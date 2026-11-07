@@ -1,0 +1,23 @@
+# --- LaguCAM: generated files and local configuration ---
+/build/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.user
+*.user.*
+.qtc_clangd/
+.qtcsettings
+*.exe
+*.dll
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.app/
+.DS_Store
+Thumbs.db
+*.bak-F0
+# --- End LaguCAM ignore rules ---

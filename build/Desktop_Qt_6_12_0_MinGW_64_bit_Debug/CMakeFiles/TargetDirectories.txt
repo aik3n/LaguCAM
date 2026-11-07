@@ -1,9 +1,0 @@
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/LaguCAM.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/edit_cache.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/rebuild_cache.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/list_install_components.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/install.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/install/local.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/install/strip.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/LaguCAM_autogen_timestamp_deps.dir
-C:/Users/momo/Desktop/LaguCAM/LaguCAM/build/Desktop_Qt_6_12_0_MinGW_64_bit_Debug/CMakeFiles/LaguCAM_autogen.dir
