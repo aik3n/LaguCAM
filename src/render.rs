@@ -1,15 +1,24 @@
-//! Renderizador 3D independiente del lector STL y del resto de la interfaz.
+//! Renderizador OpenGL con VBO independientes. La malla anterior sigue visible
+//! hasta confirmar la subida completa del reemplazo.
 use crate::preview::PreviewMesh;
 use eframe::glow;
 use glam::{Mat4, Vec3};
 use glow::HasContext as _;
 
+struct GpuChunk {
+    buffer: glow::Buffer,
+    elements: i32,
+}
+
 pub struct Render3d {
     program: glow::Program,
     vao: glow::VertexArray,
-    vbo: glow::Buffer,
-    elements: i32,
+    active: Vec<GpuChunk>,
+    staging: Vec<GpuChunk>,
     pending: Option<PreviewMesh>,
+    finishing: bool,
+    aborting: bool,
+    completed: bool,
     error: Option<String>,
 }
 
@@ -23,17 +32,16 @@ impl Render3d {
             gl.shader_source(
                 vs,
                 r#"#version 330 core
-layout (location = 0) in vec3 a_pos;
-layout (location = 1) in vec3 a_normal;
+layout(location = 0) in vec3 a_pos;
+layout(location = 1) in vec3 a_normal;
 uniform mat4 u_mvp;
 out vec3 v_normal;
 out float v_height;
 void main() {
-  gl_Position = u_mvp * vec4(a_pos, 1.0);
-  v_normal = a_normal;
-  v_height = a_pos.z;
-}
-"#,
+    gl_Position = u_mvp * vec4(a_pos, 1.0);
+    v_normal = a_normal;
+    v_height = a_pos.z;
+}"#,
             );
             gl.compile_shader(vs);
             if !gl.get_shader_compile_status(vs) {
@@ -53,16 +61,15 @@ in vec3 v_normal;
 in float v_height;
 out vec4 out_color;
 void main() {
-  vec3 n = normalize(v_normal);
-  vec3 light = normalize(vec3(0.35, -0.5, 0.8));
-  float diffuse = max(dot(n, light), 0.0);
-  vec3 low = vec3(0.16, 0.34, 0.27);
-  vec3 high = vec3(0.80, 0.73, 0.54);
-  float t = clamp(0.5 + v_height * 0.7, 0.0, 1.0);
-  vec3 base = mix(low, high, t);
-  out_color = vec4(base * (0.35 + 0.65 * diffuse), 1.0);
-}
-"#,
+    vec3 n = normalize(v_normal);
+    vec3 light = normalize(vec3(0.35, -0.5, 0.8));
+    float diffuse = max(dot(n, light), 0.0);
+    vec3 low = vec3(0.16, 0.34, 0.27);
+    vec3 high = vec3(0.80, 0.73, 0.54);
+    float t = clamp(0.5 + v_height * 0.7, 0.0, 1.0);
+    vec3 base = mix(low, high, t);
+    out_color = vec4(base * (0.35 + 0.65 * diffuse), 1.0);
+}"#,
             );
             gl.compile_shader(fs);
             if !gl.get_shader_compile_status(fs) {
@@ -85,37 +92,48 @@ void main() {
                 gl.delete_program(program);
                 return Err(format!("Shader link: {link_error}"));
             }
-
             let vao = gl
                 .create_vertex_array()
                 .inspect_err(|_| gl.delete_program(program))?;
-            let vbo = gl.create_buffer().inspect_err(|_| {
-                gl.delete_vertex_array(vao);
-                gl.delete_program(program);
-            })?;
-            gl.bind_vertex_array(Some(vao));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-            gl.enable_vertex_attrib_array(0);
-            gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
-            gl.enable_vertex_attrib_array(1);
-            gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 24, 12);
-            gl.bind_vertex_array(None);
             Ok(Self {
                 program,
                 vao,
-                vbo,
-                elements: 0,
+                active: vec![],
+                staging: vec![],
                 pending: None,
+                finishing: false,
+                aborting: false,
+                completed: false,
                 error: None,
             })
         }
     }
 
-    /// Se invoca desde la UI, pero la subida a GPU se hace dentro del callback OpenGL.
-    pub fn replace_mesh(&mut self, mesh: PreviewMesh) {
-        self.pending = Some(mesh);
+    pub fn begin_upload(&mut self) {
+        self.aborting = true;
+        self.pending = None;
+        self.finishing = false;
+        self.completed = false;
+        self.error = None;
     }
-
+    pub fn can_accept_chunk(&self) -> bool {
+        self.pending.is_none()
+    }
+    pub fn queue_chunk(&mut self, chunk: PreviewMesh) {
+        self.pending = Some(chunk);
+    }
+    pub fn finish_upload(&mut self) {
+        self.finishing = true;
+    }
+    pub fn abort_upload(&mut self) {
+        self.aborting = true;
+        self.pending = None;
+        self.finishing = false;
+        self.completed = false;
+    }
+    pub fn take_completed(&mut self) -> bool {
+        std::mem::take(&mut self.completed)
+    }
     pub fn take_error(&mut self) -> Option<String> {
         self.error.take()
     }
@@ -130,23 +148,53 @@ void main() {
         pan: Vec3,
     ) {
         unsafe {
-            if let Some(mesh) = self.pending.take() {
-                gl.bind_vertex_array(Some(self.vao));
-                gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
-                gl.buffer_data_u8_slice(
-                    glow::ARRAY_BUFFER,
-                    bytemuck::cast_slice(&mesh.vertices),
-                    glow::STATIC_DRAW,
-                );
-                self.elements = (mesh.vertices.len() / 6) as i32;
-                let error = gl.get_error();
-                if error != glow::NO_ERROR {
-                    self.elements = 0;
-                    self.error = Some(format!("Subida de malla fallida (OpenGL 0x{error:04x})"));
+            if self.aborting {
+                for chunk in self.staging.drain(..) {
+                    gl.delete_buffer(chunk.buffer);
                 }
-                gl.bind_vertex_array(None);
+                self.aborting = false;
             }
-            gl.enable(glow::SCISSOR_TEST); // la región recortada la establece egui
+            if let Some(chunk) = self.pending.take() {
+                let upload = (|| -> Result<(), String> {
+                    let buffer = gl.create_buffer()?;
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(buffer));
+                    gl.buffer_data_u8_slice(
+                        glow::ARRAY_BUFFER,
+                        bytemuck::cast_slice(&chunk.vertices),
+                        glow::STATIC_DRAW,
+                    );
+                    let error = gl.get_error();
+                    if error != glow::NO_ERROR {
+                        gl.delete_buffer(buffer);
+                        return Err(format!(
+                            "Error al transferir bloque a GPU (OpenGL 0x{error:04x})"
+                        ));
+                    }
+                    self.staging.push(GpuChunk {
+                        buffer,
+                        elements: (chunk.vertices.len() / 6) as i32,
+                    });
+                    Ok(())
+                })();
+                if let Err(error) = upload {
+                    self.error = Some(error);
+                    self.abort_upload();
+                    for chunk in self.staging.drain(..) {
+                        gl.delete_buffer(chunk.buffer);
+                    }
+                    self.aborting = false;
+                }
+            }
+            if self.finishing && self.pending.is_none() {
+                for chunk in self.active.drain(..) {
+                    gl.delete_buffer(chunk.buffer);
+                }
+                self.active = std::mem::take(&mut self.staging);
+                self.finishing = false;
+                self.completed = true;
+            }
+
+            gl.enable(glow::SCISSOR_TEST);
             gl.enable(glow::DEPTH_TEST);
             gl.depth_mask(true);
             gl.depth_func(glow::LEQUAL);
@@ -154,7 +202,7 @@ void main() {
             gl.clear_color(0.075, 0.09, 0.12, 1.0);
             gl.clear_depth_f32(1.0);
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
-            if self.elements > 0 {
+            if !self.active.is_empty() {
                 let distance = fit_distance(aspect) * distance;
                 let eye = pan
                     + Vec3::new(
@@ -177,23 +225,31 @@ void main() {
                     &mvp.to_cols_array(),
                 );
                 gl.bind_vertex_array(Some(self.vao));
-                gl.draw_arrays(glow::TRIANGLES, 0, self.elements);
+                gl.enable_vertex_attrib_array(0);
+                gl.enable_vertex_attrib_array(1);
+                for chunk in &self.active {
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(chunk.buffer));
+                    gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 24, 0);
+                    gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 24, 12);
+                    gl.draw_arrays(glow::TRIANGLES, 0, chunk.elements);
+                }
                 gl.bind_vertex_array(None);
             }
             gl.disable(glow::DEPTH_TEST);
         }
     }
 
-    pub fn destroy(&self, gl: &glow::Context) {
+    pub fn destroy(&mut self, gl: &glow::Context) {
         unsafe {
+            for chunk in self.active.drain(..).chain(self.staging.drain(..)) {
+                gl.delete_buffer(chunk.buffer);
+            }
             gl.delete_program(self.program);
             gl.delete_vertex_array(self.vao);
-            gl.delete_buffer(self.vbo);
         }
     }
 }
 
-/// Encaja la esfera que contiene el cubo normalizado [-1,1]^3 también en ventanas estrechas.
 pub fn fit_distance(aspect: f32) -> f32 {
     let vertical = 22.5_f32.to_radians();
     let horizontal = (vertical.tan() * aspect.max(0.001)).atan();
@@ -204,7 +260,7 @@ pub fn fit_distance(aspect: f32) -> f32 {
 mod tests {
     use super::*;
     #[test]
-    fn fit_contains_bounding_sphere_in_portrait_and_landscape() {
+    fn fit_contains_sphere_in_narrow_and_wide_windows() {
         for aspect in [0.1_f32, 0.5, 1.0, 2.0, 5.0] {
             let angle = 22.5_f32
                 .to_radians()

@@ -6,7 +6,7 @@ mod stl;
 
 use eframe::{egui, egui_glow, glow};
 use egui::mutex::Mutex;
-use preview::Loaded;
+use preview::LoadEvent;
 use std::{
     path::PathBuf,
     sync::{
@@ -21,12 +21,18 @@ struct LoadStats {
     info: stl::StlInfo,
 }
 
+struct PendingSuccess {
+    info: stl::StlInfo,
+    time_seconds: f32,
+}
+
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
-    receiving: Option<Receiver<Result<Loaded, String>>>,
+    receiving: Option<Receiver<LoadEvent>>,
     progress: Arc<AtomicU32>,
     cancel: Arc<AtomicBool>,
     pending_filename: Option<String>,
+    pending_success: Option<PendingSuccess>,
     filename: String,
     message: String,
     result: Option<LoadStats>,
@@ -38,17 +44,15 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
-        let gl = cc
-            .gl
-            .as_ref()
-            .ok_or("Esta aplicación necesita el backend OpenGL")?;
+        let gl = cc.gl.as_ref().ok_or("Se necesita OpenGL")?;
         let mut app = Self {
             renderer: Arc::new(Mutex::new(render::Render3d::new(gl)?)),
             receiving: None,
             progress: Arc::new(AtomicU32::new(0)),
             cancel: Arc::new(AtomicBool::new(false)),
             pending_filename: None,
-            filename: "Ningún STL abierto".to_owned(),
+            pending_success: None,
+            filename: "Ningún STL abierto".into(),
             message: "Selecciona un STL binario o abre el ejemplo incluido.".into(),
             result: None,
             yaw: 45f32.to_radians(),
@@ -62,82 +66,114 @@ impl App {
         Ok(app)
     }
 
+    fn busy(&self) -> bool {
+        self.receiving.is_some() || self.pending_success.is_some()
+    }
+
     fn open(&mut self, path: PathBuf, ctx: egui::Context) {
-        if self.receiving.is_some() {
+        if self.busy() {
             return;
         }
+        self.renderer.lock().begin_upload();
         self.pending_filename = Some(
             path.file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string(),
         );
-        self.message = "Leyendo STL y preparando una única malla visual...".into();
+        self.message = "Leyendo STL y transfiriendo bloques a GPU...".into();
         self.progress.store(0, Ordering::Relaxed);
         self.cancel.store(false, Ordering::Relaxed);
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(2);
         let progress = Arc::clone(&self.progress);
         let cancel = Arc::clone(&self.cancel);
         self.receiving = Some(rx);
         let worker = std::thread::Builder::new()
             .name("stl-import".into())
             .spawn(move || {
-                let result = preview::load(&path, &progress, &cancel);
-                let _ = tx.send(result);
+                preview::produce(&path, &progress, &cancel, &tx);
                 ctx.request_repaint();
             });
         if let Err(error) = worker {
             self.receiving = None;
             self.pending_filename = None;
+            self.renderer.lock().abort_upload();
             self.message = format!("No se pudo iniciar la importación: {error}");
         }
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
-        if let Some(error) = self.renderer.lock().take_error() {
-            self.message = format!("ERROR GPU: {error}");
-            self.result = None;
-            self.filename = "Sin malla visible".into();
+        let (error, completed, ready) = {
+            let mut renderer = self.renderer.lock();
+            (
+                renderer.take_error(),
+                renderer.take_completed(),
+                renderer.can_accept_chunk(),
+            )
+        };
+        if let Some(error) = error {
+            self.cancel.store(true, Ordering::Relaxed);
+            self.renderer.lock().abort_upload();
+            self.pending_success = None;
+            self.pending_filename = None;
+            self.message = format!("ERROR GPU: {error}. Se conserva el modelo anterior.");
         }
-        if let Some(rx) = &self.receiving {
-            match rx.try_recv() {
-                Ok(Ok(loaded)) => {
-                    self.message =
-                        format!("Previsualización preparada en {:.1} s", loaded.time_seconds);
-                    if self.cancel.load(Ordering::Relaxed) {
-                        self.message = stl::CANCELLED.into();
-                        self.receiving = None;
-                        self.pending_filename = None;
-                        return;
+        if completed {
+            if let Some(success) = self.pending_success.take() {
+                self.filename = self.pending_filename.take().unwrap_or_default();
+                self.result = Some(LoadStats { info: success.info });
+                self.message = format!(
+                    "STL cargado completamente (lectura y preparación CPU: {:.1} s)",
+                    success.time_seconds
+                );
+                self.center_view();
+            }
+        }
+        if ready {
+            if let Some(rx) = &self.receiving {
+                match rx.try_recv() {
+                    Ok(LoadEvent::Chunk(chunk)) => {
+                        if !self.cancel.load(Ordering::Relaxed) {
+                            self.renderer.lock().queue_chunk(chunk);
+                            ctx.request_repaint();
+                        }
                     }
-                    self.filename = self.pending_filename.take().unwrap_or_default();
-                    self.result = Some(LoadStats { info: loaded.info });
-                    self.renderer.lock().replace_mesh(loaded.mesh);
-                    self.receiving = None;
-                    self.yaw = 45f32.to_radians();
-                    self.pitch = 35f32.to_radians();
-                    self.distance = 1.0;
-                    self.pan = glam::Vec3::ZERO;
-                    ctx.request_repaint();
-                }
-                Ok(Err(error)) => {
-                    self.message = if error == stl::CANCELLED {
-                        error
-                    } else {
-                        format!("ERROR: {error}")
-                    };
-                    self.receiving = None;
-                    self.pending_filename = None;
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.message = "ERROR: se interrumpió la lectura".into();
-                    self.receiving = None;
-                    self.pending_filename = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    ctx.request_repaint_after(Duration::from_millis(100));
+                    Ok(LoadEvent::Finished { info, time_seconds }) => {
+                        self.receiving = None;
+                        if self.cancel.load(Ordering::Relaxed) {
+                            self.renderer.lock().abort_upload();
+                            self.pending_filename = None;
+                            self.message = stl::CANCELLED.into();
+                        } else {
+                            self.pending_success = Some(PendingSuccess { info, time_seconds });
+                            self.renderer.lock().finish_upload();
+                            self.message = "Finalizando carga en GPU...".into();
+                        }
+                    }
+                    Ok(LoadEvent::Failed(error)) => {
+                        self.receiving = None;
+                        self.renderer.lock().abort_upload();
+                        self.pending_filename = None;
+                        if !self.message.starts_with("ERROR GPU:") {
+                            self.message = if error == stl::CANCELLED {
+                                error
+                            } else {
+                                format!("ERROR: {error}. Se conserva el modelo anterior.")
+                            };
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.receiving = None;
+                        self.renderer.lock().abort_upload();
+                        self.pending_filename = None;
+                        self.message = "ERROR: se interrumpió la lectura".into();
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
                 }
             }
+        }
+        if self.busy() {
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
     }
 
@@ -148,20 +184,24 @@ impl App {
         self.pan = glam::Vec3::ZERO;
     }
 
+    fn file_dialog(&mut self, ctx: egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("STL binario", &["stl"])
+            .pick_file()
+        {
+            self.open(path, ctx);
+        }
+    }
+
     fn menu(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("Archivo", |ui| {
                 if ui
-                    .add_enabled(self.receiving.is_none(), egui::Button::new("Abrir STL…"))
+                    .add_enabled(!self.busy(), egui::Button::new("Abrir STL…"))
                     .clicked()
                 {
                     ui.close();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("STL binario", &["stl"])
-                        .pick_file()
-                    {
-                        self.open(path, ui.ctx().clone());
-                    }
+                    self.file_dialog(ui.ctx().clone());
                 }
             });
             ui.menu_button("Vista", |ui| {
@@ -175,29 +215,34 @@ impl App {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.heading("CAM Libre · Visor 0.1");
+        ui.heading("LaguCAM · Visor 0.1.1");
         ui.separator();
-        ui.label("STL binario · vista completa");
+        ui.label("STL binario · vista completa por bloques");
         if ui
-            .add_enabled(self.receiving.is_none(), egui::Button::new("Abrir STL..."))
+            .add_enabled(!self.busy(), egui::Button::new("Abrir STL..."))
             .clicked()
-            && let Some(path) = rfd::FileDialog::new()
-                .add_filter("STL binario", &["stl"])
-                .pick_file()
         {
-            self.open(path, ui.ctx().clone());
+            self.file_dialog(ui.ctx().clone());
         }
         ui.add_space(10.0);
         ui.label(egui::RichText::new(&self.filename).strong());
-        if self.receiving.is_some() {
+        if self.busy() {
             if let Some(name) = &self.pending_filename {
                 ui.label(format!("Importando: {name}"));
             }
             if ui.button("Cancelar importación").clicked() {
                 self.cancel.store(true, Ordering::Relaxed);
+                self.renderer.lock().abort_upload();
+                if self.receiving.is_none() {
+                    self.pending_success = None;
+                    self.pending_filename = None;
+                    self.message = stl::CANCELLED.into();
+                } else {
+                    self.message = "Cancelando importación...".into();
+                }
             }
             let fraction = self.progress.load(Ordering::Relaxed) as f32 / 100.0;
-            ui.add(egui::ProgressBar::new(fraction).show_percentage());
+            ui.add(egui::ProgressBar::new(fraction.min(0.99)).show_percentage());
         }
         ui.label(&self.message);
         if let Some(result) = &self.result {
@@ -212,8 +257,6 @@ impl App {
             ui.label(format!("Extensión Y: {:.2}", d[1]));
             ui.label(format!("Extensión Z: {:.2}", d[2]));
             ui.small("Unidades heredadas del STL (STL no define unidades).");
-            ui.add_space(8.0);
-            ui.label("Vista completa, sin simplificación de caras");
         }
         ui.separator();
         if ui.button("Centrar vista").clicked() {
@@ -224,7 +267,7 @@ impl App {
         ui.small("Botón izquierdo: girar");
         ui.small("Rueda: acercar / alejar");
         ui.small("Botón derecho o central: desplazar");
-        ui.small("Coordenadas GPU normalizadas a f32. El STL original permanece intacto.");
+        ui.small("STL original intacto. Visualización completa sin simplificar.");
         ui.add_space(10.0);
         ui.colored_label(
             egui::Color32::from_rgb(220, 175, 100),
@@ -258,6 +301,7 @@ impl App {
             let distance = render::fit_distance(rect.width() / rect.height()) * self.distance;
             let units = 2.0 * distance * (22.5f32.to_radians()).tan() / rect.height();
             self.pan += (-right * drag.x + up * drag.y) * units;
+            ui.ctx().request_repaint();
         }
         if response.hovered() {
             let scroll = ui.ctx().input(|i| i.smooth_scroll_delta.y);
@@ -308,22 +352,21 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll(ui.ctx());
         egui::Panel::top("main_menu").show(ui, |ui| self.menu(ui));
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let height = ui.available_height();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(260.0, height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| self.sidebar(ui),
-                );
-                ui.separator();
-                self.viewport(ui);
+        // SidePanel y CentralPanel ocupan toda la altura disponible, a diferencia
+        // de un horizontal cuyo alto se ajustaba al contenido de la barra lateral.
+        egui::Panel::left("stl_sidebar")
+            .resizable(true)
+            .default_size(290.0)
+            .min_size(220.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.sidebar(ui));
             });
-        });
+        egui::CentralPanel::default().show(ui, |ui| self.viewport(ui));
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
         self.cancel.store(true, Ordering::Relaxed);
+        self.receiving = None;
         if let Some(gl) = gl {
             self.renderer.lock().destroy(gl);
         }
@@ -336,12 +379,13 @@ fn main() -> eframe::Result {
         depth_buffer: 24,
         multisampling: 4,
         viewport: egui::ViewportBuilder::default()
-            .with_title("CAM Libre - STL Viewer")
-            .with_inner_size([1280.0, 800.0]),
+            .with_title("LaguCAM - STL Viewer")
+            .with_inner_size([1280.0, 800.0])
+            .with_maximized(true),
         ..Default::default()
     };
     eframe::run_native(
-        "CAM Libre - STL Viewer",
+        "LaguCAM - STL Viewer",
         options,
         Box::new(|cc| {
             App::new(cc)
