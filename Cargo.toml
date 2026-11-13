@@ -1,0 +1,18 @@
+[package]
+name = "cam-libre-visor"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "MIT"
+description = "Visor STL 3D con importación en streaming y vista completa con memoria limitada"
+
+[dependencies]
+eframe = { version = "=0.37.0", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+glam = "0.30"
+bytemuck = "1.23"
+rfd = "0.15"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
