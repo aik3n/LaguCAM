@@ -15,7 +15,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-007 | **ACEPTADA** | Soporte geométrico por capacidades, no solo formato/extension | Permite una estrategia con distintos backends, o restringirla cuando no existe geometría suficiente |
 | D-008 | **ACEPTADA** | Biblioteca global y permanente de fresas, con filtros en vez de carpetas obligatorias | Selección rápida desde operaciones; no depender de estructura manual de carpetas |
 | D-009 | **ACEPTADA** | Separar geometría de herramienta y parámetros de corte/uso | Evita acoplar cinemática/colisión a RPM y feed; facilita reutilización |
-| D-010 | **ACEPTADA** | Operación almacena definición identificable o copia de herramienta; cambios globales no la modifican en silencio | Reproducibilidad e invalidación explícita de trayectorias |
+| D-010 | **SUSTITUIDA** | Una operación conservaba una definición/copia de herramienta | Sustituida explícitamente por D-024 a petición del responsable del proyecto, 2026-11-14 |
 | D-011 | **ACEPTADA** | Bibliotecas independientes de herramientas, máquinas y postprocesadores | El motor CAM no depende de FluidNC ni del modo de cambio de herramienta |
 | D-012 | **ACEPTADA** | Primer postprocesador: FluidNC | Permite validar una máquina real, sin bloquear futuros controles |
 | D-013 | **ACEPTADA** | Modo de cambio manual/automático pertenece a capacidades de máquina/control | La máquina actual cambia fresas a mano; otras pueden tener ATC |
@@ -28,7 +28,8 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-020 | **PROPUESTA** | Cinco tipos iniciales: plana, esférica, V, cónica plana y cónica esférica | Referencia DeskProto; por cerrar tras definir geometrías y fórmulas |
 | D-021 | **PROPUESTA** | Primera estrategia: acabado paralelo con fresa esférica | Caso geométrico controlable antes de acometer desbaste y stock remanente |
 | D-022 | **PROPUESTA** | Un perfil de máquina por proyecto, configurable | Simplificación inicial; el usuario no ha confirmado el modelo definitivo |
-| D-023 | **PROPUESTA** | Archivo `.lagucam` en JSON versionado | Solución propuesta en el encargo de persistencia, todavía no implementada |
+| D-023 | **PROPUESTA** | Archivo `.lagucam` en JSON versionado | Formato JSON versionado ya implementado en HEAD; ratificación formal de la decisión aún pendiente |
+| D-024 | **ACEPTADA** | La herramienta pertenece exclusivamente a la biblioteca global; cada operación futura guarda solo su UUID, sin geometría ni parámetros ocultos | Cambios en biblioteca afectan al resolver la operación; falta de ID = error visible y bloqueo del cálculo; cualquier trayectoria anterior queda obsoleta y requiere nuevo cálculo. Aprobado por el responsable el 2026-11-14; no implementa aún operaciones |
 
 ## Cómo registrar una nueva decisión
 
@@ -45,3 +46,7 @@ No convertir automáticamente una recomendación de un asistente en **ACEPTADA**
 - Modelo de selección de máquina (por proyecto, setup u operación).
 - Algoritmo de contacto y estructura espacial inicial para STL de grandes dimensiones; tolerancias nominales y validación independiente.
 - Alcance de las primeras operaciones, archivo y esquema persistentes, y gestión de trayectorias obsoletas.
+
+## Nota de implementación de herramientas (sin cambiar decisiones previas)
+
+La petición específica de implementar cinco geometrías autoriza el alcance de este cambio. Se documentan aquí las fórmulas en `LIBRARIES.md`, pero **D-020 conserva su estado de PROPUESTA** hasta la aceptación expresa del catálogo definitivo por el responsable. No se ratifican otras propuestas del registro ni se añaden decisiones sobre máquinas o postprocesado.

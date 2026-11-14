@@ -25,8 +25,8 @@ El árbol lateral, bruto y origen constituyen una base de preparación CAM; **no
 | Rotación matemática de ejes CNC Rz·Ry·Rx | `src/project/origin.rs` | CÓDIGO-VERIFICADO; **sin post CNC asociado** |
 | Color configurable del modelo | `src/project_ui.rs`, `src/render.rs` | CÓDIGO-VERIFICADO |
 | Colección ordenada de operaciones | `src/project/operations.rs` | ESTRUCTURA CÓDIGO, **sin operaciones CAM** |
-| Guardar/abrir proyectos | No encontrado en árbol actual | PENDIENTE |
-| Biblioteca global de fresas y editor | No encontrado en código | PENDIENTE |
+| Guardar/abrir proyectos | `src/project/persistence.rs`, `src/main.rs` | CÓDIGO-VERIFICADO en HEAD, validación gráfica de usuario pendiente |
+| Biblioteca global de fresas y editor | `src/tools/*`, `src/tools_ui.rs`, `src/tools_profile.rs` | IMPLEMENTACIÓN PROPUESTA en este cambio, pendiente de Cargo y validación del usuario |
 | Perfiles de máquina / postprocesadores | No encontrado en código | PENDIENTE |
 | Cálculo de trayectorias / G-code / simulación | No encontrado en código | PENDIENTE |
 | Abrir STEP | No encontrado | FUTURO |
@@ -39,7 +39,7 @@ El árbol lateral, bruto y origen constituyen una base de preparación CAM; **no
 - No hay prueba de colisiones de herramienta, husillo, mango, portaherramientas o sujeción.
 - Los puntos de origen CNC y sus ejes se representan en overlay 2D, sin oclusión física completa.
 - Las rotaciones visuales del origen no equivalen a cinemática real o postprocesado verificado.
-- El estado del proyecto se reinicia al cargar un modelo nuevo; no se ha implementado persistencia.
+- Los proyectos `.lagucam` se gestionan con un esquema versionado. La biblioteca es global e independiente de esos archivos.
 - `README.md`, `AUDITORIA.md` y `PROJECT_TREE.md` reflejan en partes versiones anteriores. En particular, el README todavía describe un límite provisional que ya no figura en el flujo por bloques actual y menciona CI no presente en el árbol consultado.
 - El paquete Cargo sigue llamándose `cam-libre-visor`, pese a llamarse LaguCAM el repositorio y la ventana.
 - No se observa `.github/workflows` en el árbol `main` consultado; no se debe afirmar que exista CI activo.
@@ -54,7 +54,7 @@ El árbol lateral, bruto y origen constituyen una base de preparación CAM; **no
 
 ## 5. Siguiente hito
 
-**Etapa 1: persistencia de proyectos.** La tarea ya tiene especificación conversada, pero **no se ha identificado implementación en `main`**. No darla por cerrada hasta verificar código, tests y una sesión de usuario «abrir STL → configurar → guardar → cerrar → abrir proyecto → recuperar valores».
+**Persistencia `.lagucam` observada en HEAD** (`src/project/persistence.rs` y `src/main.rs`). Su aceptación exige la prueba de usuario de cierre y reapertura; no se confunde el código con una validación gráfica.
 
 A continuación: modelo y biblioteca de herramientas, empezando por acordar geometrías y parámetros antes de generar una tarea de implementación.
 
@@ -62,3 +62,18 @@ A continuación: modelo y biblioteca de herramientas, empezando por acordar geom
 
 - **2026-11-14 — línea base inicial.** Foto del commit `0e56d3f3`; experiencia positiva de STL grande registrada; deuda documental identificada.
 - **Por completar en el siguiente commit:** nuevo SHA, qué cambió, pruebas realizadas, validación de usuario y efectos en el roadmap.
+
+## Biblioteca global de herramientas (entrega pendiente de validación)
+
+**Base de código examinada:** `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f`. `HEAD` contiene persistencia `.lagucam` desde `6eb12e1`, pese al corte documental anterior.
+
+**Implementación de esta entrega:** modelos de cinco fresas en `src/tools/model.rs`, guardado global versionado en `src/tools/storage.rs`, editor y filtros `src/tools_ui.rs`, perfil técnico `src/tools_profile.rs`. No hay asignación de T, operaciones CAM ni modificación de `.lagucam`.
+
+**Pruebas del cambio:** el instalador comprueba `fmt`, `clippy`, `test` y `build --release`; resultado pendiente de la ejecución real del usuario. **Prueba gráfica de herramientas y regresión STL cercano a 1 GB: pendiente.**
+
+## Ajuste 009 — Estado y evidencia
+
+- **Preparado para probar en Windows:** la biblioteca de herramientas se abre solo desde el menú principal; no aparece en el árbol del proyecto. Su almacenamiento global no cambia y no requiere STL abierto.
+- **Preparado para probar en Windows:** el fondo del visor 3D usa degradado azul cielo; STL y bruto conservan el render por profundidad. Es una modificación visual; no se ha medido rendimiento con STL de casi 1 GB.
+- **Diseño acordado / no implementado aún:** cada operación futura referenciará el UUID global de una fresa; no habrá colección de fresas del proyecto ni copias ocultas. La operación fallará ante herramienta ausente; cambios invalidarán resultados anteriores.
+- **Evidencia:** lectura del HEAD `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f` y preparación del instalador 009; `fmt`, `clippy`, `test`, `release` y prueba gráfica pendientes de ejecución en Windows.

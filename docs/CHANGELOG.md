@@ -1,5 +1,20 @@
 # Historial de LaguCAM
 
+## Ajuste 008 v6 — Perfil siempre visible y longitud total (sin nuevo commit)
+- Perfil técnico permanente en Herramientas, con esquema **sin escala** cuando no hay medidas.
+- Campo de longitud total desde la punta al final del mango representado. Prueba de persistencia migrada al nuevo nombre.
+- Compatibilidad de lectura con `free_length_mm`; revisar los datos históricos si eran salidas de pinza.
+- Sin cambio de importador STL, OpenGL, operaciones ni `.lagucam`.
+- Compilación y prueba gráfica pendientes del equipo Windows.
+
+## 2026-11-14 — Biblioteca global de herramientas, primera implementación (sin commit)
+
+- **Base:** `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f`.
+- Cinco tipos de fresa con perfiles geométricos `f64` y validación; ID UUID y revisión; biblioteca global JSON versionada con sustitución segura; UI de listado, filtros, editor y dibujo técnico.
+- Sin modificación de STL, renderizador o proyectos `.lagucam` existentes. No se asigna número T ni herramientas a operaciones.
+- **Pruebas:** el instalador ejecuta `fmt`, `clippy`, `test`, `build --release` en el equipo Windows; resultados pendientes de su ejecución. No hay validación gráfica ni benchmark de STL grande en esta entrega.
+- **Documentos actualizados:** LIBRARIES, ARCHITECTURE, STATUS, REQUIREMENTS, ROADMAP, DECISIONS, CHANGELOG.
+
 Este documento resume commits y cambios visibles de la línea base. **No es un listado exhaustivo de todos los cambios**; consultar GitHub para la historia completa. No equivale a informe de pruebas ejecutadas en la revisión documental.
 
 ## 2026-11-14 — Primera base documental (sin commit Git)
@@ -38,3 +53,11 @@ Documentos actualizados:
 ```
 
 La documentación se actualiza con el cambio; no añadir pruebas inexistentes ni cerrar hitos sin aceptación.
+
+## 2026-11-14 — Ajuste 009: acceso global y cielo degradado (sin commit)
+
+- Base Git: `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f`, biblioteca 008 v6 ya instalada localmente.
+- La biblioteca pasa al menú principal `Herramientas`; se elimina el nodo del árbol del proyecto, la variante de selección obsoleta y el retorno booleano del panel de proyecto.
+- Decisión D-024: operaciones futuras con referencia al UUID global, nunca snapshots ni parámetros ocultos. D-010 sustituida. No se implementan aún operaciones ni cambios de formato `.lagucam`.
+- Fondo de visor en degradado azul cielo mediante malla egui; el renderizador borra únicamente profundidad. STL grande, stock, origen y rendimiento pendientes de validación gráfica.
+- Controles Rust: el instalador ejecuta `fmt --check`, `clippy -D warnings`, `test --locked`, `build --release`; resultados por confirmar en el equipo Windows.

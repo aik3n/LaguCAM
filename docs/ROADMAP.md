@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | **0.1 — Visor STL grande** | Abrir y mover en 3D STL reales cercanos a 1 GB | **USUARIO-VALIDADO** para el equipo y archivo probados; faltan métricas automatizadas |
 | **0.2 — Entorno de proyecto** | Árbol lateral, bruto, origen, representación coherente | **IMPLEMENTADO** en código; comprobaciones funcionales positivas del usuario |
-| **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **PRÓXIMO; PENDIENTE** |
-| **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **DISEÑO EN DISCUSIÓN** |
+| **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **IMPLEMENTADO EN CÓDIGO** desde `6eb12e1`; aceptación manual pendiente |
+| **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **IMPLEMENTACIÓN INICIAL ENTREGADA PARA PRUEBAS**; selección por operación pendiente |
 | **Etapa 3 — Máquina y post** | Perfiles de máquina; abstracción post independiente; primer dialecto FluidNC | **ACORDADO COMO OBJETIVO**, sin implementación |
 | **Etapa 4 — Base geométrica CAM** | Acceso geométrico fiable a STL, consultas espaciales, contacto herramienta-pieza y tests patrón | **PENDIENTE** |
 | **Etapa 5 — Primera estrategia** | Acabado 3D paralelo de 3 ejes sobre superficies de referencia | **PROPUESTA**, pendiente de aprobar estrategia exacta |
@@ -32,7 +32,7 @@ No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de 
 
 - Tipos y fórmulas geométricas aprobados.
 - Validación de dimensiones y perfiles de prueba con casos degenerados.
-- Biblioteca global + selección filtrada + snapshot en proyecto.
+- Biblioteca global y selección filtrada por operación, con referencia al UUID global sin instantánea en el proyecto.
 - Al cambiar geometría, invalidación explícita de trayectorias dependientes.
 - Visualización técnica y datos de corte no confundidos con geometría.
 

@@ -38,12 +38,6 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
             {
                 project.selection = Selection::Origin;
             }
-            if ui
-                .selectable_label(project.selection == Selection::Tools, "Herramientas")
-                .clicked()
-            {
-                project.selection = Selection::Tools;
-            }
             ui.collapsing("Operaciones", |ui| {
                 if ui
                     .selectable_label(
@@ -267,9 +261,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
                 ui.label("Define primero el modelo y el bruto.");
             }
         }
-        Selection::Tools => {
-            ui.label("Herramientas: pendiente de desarrollo.");
-        }
+
         Selection::Operations => {
             ui.label(format!("Operaciones: {}", project.operations.items.len()));
         }

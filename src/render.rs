@@ -219,9 +219,10 @@ void main() {
             gl.depth_mask(true);
             gl.depth_func(glow::LEQUAL);
             gl.disable(glow::CULL_FACE);
-            gl.clear_color(0.075, 0.09, 0.12, 1.0);
+            // El cielo lo dibuja egui. Se limpia solo la profundidad.
+            // No modificar el streaming ni los bloques GPU del STL.
             gl.clear_depth_f32(1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
+            gl.clear(glow::DEPTH_BUFFER_BIT);
             if !self.active.is_empty() {
                 let distance = fit_distance(aspect) * distance;
                 let eye = pan

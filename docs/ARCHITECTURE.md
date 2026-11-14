@@ -32,7 +32,7 @@ El `Cargo.toml` aún denomina al paquete `cam-libre-visor`; el nombre de la apli
 | `src/main.rs` | Ciclo de vida de la aplicación, importación en hilo, interacción y callback de dibujo |
 | `examples/terrain_demo.stl` | STL pequeño para pruebas |
 
-No se observan módulos de motor CAM, biblioteca de herramientas, máquina, postprocesador, serialización de proyecto ni exportación G-code en esta fotografía.
+En esta entrega se incorpora biblioteca de herramientas y la serialización de proyectos ya existe en el código actual. No existe motor CAM, biblioteca de máquinas, postprocesador ni exportación G-code.
 
 ## 3. Flujo de STL grande [ACTUAL]
 
@@ -125,7 +125,7 @@ No todos los tipos de geometría deben proporcionar las mismas consultas. Se asi
 
 1. La importación de un nuevo STL reinicializa hoy bruto/origen/operaciones (`Project::loaded`). **La persistencia debe restaurar el proyecto sin que esa rutina sobrescriba el estado guardado.**
 2. Las rutas del STL no se almacenan de modo persistente en el estado actual; la persistencia necesita un identificador/ruta robustos y gestión de fichero ausente.
-3. La biblioteca global y los snapshots del proyecto deben evitar que una modificación externa altere silenciosamente una trayectoria.
+3. Las operaciones futuras resolverán su herramienta por UUID en la biblioteca global. Un UUID ausente bloqueará la operación; cualquier cambio de definición invalidará resultados previamente calculados. No se guardarán snapshots ocultos.
 4. Los datos de representación visual nunca deben alimentar cálculos G-code sin una especificación de error y validación.
 5. El controlador FluidNC no está implementado; no hay salida G-code operativa validada.
 6. Antes de implementar estrategias, definir operaciones y pruebas geométricas que eviten movimientos peligrosos incluso con STL corruptos o incompletos.
@@ -133,3 +133,22 @@ No todos los tipos de geometría deben proporcionar las mismas consultas. Se asi
 ## 8. Referencias de código
 
 [Árbol del repositorio en el commit base](https://github.com/aik3n/LaguCAM/tree/0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9/src) · [`src/project/origin.rs`](https://github.com/aik3n/LaguCAM/blob/0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9/src/project/origin.rs) · [`src/preview.rs`](https://github.com/aik3n/LaguCAM/blob/0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9/src/preview.rs)
+
+## Biblioteca global de fresas (módulos de la nueva entrega)
+
+```text
+src/tools/model.rs       Tool, ToolGeometry, ToolLibrary; validación f64, perfil axial, IDs y revisiones
+src/tools/storage.rs     JSON global versionado en configuración de usuario; escritura temporal y sustitución
+src/tools_ui.rs          Ventana egui de tres columnas, búsqueda, editor de borradores y confirmaciones
+src/tools_profile.rs     Proyección visual de la sección axial; cotas; no altera geometría CAM
+```
+
+La biblioteca no es miembro de `Project`, no entra en la serialización `.lagucam` y no se enlaza con operaciones. El modelo geométrico no depende de egui; la vista 2D recibe un perfil validado.
+
+No hay cambios en `src/stl.rs`, `src/preview.rs`, `src/render.rs`, `src/stock_render.rs` ni `src/overlay.rs`. El estado de herramientas permanece fuera de GPU y de los hilos de importación.
+
+## Ajuste 009 — Biblioteca y cielo
+
+- La biblioteca `App::tool_library` sigue siendo **global** y existe sin STL/proyecto. Solo se abre desde `Herramientas -> Biblioteca de herramientas` en el menú principal.
+- Se elimina el acceso a la biblioteca desde el árbol y la variante obsoleta `Selection::Tools`, sin modificar los archivos `.lagucam` porque la selección visual no se persiste. Las operaciones todavía no asignan herramientas; cuando se implementen guardarán el UUID global sin copiar propiedades.
+- El degradado del viewport se dibuja como `egui::Mesh` de cuatro vértices, **antes** del callback OpenGL. En `Render3d::paint` se limpia solo `DEPTH_BUFFER_BIT`; se conserva la carga GPU por bloques y la profundidad para malla y bruto. Requiere prueba gráfica y con STL grande en Windows.

@@ -7,6 +7,9 @@ mod project_ui;
 mod render;
 mod stl;
 mod stock_render;
+mod tools;
+mod tools_profile;
+mod tools_ui;
 
 use eframe::{egui, egui_glow, glow};
 use egui::mutex::Mutex;
@@ -47,6 +50,9 @@ struct App {
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
     project: project::Project,
     property_error: String,
+    tool_library: tools::model::ToolLibrary,
+    tool_library_path: Option<PathBuf>,
+    tool_ui: tools_ui::ToolUi,
     project_path: Option<PathBuf>,
     current_stl_path: Option<PathBuf>,
     pending_stl_path: Option<PathBuf>,
@@ -79,11 +85,22 @@ impl App {
                 return Err(error);
             }
         };
+        // Biblioteca independiente de proyectos STL y ficheros .lagucam.
+        let (tool_library, tool_library_path, tool_error) = match tools::storage::config_path() {
+            Ok(path) => match tools::storage::load(&path) {
+                Ok(lib) => (lib, Some(path), None),
+                Err(err) => (tools::model::ToolLibrary::default(), Some(path), Some(err)),
+            },
+            Err(err) => (tools::model::ToolLibrary::default(), None, Some(err)),
+        };
         let mut app = Self {
             renderer: Arc::new(Mutex::new(mesh_renderer)),
             stock_renderer: Arc::new(Mutex::new(stock_renderer)),
             project: project::Project::default(),
             property_error: String::new(),
+            tool_library,
+            tool_library_path,
+            tool_ui: tools_ui::ToolUi::new(tool_error),
             project_path: None,
             current_stl_path: None,
             pending_stl_path: None,
@@ -558,6 +575,12 @@ impl App {
                     self.request_action(FileAction::Exit, ui.ctx().clone());
                 }
             });
+            ui.menu_button("Herramientas", |ui| {
+                if ui.button("Biblioteca de herramientas...").clicked() {
+                    self.tool_ui.open = true;
+                    ui.close();
+                }
+            });
             ui.menu_button("Vista", |ui| {
                 if ui.button("Centrar vista").clicked() {
                     self.center_view();
@@ -611,6 +634,18 @@ impl App {
             return;
         }
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        // Dibujado antes del callback OpenGL; no se modifica la malla STL.
+        // Cuatro vértices: azul más intenso arriba y claro abajo.
+        let mut sky = egui::Mesh::default();
+        let high = egui::Color32::from_rgb(75, 153, 210);
+        let low = egui::Color32::from_rgb(190, 228, 246);
+        sky.colored_vertex(rect.left_top(), high);
+        sky.colored_vertex(rect.right_top(), high);
+        sky.colored_vertex(rect.right_bottom(), low);
+        sky.colored_vertex(rect.left_bottom(), low);
+        sky.add_triangle(0, 1, 2);
+        sky.add_triangle(0, 2, 3);
+        ui.painter().add(egui::Shape::mesh(sky));
         if response.dragged_by(egui::PointerButton::Primary) {
             let drag = response.drag_motion();
             self.yaw -= drag.x * 0.008;
@@ -734,6 +769,11 @@ impl eframe::App for App {
             }
         }
         self.unsaved_dialog(ui.ctx());
+        self.tool_ui.show(
+            ui.ctx(),
+            &mut self.tool_library,
+            self.tool_library_path.as_deref(),
+        );
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {

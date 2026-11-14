@@ -13,9 +13,9 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | UI-03 | Panel lateral con modelo, bruto, origen, herramientas y operaciones ordenadas | Observado en código; herramientas aún vacías |
 | UI-04 | Bruto rectangular editable, tamaño, posición, extras por cada cara y representación visual | Observado en código; usuario probó bruto |
 | UI-05 | Origen CNC con referencia a bruto o modelo, marcadores seleccionables, offset y orientación | Observado en código |
-| PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | **Pendiente**; etapa 1 acordada |
+| PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | Implementado en código desde `6eb12e1`; pendiente validación manual de flujo completo |
 | PRJ-02 | Guardar referencia externa al modelo, bruto, origen, aspecto, operaciones, unidades y máquina seleccionada cuando exista | Acordado para persistencia; algunos campos aún no existen |
-| PRJ-03 | Versionar esquema, validar al cargar, tratar STL ausente/modificado y no perder el proyecto anterior por error | Acordado como criterio de la etapa 1 |
+| PRJ-03 | Versionar esquema, validar al cargar, tratar STL ausente/modificado y no perder el proyecto anterior por error | Observado en `src/project/persistence.rs` y `src/main.rs`; pruebas del flujo completo pendientes |
 | PRJ-04 | Declarar explícitamente unidades; STL no las incorpora | Acordado; milímetros como punto de partida, no deducir de STL |
 | PRJ-05 | Trabajar sin copias gigantes de triángulos dentro del archivo de proyecto | Acordado |
 
@@ -41,11 +41,11 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | ID | Requisito | Estado |
 | --- | --- | --- |
 | TL-01 | Biblioteca **global**, reutilizable y no organizada por carpetas obligatorias | Acordado |
-| TL-02 | Búsqueda y filtros por nombre, tipo y diámetro; favoritas/recentes como mejora posible | Acordado el enfoque; filtros futuros |
+| TL-02 | Búsqueda y filtros por nombre, tipo y diámetro; favoritas/recentes como mejora posible | Implementación de filtros/orden disponible en esta entrega; pendiente validar |
 | TL-03 | Tipos inicialmente considerados: plana, esférica, cónica V, cónica punta plana y cónica punta esférica | **Propuesta de catálogo**, aún por cerrar |
-| TL-04 | Editor con vista técnica de perfil y parámetros coherentes para cada tipo | Acordado como concepto |
+| TL-04 | Editor con vista técnica de perfil y parámetros coherentes para cada tipo | Implementación de la primera versión, pendiente de validación gráfica |
 | TL-05 | Separar geometría cortante, mango/cuello, montaje y velocidades/avances | Acordado |
-| TL-06 | Las operaciones retienen una definición identificable; cambios de biblioteca no alteran silenciosamente cálculos previos | Acordado |
+| TL-06 | Cada operación futura guarda solo el UUID global de su herramienta; falta de herramienta = error, cambio de definición = recálculo obligatorio; sin copia oculta | Acordado explícitamente el 2026-11-14; selección por operación pendiente |
 | MACH-01 | Biblioteca de perfiles de máquina, independiente de herramientas y postprocesadores | Acordado |
 | MACH-02 | Características físicas, límites, husillo y modo de cambio manual/ATC según máquina | Acordado; aún no implementado |
 | MACH-03 | Perfil de la máquina de pruebas con FluidNC y cambio manual | Confirmado como caso de uso; valores físicos de captura por verificar |
@@ -83,3 +83,16 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 - Estrategia de cálculo geométrico inicial y tolerancias nominales.
 - Formato definitivo de proyecto (`.lagucam` y JSON propuestos en el encargo de etapa 1; no existe aún esquema ratificado en código).
 - Unidad de longitud y conversión para formatos futuros.
+
+## Biblioteca de herramientas: requisitos de la primera entrega
+
+- **TL-07 (implementación pendiente de aceptación):** persistencia global en configuración de usuario, esquema versionado e IDs UUID estables. Biblioteca vacía en primera ejecución; no sobrescribir un JSON corrupto.
+- **TL-08 (implementación pendiente de aceptación):** edición sobre borrador con guardar/cancelar, duplicación con nuevo ID, revisión creciente y eliminación confirmada.
+- **TL-09 (implementación pendiente de aceptación):** cinco geometrías definidas por fórmulas; `f64`; validación de ángulos totales y longitudes. No se establecen valores recomendados de RPM ni avance.
+- **Fuera de alcance:** instantánea de herramienta dentro de una operación, selector por operación, cálculos CAM y G-code. La política D-010 queda sustituida por D-024 (ID global sin snapshots); la asignación por operación sigue pendiente.
+
+## Revisión 009 — Accesos y visor
+
+- La biblioteca global se abre desde el menú principal y no desde el árbol de proyecto, que no tendrá un nodo de herramientas.
+- El viewport debe mostrar un degradado azul cielo con el STL y bruto correctamente visibles; la GPU y un STL cercano a 1 GB se validarán en el equipo del usuario.
+- **No implementado:** selección de fresa por operación; futura referencia UUID global sin copias ocultas (D-024).

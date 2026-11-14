@@ -4,7 +4,6 @@ pub enum Selection {
     Model,
     Stock,
     Origin,
-    Tools,
     Operations,
     Operation(usize),
 }

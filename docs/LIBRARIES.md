@@ -45,7 +45,7 @@ Precisar si el ángulo cónico es **total** o **semiángulo respecto al eje**. N
 
 ### Reutilización por proyecto
 
-Una operación debe apuntar a una herramienta del proyecto; esta conserva una definición identificable, idealmente una **instantánea de geometría y parámetros relevantes**, para reproducir cálculos. Si cambia la versión global, avisar y ofrecer actualización explícita. Cualquier cambio geométrico que afecte contactos o colisiones invalida las trayectorias dependientes.
+Cada operación futura referenciará directamente el **UUID de una herramienta de la biblioteca global**, sin copia de geometría, RPM ni avances en el proyecto. Las propiedades actuales de esa herramienta se resolverán al usarla. Si el UUID no existe, la operación mostrará un error y no podrá calcularse. Una modificación de la fresa invalida cualquier trayectoria anterior dependiente; nunca se reutilizará G-code obsoleto.
 
 ## 3. Biblioteca de máquinas
 
@@ -84,6 +84,26 @@ La configuración real de FluidNC y del firmware debe documentarse antes de gene
 
 ## 5. Biblioteca y configuración del proyecto
 
-El formato de proyecto futuro debe registrar identificadores/revisiones de herramienta y máquina, referencia al postprocesador y **copias de los parámetros que afectan los resultados**. Se puede seleccionar otra máquina en el futuro, pero no reutilizar automáticamente un G-code previamente emitido sin recomprobación.
+El proyecto `.lagucam` ya existe. Cuando haya operaciones CAM, cada una registrará únicamente el UUID de su herramienta en la biblioteca global; no incluirá copias ocultas de sus dimensiones ni de sus parámetros tecnológicos. Si una herramienta cambia o desaparece, la operación requerirá revisión o recálculo. No reutilizar automáticamente G-code anterior.
 
 La decisión de permitir varias máquinas por proyecto está abierta. La propuesta inicial fue una sola máquina por proyecto; no se ha ratificado.
+
+## 6. Primera biblioteca global: convención geométrica implementada
+
+**Alcance:** los cinco tipos solicitados para esta entrega, sin añadir toroidales ni funciones CAM. Todas las cotas están en milímetros y se almacenan como `f64`. Se mide `z` desde el extremo inferior de la herramienta hacia el mango; la punta comienza en `z = 0`. El diámetro de corte es el **máximo diámetro del tramo cortante**, no el del mango.
+
+| Geometría | Parámetros de corte | Perfil geométrico |
+| --- | --- | --- |
+| Plana | Ø de corte, longitud de corte | Cilindro cortante con extremo plano |
+| Esférica | Ø de corte, longitud de corte | Hemisferio de radio Ø/2, seguido de cilindro cortante |
+| Cónica en V | Ø máximo de corte, **ángulo total** | Cono con ápice matemático en z=0, hasta Ø máximo |
+| Cónica con punta plana | Ø máximo, Ø de punta plana, **ángulo total** | Disco frontal plano y flanco cónico hasta Ø máximo |
+| Cónica con punta esférica | Ø máximo, **radio R de una esfera de punta**, **ángulo total** | Casquete esférico unido tangencialmente al flanco cónico; no es un radio toroidal |
+
+Para cada cono, α = ángulo total/2 (semiángulo respecto al eje). Si R es el radio de la punta esférica, la tangencia sucede en `r = R cos α` y `z = R(1 − sin α)`. Desde esa tangencia el radio crece como `tan α` por unidad axial. El radio máximo `D/2` debe exceder `R cos α`, y la longitud cortante debe alcanzar la altura necesaria. Para la punta plana, la altura cónica es `(D − d_punta)/(2 tan α)`; para V pura es `D/(2 tan α)`. Si sobra longitud de corte, se representa un tramo cilíndrico cortante a Ø máximo.
+
+La parte no cortante se modela inicialmente con **diámetro de mango** y **longitud total** desde la punta axial hasta el extremo superior del mango representado. Debe ser mayor o igual a la longitud cortante. **No es la salida de pinza** y no modela el portaherramientas. Los registros anteriores con `free_length_mm` se leen sin alterar su número y pasan a `total_length_mm` al guardar; revisar esas longitudes si se introdujeron como salida de pinza. No se modelan cuello estrechado ni portaherramientas; se añadirán antes de evaluar colisiones. RPM, avance y número de filos son opcionales.
+
+El archivo global está en `%APPDATA%\LaguCAM\tools.json` (Windows) o el directorio de configuración equivalente (Linux/macOS). Esquema versión 1; UUIDv4 y revisión de herramienta permiten identificar cambios y marcar resultados como obsoletos. No se crean instantáneas de herramienta en los proyectos.
+
+Esta convención corresponde a la primera implementación solicitada; no implica aprobar automáticamente decisiones abiertas ni certificar contactos o colisiones.
