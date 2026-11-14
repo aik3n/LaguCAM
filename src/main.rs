@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod overlay;
 mod preview;
+mod project;
+mod project_ui;
 mod render;
 mod stl;
 
@@ -17,10 +20,6 @@ use std::{
     time::Duration,
 };
 
-struct LoadStats {
-    info: stl::StlInfo,
-}
-
 struct PendingSuccess {
     info: stl::StlInfo,
     time_seconds: f32,
@@ -28,6 +27,8 @@ struct PendingSuccess {
 
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
+    project: project::Project,
+    property_error: String,
     receiving: Option<Receiver<LoadEvent>>,
     progress: Arc<AtomicU32>,
     cancel: Arc<AtomicBool>,
@@ -35,7 +36,6 @@ struct App {
     pending_success: Option<PendingSuccess>,
     filename: String,
     message: String,
-    result: Option<LoadStats>,
     yaw: f32,
     pitch: f32,
     distance: f32,
@@ -47,6 +47,8 @@ impl App {
         let gl = cc.gl.as_ref().ok_or("Se necesita OpenGL")?;
         let mut app = Self {
             renderer: Arc::new(Mutex::new(render::Render3d::new(gl)?)),
+            project: project::Project::default(),
+            property_error: String::new(),
             receiving: None,
             progress: Arc::new(AtomicU32::new(0)),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -54,7 +56,6 @@ impl App {
             pending_success: None,
             filename: "Ningún STL abierto".into(),
             message: "Selecciona un STL binario o abre el ejemplo incluido.".into(),
-            result: None,
             yaw: 45f32.to_radians(),
             pitch: 35f32.to_radians(),
             distance: 1.0,
@@ -102,6 +103,7 @@ impl App {
         }
     }
 
+    #[allow(clippy::collapsible_if)]
     fn poll(&mut self, ctx: &egui::Context) {
         let (error, completed, ready) = {
             let mut renderer = self.renderer.lock();
@@ -121,7 +123,8 @@ impl App {
         if completed {
             if let Some(success) = self.pending_success.take() {
                 self.filename = self.pending_filename.take().unwrap_or_default();
-                self.result = Some(LoadStats { info: success.info });
+                self.project.loaded(self.filename.clone(), success.info);
+                self.property_error.clear();
                 self.message = format!(
                     "STL cargado completamente (lectura y preparación CPU: {:.1} s)",
                     success.time_seconds
@@ -214,19 +217,12 @@ impl App {
         });
     }
 
+    // LaguCAM 003: panel limpio. El arbol y sus propiedades son la vista principal.
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.heading("LaguCAM · Visor 0.1.1");
-        ui.separator();
-        ui.label("STL binario · vista completa por bloques");
-        if ui
-            .add_enabled(!self.busy(), egui::Button::new("Abrir STL..."))
-            .clicked()
-        {
-            self.file_dialog(ui.ctx().clone());
-        }
-        ui.add_space(10.0);
-        ui.label(egui::RichText::new(&self.filename).strong());
+        project_ui::show(ui, &mut self.project, &mut self.property_error);
+        // Progreso y cancelacion solo mientras se importa. Se conserva el flujo STL original.
         if self.busy() {
+            ui.separator();
             if let Some(name) = &self.pending_filename {
                 ui.label(format!("Importando: {name}"));
             }
@@ -243,36 +239,12 @@ impl App {
             }
             let fraction = self.progress.load(Ordering::Relaxed) as f32 / 100.0;
             ui.add(egui::ProgressBar::new(fraction.min(0.99)).show_percentage());
-        }
-        ui.label(&self.message);
-        if let Some(result) = &self.result {
+            ui.label(&self.message);
+        } else if self.message.starts_with("ERROR") {
+            // No ocultar errores de importacion ni de GPU tras limpiar el panel.
             ui.separator();
-            ui.label(format!("Triángulos STL: {}", result.info.triangles));
-            ui.label(format!(
-                "Archivo: {:.1} MiB",
-                result.info.size_bytes as f64 / 1_048_576.0
-            ));
-            let d = result.info.bounds.dimensions();
-            ui.label(format!("Extensión X: {:.2}", d[0]));
-            ui.label(format!("Extensión Y: {:.2}", d[1]));
-            ui.label(format!("Extensión Z: {:.2}", d[2]));
-            ui.small("Unidades heredadas del STL (STL no define unidades).");
+            ui.colored_label(egui::Color32::RED, &self.message);
         }
-        ui.separator();
-        if ui.button("Centrar vista").clicked() {
-            self.center_view();
-        }
-        ui.add_space(12.0);
-        ui.label("Controles");
-        ui.small("Botón izquierdo: girar");
-        ui.small("Rueda: acercar / alejar");
-        ui.small("Botón derecho o central: desplazar");
-        ui.small("STL original intacto. Visualización completa sin simplificar.");
-        ui.add_space(10.0);
-        ui.colored_label(
-            egui::Color32::from_rgb(220, 175, 100),
-            "No utilizar para calcular G-code.",
-        );
     }
 
     fn viewport(&mut self, ui: &mut egui::Ui) {
@@ -338,6 +310,7 @@ impl App {
                     .paint(painter.gl(), yaw, pitch, distance, aspect, pan);
             })),
         });
+        overlay::paint(ui, rect, &self.project, yaw, pitch, distance, pan);
         ui.painter().text(
             rect.left_top() + egui::vec2(12.0, 12.0),
             egui::Align2::LEFT_TOP,

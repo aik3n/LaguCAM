@@ -3,7 +3,7 @@ use crate::stl::{self, Bounds, StlInfo};
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32},
         mpsc::{SyncSender, TrySendError},
     },
     thread,
@@ -124,6 +124,7 @@ pub fn produce(path: &Path, progress: &AtomicU32, cancel: &AtomicBool, tx: &Sync
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     #[test]
     fn preserves_lower_and_vertical_faces() {
         let bounds = Bounds {
