@@ -1,85 +1,59 @@
-# CAM Libre — Visor STL 0.1, primera revisión auditada
+# LaguCAM
 
-Aplicación de escritorio en Rust + egui/eframe + OpenGL. **Base compilada y probada; la versión 0.1 NO está terminada.** La visualización interactiva en un escritorio real y el objetivo de 700 MB–1 GB siguen pendientes. Véase `AUDITORIA.md`.
+**CAM libre experimental para fresado CNC.** Estado del código documentado: [`f1e436b976eb6f4f88482b00ae5aeff2761e08ee`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee), 14 de noviembre de 2026. Licencia MIT.
 
-## Compilación y ejecución
+LaguCAM nace para mecanizar relieves topográficos a partir de STL binarios enormes, pero se diseña para piezas, formatos y máquinas diferentes. **Todavía no calcula trayectorias CAM ni exporta G-code.** No constituye un sistema de mecanizado verificado.
 
-Instala Rust mediante <https://rustup.rs/>. `rust-toolchain.toml` fija Rust 1.100.0, versión utilizada en esta revisión; `Cargo.lock` fija las dependencias. Desde el directorio del proyecto:
+## Funcionalidad disponible
+
+- Lector STL binario en dos pasadas, importación y transferencia a OpenGL por bloques, sin modificar el STL fuente.
+- Visor con rotación, zoom, desplazamiento y pivote visual seleccionable en la superficie visible.
+- **Validación comunicada por el usuario:** apertura y navegación fluida de un STL real de casi 1 GB en su equipo; no es un benchmark cuantitativo ni garantía para todo hardware.
+- Proyecto con árbol, bruto rectangular editable, extras en seis caras, colores y origen CNC anclado a bruto o modelo, con offsets y rotación matemática.
+- Guardar y abrir proyectos `.lagucam` **versión 2**, JSON con referencias externas al STL y unidades en milímetros.
+- Biblioteca global de herramientas con cinco familias geométricas, filtros, editor y perfil técnico 2D; identificadores UUID y revisiones.
+- Paneles Proyecto/Propiedades acoplables o flotantes, temas claro/oscuro y preferencias portables.
+- Operaciones representadas como datos, todavía sin estrategias; referencia a herramienta por UUID, sin selector operativo.
+
+## Compilación y uso
+
+Rust edición 2024, versión fijada en `rust-toolchain.toml` (1.100), egui/eframe y OpenGL/glow. Es necesario un entorno gráfico y GPU compatibles. El paquete Cargo sigue llamándose `cam-libre-visor`.
 
 ```bash
 cargo build --locked --release
-cargo run --locked --release -- examples/terrain_demo.stl
-# O abrir el selector de archivos:
 cargo run --locked --release
+cargo run --locked --release -- examples/terrain_demo.stl
 ```
 
-El ejecutable se genera en `target/release/cam-libre-visor` (Windows: `.exe`). Se necesita un escritorio con OpenGL 3.3 y soporte de profundidad. La compilación de Windows/macOS no se ha comprobado. No se incluye un binario portable.
+El ejecutable aparece en `target/release/cam-libre-visor` (`.exe` en Windows). Los menús ofrecen **Archivo** (Nuevo/Abrir/Guardar proyecto, Abrir STL), **Herramientas** (Biblioteca de herramientas y Opciones) y **Vista** (Centrar vista, Restablecer paneles).
 
-En Ubuntu/Debian, si faltan bibliotecas de desarrollo:
+**Controles actuales:** mantener el botón izquierdo sobre el modelo y arrastrar para orbitar desde un pivote visual elegido en la pulsación; rueda para zoom; botón derecho o central para desplazar. El indicador del pivote solo aparece durante el gesto de órbita. Los paneles se reorganizan mediante su asa de arrastre.
 
-```bash
-sudo apt install build-essential pkg-config libxkbcommon-dev \
-  libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-  libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
-```
+## Configuración y datos
 
-El selector de archivos Linux de `rfd` utiliza un portal de escritorio con sus características actuales. Si no está disponible, se puede abrir el archivo por argumento. Sin servidor gráfico la aplicación no puede arrancar.
+- La distribución portable guarda `config/tools.json`, `config/panels.json` y `config/settings.json` **junto al ejecutable**. Al ejecutar desde `target/release`, los datos quedan junto al binario de esa carpeta. No se usa AppData ni el Registro.
+- El archivo `.lagucam` v2 almacena una referencia al STL, no los triángulos. El proyecto no guarda una copia de la definición de cada herramienta: las operaciones referenciarán su UUID global.
+- El esquema `.lagucam` v1 se rechaza. **Durante el desarrollo no se exige compatibilidad con formatos antiguos ni su migración**; no se deben borrar datos personales silenciosamente.
+- STL no contiene unidades, aunque el proyecto actual trabaja en mm. Los datos geométricos usan `f64`; el dibujo GPU normalizado usa `f32` **y no es una base válida para cálculo CAM**.
+- Solo STL **binario**. Se comprueba la estructura, pero no que la malla sea manifold, cerrada o apta para mecanizar. GPU, RAM y rendimiento dependen del tamaño de entrada y del hardware.
 
-## Menús
+## Próxima etapa acordada
 
-- **Archivo → Abrir STL…**: abre el selector de archivos STL. También hay un botón lateral.
-- **Vista → Centrar vista**: restablece orientación, zoom y desplazamiento para encuadrar la pieza completa.
+El commit de referencia unifica el tipo `ToolId` (UUID textual) en biblioteca, operaciones y persistencia. **Está acordado —pero no implementado— calcular una huella SHA-256 de los parámetros geométricos de las fresas** mediante codificación binaria canónica y versionada. Excluirá UUID, nombre, revisión, notas, RPM y avances. Aún no existen trayectorias ni reglas ejecutables para comprobar su vigencia.
 
-## Controles
-
-- Botón izquierdo y arrastre: rotación orbital.
-- Rueda: zoom, cuando el cursor está sobre la vista.
-- Botón derecho o central y arrastre: desplazamiento de cámara.
-- **Centrar vista**: restablece orientación, desplazamiento y encuadre.
-- **Cancelar importación**: interrumpe la lectura en segundo plano. Conserva la vista anterior.
-
-## Datos y límites explícitos
-
-Solo STL **binario estándar**, no ASCII. Se exige tamaño exacto `84 + 50 × triángulos`, al menos un triángulo y posiciones finitas. Se admiten planos verticales. Una geometría con extensión nula en todos los ejes se rechaza. No se valida que la malla sea cerrada, manifold o apta para fabricar.
-
-El lector recorre el archivo dos veces con un búfer de 4 MiB: primero calcula límites en f64 y luego construye la vista. No crea una segunda colección de triángulos originales. El STL fuente se abre exclusivamente para lectura y permanece en disco, intacto. No hay todavía almacén geométrico persistente ni caché para CAM; no borrar ni modificar el archivo fuente durante la importación.
-
-La vista conserva **todos los triángulos**: sin heightfield, submuestreo, relleno de huecos ni simplificación. Solo centra y escala uniformemente las posiciones para la GPU. El cálculo de esa transformación usa f64; los vértices GPU son f32 y no son una representación apta para CAM. Detalles muy pequeños respecto a la extensión total pueden perder precisión visual. Las normales se recalculan para iluminación, sin modificar el archivo. Los triángulos degenerados se conservan, pero no tienen superficie visible.
-
-**Límite actual:** 256 MiB de datos CPU de la malla visual, a 72 bytes por triángulo (tres posiciones y normales). Equivale a 3.728.270 triángulos o aproximadamente 177,8 MiB de STL. Una carga superior se rechaza íntegramente; nunca se muestra una selección incompleta como si fuera la pieza entera. Este límite es una protección provisional y **no satisface el objetivo de 1 GB**.
-
-El presupuesto no limita la memoria total del proceso: además hay búfer de lectura, GUI, malla anterior en GPU y memoria del controlador. La carga a GPU todavía es monolítica y puede causar una pausa al terminar la importación. La cancelación es cooperativa entre registros; no interrumpe una lectura del sistema operativo bloqueada ni una subida GPU. El tiempo mostrado corresponde a lectura y construcción CPU, no al tiempo total hasta el primer fotograma.
-
-## Pruebas
+## Pruebas y límites
 
 ```bash
-cargo fmt --check
-cargo test --locked
+cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 cargo build --locked --release
 ```
 
-La CI ejecuta estos controles. No ejecuta una prueba gráfica ni mide rendimiento. Hay 13 pruebas de lectura, errores, cancelación en ambas pasadas, límites de memoria, transformación visual, conservación de caras y encuadre. El ejemplo incluido se carga en una prueba y debe conservar sus 32.768 triángulos.
+Son comandos recomendados, **no pruebas ejecutadas en esta actualización documental**. No se ha constatado un workflow de CI activo en el árbol revisado. Ningún modelo mostrado, ni futuro G-code, debe considerarse seguro para mecanizar sin verificación geométrica, de offsets, herramienta física, colisiones y máquina real.
 
-## Arquitectura
+## Documentación
 
-| Archivo | Responsabilidad |
-| --- | --- |
-| `src/stl.rs` | E/S binaria progresiva, validación, bounds f64, cancelación y callback por triángulo |
-| `src/preview.rs` | Única malla visual CPU, transformación y presupuesto de memoria |
-| `src/render.rs` | Recursos OpenGL, VBO intercalado, shaders, profundidad y encuadre |
-| `src/main.rs` | Interfaz, canal de resultados, hilo de importación y controles de cámara |
+Leer [AGENTS.md](AGENTS.md) y [docs/INDEX.md](docs/INDEX.md). Estado real: [docs/STATUS.md](docs/STATUS.md). Arquitectura: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Decisiones: [docs/DECISIONS.md](docs/DECISIONS.md). Bibliotecas: [docs/LIBRARIES.md](docs/LIBRARIES.md). Proceso de trabajo: [docs/WORKFLOW.md](docs/WORKFLOW.md).
 
-La vista no alimentará futuros cálculos CAM. La separación de responsabilidades existente se conserva. No se han añadido estrategias CAM, herramientas ni G-code.
-
-## Validación pendiente en tu equipo
-
-1. Compilar y abrir el ejemplo. Comprobar orientación, oclusión, encuadre, giro, zoom y desplazamiento; también en una ventana estrecha.
-2. Abrir otro archivo inválido y cancelar una importación: debe seguir visible el modelo anterior con su nombre y datos.
-3. Comprobar el selector de archivos y los errores de contexto/GPU.
-4. Antes de la aceptación de 0.1, implementar y validar el camino de grandes mallas descrito en la auditoría. Esta revisión rechazará un STL de 700 MB–1 GB.
-5. Una vez disponible ese camino, medir con tu montaña real: CPU/GPU/RAM/VRAM, disco, tamaño y triángulos, tiempo hasta el primer fotograma y hasta carga completa, memoria máxima, tiempos de fotograma al girar/zoom/desplazar y latencia de cancelación. No se presume validación con un archivo sintético.
-
-## Licencias
-
-Código del proyecto: MIT (`LICENSE`). No se han añadido dependencias. Las cuatro dependencias directas ofrecen licencias permisivas. `DEPENDENCIAS.md` incluye el inventario de expresiones de licencia descargadas en Linux; no constituye una aprobación de integración con SolidCraft ni una revisión completa de todas las plataformas. Antes de distribuir binarios, recopilar avisos y licencias de las dependencias, incluidas las fuentes tipográficas.
+Las entregas `LAGUCAM_004.md` a `LAGUCAM_007.md`, `AUDITORIA.md` y `DEPENDENCIAS.md` son documentos de etapas anteriores y deben interpretarse como históricos.

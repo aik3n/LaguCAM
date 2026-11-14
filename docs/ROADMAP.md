@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | **0.1 — Visor STL grande** | Abrir y mover en 3D STL reales cercanos a 1 GB | **USUARIO-VALIDADO** para el equipo y archivo probados; faltan métricas automatizadas |
 | **0.2 — Entorno de proyecto** | Árbol lateral, bruto, origen, representación coherente | **IMPLEMENTADO** en código; comprobaciones funcionales positivas del usuario |
-| **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **IMPLEMENTADO EN CÓDIGO** desde `6eb12e1`; aceptación manual pendiente |
-| **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **IMPLEMENTACIÓN INICIAL ENTREGADA PARA PRUEBAS**; selección por operación pendiente |
+| **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **IMPLEMENTADO EN CÓDIGO** (v2); prueba manual actual pendiente |
+| **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **EDITOR Y BIBLIOTECA IMPLEMENTADOS**; UUID global unificado; selector por operación pendiente |
 | **Etapa 3 — Máquina y post** | Perfiles de máquina; abstracción post independiente; primer dialecto FluidNC | **ACORDADO COMO OBJETIVO**, sin implementación |
 | **Etapa 4 — Base geométrica CAM** | Acceso geométrico fiable a STL, consultas espaciales, contacto herramienta-pieza y tests patrón | **PENDIENTE** |
 | **Etapa 5 — Primera estrategia** | Acabado 3D paralelo de 3 ejes sobre superficies de referencia | **PROPUESTA**, pendiente de aprobar estrategia exacta |
@@ -32,8 +32,8 @@ No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de 
 
 - Tipos y fórmulas geométricas aprobados.
 - Validación de dimensiones y perfiles de prueba con casos degenerados.
-- Biblioteca global y selección filtrada por operación, con referencia al UUID global sin instantánea en el proyecto.
-- Al cambiar geometría, invalidación explícita de trayectorias dependientes.
+- Biblioteca global implementada; referencia UUID sin snapshot; selector filtrado desde operación aún pendiente.
+- SHA-256 geométrico canónico acordado, aún sin código; futuras trayectorias compararán huella y otras dependencias para evitar exportar resultados obsoletos.
 - Visualización técnica y datos de corte no confundidos con geometría.
 
 ### Motor geométrico
@@ -51,12 +51,14 @@ No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de 
 - Números de herramienta, cambio manual y offsets tratados sin supuestos inseguros.
 - Simulación/comprobación offline, ejecución en vacío y pruebas controladas antes del mecanizado real.
 
-## Priorización inmediata
+## Priorización inmediata tras `f1e436b`
 
-1. Estabilizar documentación y su protocolo por commit.
-2. Ejecutar y validar **persistencia** ya definida.
-3. Debatir a fondo las **geometrías de fresa** antes de encargar su implementación.
-4. No perder tiempo ahora con interfaz de SolidCraft, STEP completo, ATC, G-code avanzado o 5 ejes.
+1. **UUID unificado en código:** biblioteca, operaciones y `.lagucam` v2. Comprobaciones de compilación y GUI del commit actual pendientes de acreditar.
+2. **Definición del SHA-256 geométrico:** aceptada. Próxima tarea posible: implementar **solo** hash binario canónico/versionado y tests, incluido Ø6 → Ø4 → Ø6, sin ampliar todavía operaciones ni persistencia.
+3. Posteriormente debatir el registro de dependencias, validez de trayectorias y condiciones de exportación, antes del motor CAM.
+4. Mantener documentación y pruebas de regresión; no invertir ahora en más cambios de interfaz ni en refactorizaciones cosméticas.
+
+**Política de desarrollo:** se permiten cambios de esquema incompatibles sin migración; siempre documentados y sin borrar datos personales.
 
 ## Riesgos estratégicos
 

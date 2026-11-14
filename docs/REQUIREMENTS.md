@@ -1,9 +1,9 @@
 # Requisitos de LaguCAM
 
-## Actualización 019 — TL-06 y PRJ-03
-- **TL-06, parcialmente implementado:** las operaciones ya representan la referencia a herramienta mediante el mismo tipo UUID de la biblioteca; se almacena sin copia de geometría. La selección por operación, resolución en biblioteca, bloqueo por herramienta ausente e invalidación de trayectorias siguen pendientes.
-- **PRJ-03, esquema versionado:** versión `.lagucam` 2, que rechaza explícitamente documentos con versión 1 durante esta fase de desarrollo; valida el formato UUID de cada referencia de herramienta.
-**Estado:** borrador vivo, no todo implementado · **Base:** `0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9`
+> **Actualización vigente, código `f1e436b` (14-11-2026).** El proyecto `.lagucam` v2, la biblioteca de cinco fresas, la configuración portable y el UUID compartido ya existen en código. La huella geométrica SHA-256 está **acordada, no implementada**. En desarrollo no se exigen migraciones de formatos obsoletos; no borrar datos personales silenciosamente.
+
+
+**Estado:** borrador vivo · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -13,12 +13,12 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | --- | --- | --- |
 | UI-01 | Visor tridimensional con rotación, zoom, desplazamiento y centrado | Usuario validó interacción |
 | UI-02 | Abrir STL binarios cercanos a 1 GB sin perder fluidez al navegar en el equipo de referencia | Usuario validó caso real; faltan métricas |
-| UI-03 | Panel lateral con modelo, bruto, origen, herramientas y operaciones ordenadas | Observado en código; herramientas aún vacías |
+| UI-03 | Árbol de proyecto y propiedades, biblioteca global desde menú principal | Implementado en código; selección de herramienta por operación pendiente |
 | UI-04 | Bruto rectangular editable, tamaño, posición, extras por cada cara y representación visual | Observado en código; usuario probó bruto |
 | UI-05 | Origen CNC con referencia a bruto o modelo, marcadores seleccionables, offset y orientación | Observado en código |
-| PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | Implementado en código desde `6eb12e1`; pendiente validación manual de flujo completo |
+| PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | Implementado en código desde 6eb12e1; validación gráfica de versión actual pendiente |
 | PRJ-02 | Guardar referencia externa al modelo, bruto, origen, aspecto, operaciones, unidades y máquina seleccionada cuando exista | Acordado para persistencia; algunos campos aún no existen |
-| PRJ-03 | Versionar esquema, validar al cargar, tratar STL ausente/modificado y no perder el proyecto anterior por error | Observado en `src/project/persistence.rs` y `src/main.rs`; pruebas del flujo completo pendientes |
+| PRJ-03 | Esquema versionado, validación, STL ausente/modificado y preservación del proyecto anterior ante fallos | `.lagucam` v2 implementado en código; validación gráfica pendiente |
 | PRJ-04 | Declarar explícitamente unidades; STL no las incorpora | Acordado; milímetros como punto de partida, no deducir de STL |
 | PRJ-05 | Trabajar sin copias gigantes de triángulos dentro del archivo de proyecto | Acordado |
 
@@ -43,12 +43,12 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 | ID | Requisito | Estado |
 | --- | --- | --- |
-| TL-01 | Biblioteca **global**, reutilizable y no organizada por carpetas obligatorias | Acordado |
-| TL-02 | Búsqueda y filtros por nombre, tipo y diámetro; favoritas/recentes como mejora posible | Implementación de filtros/orden disponible en esta entrega; pendiente validar |
+| TL-01 | Biblioteca **global**, reutilizable y sin carpetas obligatorias | Implementado en código |
+| TL-02 | Filtros por nombre, tipo y diámetro; favoritas/recentes como mejora futura | Filtros implementados en código |
 | TL-03 | Tipos inicialmente considerados: plana, esférica, cónica V, cónica punta plana y cónica punta esférica | **Propuesta de catálogo**, aún por cerrar |
-| TL-04 | Editor con vista técnica de perfil y parámetros coherentes para cada tipo | Implementación de la primera versión, pendiente de validación gráfica |
+| TL-04 | Editor con vista técnica de perfil y parámetros coherentes para cada tipo | Implementado en código; validación visual actual pendiente |
 | TL-05 | Separar geometría cortante, mango/cuello, montaje y velocidades/avances | Acordado |
-| TL-06 | Cada operación futura guarda solo el UUID global de su herramienta; falta de herramienta = error, cambio de definición = recálculo obligatorio; sin copia oculta | Acordado explícitamente el 2026-11-14; selección por operación pendiente |
+| TL-06 | Operación guarda UUID global sin snapshot; trayectoria futura compara huella y dependencias antes de usarse | UUID compartido implementado; resolución e invalidación pendientes |
 | MACH-01 | Biblioteca de perfiles de máquina, independiente de herramientas y postprocesadores | Acordado |
 | MACH-02 | Características físicas, límites, husillo y modo de cambio manual/ATC según máquina | Acordado; aún no implementado |
 | MACH-03 | Perfil de la máquina de pruebas con FluidNC y cambio manual | Confirmado como caso de uso; valores físicos de captura por verificar |
@@ -80,22 +80,16 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 ## 6. Decisiones abiertas que afectan a requisitos
 
-- Conjunto exacto de cinco geometrías iniciales y convenciones dimensionales/angulares.
+- Cinco geometrías ya implementadas con convenciones de ángulo total y radio de esfera; falta validación para cálculo CAM exacto.
 - Grado de representación de mango, cuello y portaherramientas en la primera biblioteca.
 - Semántica de máquina por proyecto o por setup (una máquina por proyecto fue **recomendada, no confirmada**).
 - Estrategia de cálculo geométrico inicial y tolerancias nominales.
-- Formato definitivo de proyecto (`.lagucam` y JSON propuestos en el encargo de etapa 1; no existe aún esquema ratificado en código).
+- Evolución del esquema `.lagucam` v2; en desarrollo no se exige compatibilidad con versiones anteriores.
 - Unidad de longitud y conversión para formatos futuros.
 
-## Biblioteca de herramientas: requisitos de la primera entrega
+## Requisitos añadidos tras D-033 y D-034
 
-- **TL-07 (implementación pendiente de aceptación):** persistencia global en configuración de usuario, esquema versionado e IDs UUID estables. Biblioteca vacía en primera ejecución; no sobrescribir un JSON corrupto.
-- **TL-08 (implementación pendiente de aceptación):** edición sobre borrador con guardar/cancelar, duplicación con nuevo ID, revisión creciente y eliminación confirmada.
-- **TL-09 (implementación pendiente de aceptación):** cinco geometrías definidas por fórmulas; `f64`; validación de ángulos totales y longitudes. No se establecen valores recomendados de RPM ni avance.
-- **Fuera de alcance:** instantánea de herramienta dentro de una operación, selector por operación, cálculos CAM y G-code. La política D-010 queda sustituida por D-024 (ID global sin snapshots); la asignación por operación sigue pendiente.
-
-## Revisión 009 — Accesos y visor
-
-- La biblioteca global se abre desde el menú principal y no desde el árbol de proyecto, que no tendrá un nodo de herramientas.
-- El viewport debe mostrar un degradado azul cielo con el STL y bruto correctamente visibles; la GPU y un STL cercano a 1 GB se validarán en el equipo del usuario.
-- **No implementado:** selección de fresa por operación; futura referencia UUID global sin copias ocultas (D-024).
+- **TL-10 — Huella geométrica (ACEPTADA, pendiente de código):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
+- **TL-11 — Vigencia de resultados (ACORDADO COMO OBJETIVO, aún sin operaciones):** futuro cálculo resuelve UUID actual y toma copia temporal inmutable; trayectoria identifica hash geométrico y demás dependencias; prohibir exportación si están obsoletas.
+- **PRJ-06 — Compatibilidad experimental (ACEPTADO):** durante desarrollo no mantener versiones anteriores ni migraciones obligatorias; comunicar incompatibilidades y no destruir archivos personales.
+- **CAM-07 — Separación de validez:** cambios tecnológicos como avance y RPM pueden requerir regenerar G-code sin modificar la geometría calculada; una coincidencia de hash geométrico no valida por sí sola máquina, setup ni programa.

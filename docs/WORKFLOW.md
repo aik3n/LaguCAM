@@ -1,6 +1,8 @@
+> **Regla de continuidad:** el último corte de código revisado es `f1e436b` (UUID compartido, proyecto `.lagucam` v2, biblioteca global). La huella de herramienta SHA-256 está **acordada, no implementada**. Nunca convertir una decisión documentada en código sin una nueva tarea explícita.
+
 # Protocolo de trabajo: usuario, chat de dirección y chat de desarrollo
 
-**Estado:** protocolo inicial propuesto para adopción · **Fecha:** 2026-11-14
+**Estado:** protocolo vigente · **Código de referencia:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Fecha:** 2026-11-14
 
 ## 1. Roles
 
@@ -77,6 +79,7 @@ Después el responsable indicará el rol (debate o desarrollo) y una tarea concr
 - Identificar siempre SHA base y estado de cambios no confirmados.
 - Usar commits pequeños y mensajes descriptivos; dejar fácil revertir una regresión.
 - No sobrescribir archivos o modificaciones no confirmadas sin consentimiento.
+- **En desarrollo no se requiere compatibilidad retroactiva** de formatos ni migración; los cambios incompatibles se registran y no se borran datos personales sin aviso/autorización.
 - No publicar, fusionar ni modificar la rama principal por iniciativa propia.
 - Los STL reales grandes quedan fuera de Git; usar un STL pequeño de referencia y datos sintéticos para tests reproducibles.
 - Una tarea puede terminar correctamente con un patch o archivo sin commit **si no se dispone de acceso Git**, pero declararlo explícitamente.

@@ -1,17 +1,36 @@
-# LaguCAM - árbol de proyecto / bruto / origen CNC
+# LaguCAM — árbol de proyecto y módulos (estado actual)
 
-Esta actualización añade un árbol lateral y un estado de proyecto en módulos Rust separados.
-El STL sigue cargándose por bloques sin modificación de stl.rs, preview.rs ni render.rs.
+**Referencia:** commit `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`, 14-11-2026. Este archivo sustituye una descripción antigua del árbol y del bruto; detalles en `docs/ARCHITECTURE.md`.
 
-- El bruto es una caja rectangular alineada con los ejes del modelo; `min` expresa su esquina mínima en coordenadas STL y `size` contiene dimensiones reales f64.
-- El botón Ajustar a límites del STL utiliza los límites originales. Un eje del STL con extensión cero se inicializa con grosor 1 unidad para obtener un bruto válido.
-- El origen de trabajo se define como desplazamiento desde la esquina mínima del bruto. Los presets incluyen esquinas, centro superior y centro del bruto.
-- El origen personalizado admite posiciones fuera del bruto intencionadamente.
-- La representación del bruto es un dibujo de aristas proyectado con la cámara 3D; es una superposición sin prueba de profundidad, por lo que las aristas pueden verse delante del STL.
-- No se persisten los datos al cerrar, no hay algoritmos CAM, herramientas funcionales, trayectorias ni G-code.
-- La geometría de referencia y todas las posiciones/dimensiones se guardan en f64; la conversión a f32 solo ocurre durante la proyección visual.
-- Las operaciones usan una colección Vec ordenada, inicialmente vacía.
+```text
+src/
+  main.rs                 Orquestación UI, archivos, importación y dibujo
+  stl.rs                  Lectura/validación STL binario
+  preview.rs              Bloques visuales y canal acotado
+  render.rs               Dibujo STL mediante OpenGL
+  stock_render.rs         Dibujo del bruto
+  overlay.rs              Marcadores de cero CNC
+  navigation.rs           Acciones y estado de cámara
+  scene_pick.rs           Picking VISUAL basado en profundidad GPU
+  project/
+    mod.rs                Estado del proyecto
+    model.rs              Referencia de STL y límites
+    stock.rs              Bruto
+    origin.rs             Origen CNC y transformaciones
+    display.rs            Aspecto del bruto
+    selection.rs          Selección de elementos
+    operations.rs         Operaciones marcadoras con ToolId UUID
+    persistence.rs        .lagucam versión 2
+  project_ui.rs           Árbol/propiedades de proyecto
+  tools/
+    mod.rs                Módulo de herramientas
+    model.rs              Cinco geometrías, UUID, validación
+    storage.rs            Biblioteca config/tools.json
+  tools_ui.rs             Editor y filtros de fresas
+  tools_profile.rs        Dibujo 2D de perfiles
+  panel_layout.rs         Paneles acoplables y flotantes
+  portable.rs             Configuración portable y escritura atómica
+  options.rs              Tema y preferencias
+```
 
-## Validación
-
-El script de instalación ejecuta cargo fmt, clippy, test y build --release. Validar visualmente la caja, los ejes, el selector de origen y un STL grande en el equipo con GPU.
+**No existen todavía** motor CAM, módulo de contactos, trayectorias, verificación de colisiones, máquinas o postprocesadores. El hash SHA-256 de geometría de herramientas está acordado, pero no programado.

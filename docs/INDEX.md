@@ -1,9 +1,9 @@
 # Documentación de LaguCAM
 
 **Corte documental:** 2026-11-14 · **Repositorio:** https://github.com/aik3n/LaguCAM  
-**Último commit revisado:** [`0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9`](https://github.com/aik3n/LaguCAM/commit/0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9)
+**Último commit de código revisado:** [`f1e436b976eb6f4f88482b00ae5aeff2761e08ee`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee)
 
-Este conjunto resume las decisiones de las conversaciones de dirección técnica y las contrasta con los archivos accesibles del repositorio. Se entrega **por separado**; no se ha publicado ni modificado el repositorio GitHub.
+Este conjunto resume las decisiones de las conversaciones de dirección técnica y las contrasta con los archivos accesibles del repositorio. Esta revisión documental describe el estado de código indicado; cualquier commit documental posterior debe distinguirse de nuevas modificaciones funcionales.
 
 ## Índice y orden recomendado de lectura
 
@@ -31,6 +31,15 @@ Este conjunto resume las decisiones de las conversaciones de dirección técnica
 - **PENDIENTE**: no se ha encontrado implementación o no se ha validado.
 
 Si hay conflicto entre documentación antigua y código actual, **prevalece el código para describir lo implementado**, pero no autoriza a considerar correcto el comportamiento sin las pruebas pertinentes. Registrar la discrepancia y corregir los documentos.
+
+## Resumen vigente al commit `f1e436b`
+
+- `.lagucam` **v2** y biblioteca de herramientas global con cinco familias: implementados en código.
+- UUID textual compartido en biblioteca, operación y persistencia: implementado en `f1e436b`; selección real por operación aún pendiente.
+- Configuración portable `config/` junto al ejecutable; paneles acoplables y tema claro/oscuro.
+- **Aceptado, no implementado:** huella SHA-256 de geometría de fresa, canónica y versionada; exclusión de UUID, revisión, nombre, RPM y avances.
+- **Durante desarrollo:** no se exige compatibilidad con formatos anteriores; evitar eliminación silenciosa de datos personales.
+- CAM, máquinas, FluidNC y G-code: todavía pendientes. Los documentos `LAGUCAM_004.md`–`LAGUCAM_007.md`, `AUDITORIA.md` y `DEPENDENCIAS.md` son históricos.
 
 ## Fuentes de la fotografía inicial
 

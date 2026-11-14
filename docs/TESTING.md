@@ -1,40 +1,22 @@
 # Política de pruebas, regresión y seguridad CNC
 
-## Comprobaciones 019 — UUID de herramientas
-- Ejecutar `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, `cargo build --locked --release`.
-- Verificar `ToolId` UUID en operaciones, `tools.json` y `.lagucam` v2 sin conversión a `u64`; `toolpath_id` conserva su tipo numérico propio.
-- Pruebas automáticas: UUID válido en JSON y restauración, UUID inválido rechazado, `tool_id` numérico rechazado, `.lagucam` v1 rechazado por versión.
-- Manual: guardar y reabrir proyecto v2 sin operaciones y con operaciones de prueba; comprobar que una biblioteca global vacía no impide abrir un proyecto. No se implementa resolución de fresas.
-- Regresión en Windows: cargar un STL grande conocido, mover cámara, modificar bruto/origen y comprobar configuración portable y paneles; sin mecanizado real.
-## Pruebas manuales 018 — Docking estético
-- Confirmar que no hay menú «Posición» y aparecen seis puntos junto al título de los paneles acoplados.
-- Mantener pulsado sobre el asa, arrastrar hacia el centro: ver silueta semitransparente siguiendo el cursor, soltar para desacoplar.
-- Arrastrar sobre cada uno de los cuatro destinos: comprobar que son pictogramas sin texto, y que se previsualiza el lugar final.
-- Arrastrar desde barra de título de ventana flotante al lateral: acopla sin activar por redimensionar o editar controles.
-- Probar en Claro y Oscuro; comprobar contraste de guías, fantasma, títulos y contenido de propiedades.
-- Reiniciar: persiste la distribución portable `config/panels.json`; Vista > Restablecer paneles funciona.
-- Comprobar pivote, carga/cancelación STL, origen CNC y biblioteca de herramientas sin cambios.
-## Pruebas manuales del ajuste 017
-- Ejecutar el EXE compilado sin instalación: `config/` debe crearse a su lado al guardar preferencias, paneles o herramientas.
-- Cambiar Claro/Oscuro en Herramientas > Opciones y comprobar actualización inmediata de menús, paneles y herramientas, manteniendo el cielo del visor.
-- Reiniciar y comprobar que tema, paneles y biblioteca siguen la configuración de esa carpeta de EXE.
-- Ejecutar una segunda copia del programa desde otra carpeta y comprobar preferencias y herramientas independientes.
-- Confirmar que `%APPDATA%\\LaguCAM` no se consulta, copia, migra ni borra; la biblioteca nueva puede aparecer vacía.
-- Probar carpeta de programa sin permisos de escritura: debe mostrarse error al guardar preferencias, sin caída ni ruta alternativa oculta.
-- Verificar operaciones existentes: carga/cancelación STL, pivote, origen CNC, paneles flotantes y tamaño de ventana.
-## Pruebas manuales del ajuste 016
-- Arrastrar desde la cabecera de Proyecto hasta el centro y soltar: debe convertirse en flotante sin alterar Propiedades.
-- Arrastrar el título de una ventana flotante hasta cada uno de los cuatro destinos: izquierda/derecha y arriba/abajo; comprobar guía y vista previa antes de soltar.
-- Probar un panel acoplado sobre el otro y volver a invertir el orden de apilamiento mediante arrastre.
-- Soltar una ventana flotante tras redimensionarla (sin arrastrar título): no debe acoplarse de forma involuntaria.
-- Reiniciar: preservar la posición, tamaño y distribución anteriores mediante `panels.json`; comprobar Vista > Restablecer paneles.
-- Probar proyecto nuevo, Abrir modelo, barra de estado, cancelación STL, pivote y origen CNC. Probar STL grande para detectar pérdida de fluidez.
-## Pruebas manuales del ajuste 015
-- Arrastrar una ventana flotante cerca de los bordes izquierdo/derecho y soltar para acoplarla.
-- Probar ambos paneles arriba/abajo, redimensionar separador horizontal y anchuras de cada lateral.
-- Probar posición flotante y tamaño persistentes al cerrar y volver a abrir; Vista > Restablecer paneles.
-- Probar textos largos y muchas propiedades: scroll interno sin modificación automática del tamaño.
-- Comprobar Cancelar importación y errores, Abrir modelo en proyecto vacío, origen CNC y pivote de navegación, proyecto `.lagucam` sin cambios.
+**Código de referencia:** `f1e436b` · 14-11-2026. La actualización de documentación **no ejecuta Cargo ni pruebas gráficas/CNC**. Las secciones de entregas anteriores son histórico de criterios, no evidencia de su ejecución.
+
+## Comprobaciones de identidad UUID y proyecto v2
+
+- `ToolId` UUID textual compartido en biblioteca, operación y `.lagucam` v2; probar valor válido, inválido, numérico antiguo y JSON nulo.
+- El esquema `.lagucam` v1 se rechaza expresamente: **es aceptable durante desarrollo**; no migrar por compatibilidad ni borrar archivos personales.
+- Verificar que `toolpath_id` sigue siendo independiente y que guardar/abrir proyectos sin operaciones o con referencias UUID no altera datos del modelo ni del bruto.
+
+## Próximos tests SHA-256 geométrico (función aún no implementada)
+
+- Idéntico tipo y geometría → mismo hash, aunque difieran UUID, revisión, nombre o metadatos.
+- Ø6 → Ø4 → Ø6: primera y tercera huella iguales si todas las cotas relevantes coinciden; la de Ø4 diferente.
+- Variar cada parámetro físico relevante en los cinco tipos: cambia hash. Cambiar RPM, avance, nombre o notas: no cambia hash geométrico.
+- Representación canónica binaria y versionada en milímetros: orden de campos, codificación f64, casos `+0.0`/`-0.0`, NaN/infinito y casos límite.
+- No añadir operaciones ni campos nuevos a `.lagucam` mientras solo se implementa la función.
+
+
 **Estado:** criterios para futuras etapas; no constituye certificación del software. **Fecha:** 2026-11-14.
 
 ## 1. Comandos de calidad de Rust
@@ -115,40 +97,3 @@ La cadena de verificación debe incluir:
 - Prueba de máquina: requiere procedimiento controlado; nunca derivarla de una revisión de código.
 
 Registrar explícitamente cuál se realizó y cuál falta.
-
-## Ensayos de pivote de navegación (010)
-
-1. Abrir STL pequeño; doble clic en una cara: debe aparecer una cruz discreta en el centro de giro. Girar y hacer zoom sin que el punto se desplace con respecto al modelo.
-2. Doble clic en el cielo: se mantiene el pivote y aparece mensaje, sin salto de cámara.
-3. `Vista > Centrar vista`: restaura centro visual de bounds y encuadre inicial; desaparece la marca de pivote personalizado.
-4. Girar, hacer zoom y desplazar; comprobar bruto, marcadores de origen CNC y proyectos `.lagucam` previos.
-5. Repetir sobre STL cercano a 1 GB: comprobar que no se vuelve a leer desde disco, que no aumenta memoria de forma proporcional al STL y que el clic no bloquea perceptiblemente el visor.
-6. Con GPU y driver de Windows, comprobar profundidad con MSAA 4×, vistas en perspectiva, bordes de triángulo, paneles redimensionados y escalado DPI distinto de 100%.
-
-La lectura GPU es visual, no una consulta geométrica exacta para CAM.
-
-## Ensayos 011 — Clic simple sin movimiento inmediato
-
-1. Sobre una zona reconocible del STL, hacer clic simple. Confirmar que ni el modelo ni el encuadre saltan en ese instante, y que la marca aparece sobre el punto elegido.
-2. Arrastrar con el boton izquierdo: la escena rota alrededor de ese punto manteniendolo fijo en pantalla. Probar otros puntos, pendientes fuertes y modelos planos.
-3. Clic sobre el cielo: conserva el pivote anterior. «Vista > Centrar vista» recupera pivote y encuadre iniciales.
-4. En Origen CNC, seleccionar puntos rojos sin cambiar el pivote de navegacion. Verificar pan derecho, zoom y bruto.
-5. Repetir en el STL real cercano a 1 GB, comprobando fluidez, ausencia de otra lectura del archivo y funcionamiento de biblioteca y `.lagucam`.
-6. Verificar en Windows con DPI distinto de 100% y MSAA 4x.
-
-## Ensayos 012 — Pulsacion y arrastre continuos
-
-1. En el STL, pulsar boton izquierdo sin soltar: se selecciona y marca un pivote sin mover la vista.
-2. Manteniendo pulsado, arrastrar inmediatamente: la orbita empieza alrededor de ese mismo punto. Probar movimientos rapidos para comprobar que no hay salto ni desplazamiento inicial alrededor del pivote antiguo.
-3. Soltar: el marcador persiste; volver a girar y comprobar que el ultimo pivote se conserva. «Vista > Centrar vista» lo restablece.
-4. Pulsar en el cielo: no sustituye el pivote. Arrastrar desde el cielo puede girar con el pivote anterior.
-5. Verificar puntos rojos de Origen CNC, bruto, zoom y pan; repetir con DPI alto, MSAA y STL real de gran volumen.
-6. Comprobar tests de `PivotPress` y de `navigation.rs`, Clippy y compilacion release.
-
-## Ensayos 013 — Indicador solo mientras se rota
-
-1. Pulsar en la superficie y mantener: aparece la marca amarilla en el punto, sin salto de camara. Arrastrar sin soltar: rota alrededor de ese pivote.
-2. Soltar sobre el modelo y tambien tras salir del viewport: la marca desaparece. Girar de nuevo debe seguir seleccionando de inmediato el nuevo pivote.
-3. Clic breve: establece pivote aunque no llegue a verse la marca al soltarse inmediatamente. Girar desde el fondo debe conservar el pivote anterior; si se pulsa para rotar, la marca solo aparece durante el gesto.
-4. Probar boton derecho/central para desplazar, rueda para zoom, prioridad de puntos rojos del origen CNC y «Vista > Centrar vista».
-5. Revisar pruebas Rust del estado del gesto y botones por defecto; Cargo fmt, clippy, test, release, rendimiento con STL grande, DPI y MSAA.

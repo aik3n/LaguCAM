@@ -1,8 +1,6 @@
 # Bibliotecas de herramientas, máquinas y postprocesadores
 
-## Identificador único de herramienta 019
-Las fresas de `tools.json`, las operaciones del proyecto y la persistencia `.lagucam` v2 comparten `tools::model::ToolId`, un alias de `String` que representa un UUID. Se valida mediante una única función y se conserva el valor exacto en cada referencia; no se copian geometrías ni se asignan números T. La falta de herramienta en la biblioteca aún no se comprueba en esta fase, porque no existe selección/resolución de herramienta por operación.
-**Estado:** diseño funcional acordado con componentes aún pendientes · **Fecha:** 2026-11-14
+**Estado:** herramientas implementadas en código, máquinas y post pendientes · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Fecha:** 2026-11-14
 
 Las capturas de DeskProto compartidas por el usuario son **referencias funcionales**, no instrucciones de copiar su diseño ni prueba de que sus valores sean capacidades certificadas de una máquina.
 
@@ -18,11 +16,11 @@ Las capturas de DeskProto compartidas por el usuario son **referencias funcional
 
 ## 2. Biblioteca de herramientas — UX
 
-Una colección permanente de herramientas, **sin carpetas obligatorias**. Se podrá buscar y filtrar por nombre, geometría, diámetro; favoritas y recientes son mejoras recomendadas. La operación abrirá un selector ágil, preferentemente con herramientas que el algoritmo acepte, sin esconder compatibilidades relevantes.
+Una colección permanente de herramientas, **sin carpetas obligatorias**. **Ya se puede buscar y filtrar** por nombre, geometría y diámetro; favoritas y recientes son mejoras recomendadas. La operación abrirá un selector ágil, preferentemente con herramientas que el algoritmo acepte, sin esconder compatibilidades relevantes.
 
-El editor completo tendrá: **lista/selector, propiedades y dibujo técnico parametrizado del perfil**. Debe actualizar la vista previa con los datos reales y mostrar cotas, no inventar geometría aproximada no declarada.
+El editor implementado tiene **lista/filtros, propiedades y dibujo técnico parametrizado del perfil**. Debe actualizar la vista previa con los datos reales y mostrar cotas, no inventar geometría aproximada no declarada.
 
-Operaciones previstas: crear, copiar, editar, eliminar/archivar, buscar, elegir, y comprobar referencias desde proyectos. Identidad estable de herramienta y revisión o snapshot.
+Ya se implementaron crear, duplicar, editar, eliminar, buscar y ordenar; el selector desde operaciones y la resolución de referencias son pendientes. La identidad UUID y revisión existen; no hay snapshot persistente en proyecto.
 
 ### Geometrías candidatas iniciales
 
@@ -32,7 +30,7 @@ Operaciones previstas: crear, copiar, editar, eliminar/archivar, buscar, elegir,
 4. Cónica con punta plana.
 5. Cónica con punta esférica.
 
-**Pendiente de cerrar** la lista exacta. Fresa toroidal (*bull nose* / radio de esquina) y «esférica con punta plana» se contemplan para el futuro; no deben confundirse entre sí.
+Los cinco tipos ya están implementados en el modelo actual; la aceptación geométrica como superficie exacta CAM permanece pendiente. Fresa toroidal (*bull nose* / radio de esquina) y «esférica con punta plana» se contemplan para el futuro; no deben confundirse entre sí.
 
 ### Campos conceptuales
 
@@ -47,7 +45,7 @@ Precisar si el ángulo cónico es **total** o **semiángulo respecto al eje**. N
 
 ### Reutilización por proyecto
 
-Cada operación futura referenciará directamente el **UUID de una herramienta de la biblioteca global**, sin copia de geometría, RPM ni avances en el proyecto. Las propiedades actuales de esa herramienta se resolverán al usarla. Si el UUID no existe, la operación mostrará un error y no podrá calcularse. Una modificación de la fresa invalida cualquier trayectoria anterior dependiente; nunca se reutilizará G-code obsoleto.
+**Decisión D-024:** la operación apunta directamente al UUID de la **biblioteca global**. No guarda instantáneas persistentes de fresa en el proyecto. Cuando haya CAM, el cálculo tomará una captura **temporal e inmutable** y la futura trayectoria deberá registrar huella geométrica y dependencias. Cualquier cambio relevante exige comprobar su vigencia antes de reutilizar/exportar el resultado.
 
 ## 3. Biblioteca de máquinas
 
@@ -86,26 +84,25 @@ La configuración real de FluidNC y del firmware debe documentarse antes de gene
 
 ## 5. Biblioteca y configuración del proyecto
 
-El proyecto `.lagucam` ya existe. Cuando haya operaciones CAM, cada una registrará únicamente el UUID de su herramienta en la biblioteca global; no incluirá copias ocultas de sus dimensiones ni de sus parámetros tecnológicos. Si una herramienta cambia o desaparece, la operación requerirá revisión o recálculo. No reutilizar automáticamente G-code anterior.
+El proyecto `.lagucam` **v2** existe y sus operaciones admiten ya una referencia UUID textual a la biblioteca global. **No se guardarán copias editables de fresa.** Las trayectorias futuras registrarán huella y dependencias para evitar resultados obsoletos. Se puede seleccionar otra máquina en el futuro, pero no reutilizar automáticamente un G-code previamente emitido sin recomprobación.
 
 La decisión de permitir varias máquinas por proyecto está abierta. La propuesta inicial fue una sola máquina por proyecto; no se ha ratificado.
 
-## 6. Primera biblioteca global: convención geométrica implementada
 
-**Alcance:** los cinco tipos solicitados para esta entrega, sin añadir toroidales ni funciones CAM. Todas las cotas están en milímetros y se almacenan como `f64`. Se mide `z` desde el extremo inferior de la herramienta hacia el mango; la punta comienza en `z = 0`. El diámetro de corte es el **máximo diámetro del tramo cortante**, no el del mango.
+## 6. Estado de la biblioteca global en `f1e436b`
 
-| Geometría | Parámetros de corte | Perfil geométrico |
-| --- | --- | --- |
-| Plana | Ø de corte, longitud de corte | Cilindro cortante con extremo plano |
-| Esférica | Ø de corte, longitud de corte | Hemisferio de radio Ø/2, seguido de cilindro cortante |
-| Cónica en V | Ø máximo de corte, **ángulo total** | Cono con ápice matemático en z=0, hasta Ø máximo |
-| Cónica con punta plana | Ø máximo, Ø de punta plana, **ángulo total** | Disco frontal plano y flanco cónico hasta Ø máximo |
-| Cónica con punta esférica | Ø máximo, **radio R de una esfera de punta**, **ángulo total** | Casquete esférico unido tangencialmente al flanco cónico; no es un radio toroidal |
+- **Implementado:** `tools/model.rs` contiene cinco variantes, con geometría en `f64`; `tools/storage.rs` guarda biblioteca versionada (`tools.json`, versión 1). `tools_ui.rs` ofrece editor/filtros y `tools_profile.rs` dibuja el perfil técnico. En `f1e436b`, `ToolId = String` comparte UUID entre biblioteca, operaciones y persistencia `.lagucam` v2.
+- **Portabilidad:** `config/tools.json` vive en la carpeta `config/` **junto al ejecutable**, no en AppData.
+- **Semántica:** longitud total de la fresa desde punta a extremo de mango representado **no significa** salida de pinza. No se ha modelado el portaherramientas ni la colisión real.
+- **Geometrías:** plana; esférica (radio Ø/2); V con ángulo **incluido total**; cónica de punta plana; cónica de punta esférica mediante casquete tangente a flanco cónico. No confundir el perfil 2D discretizado con una solución geométrica exacta para CAM.
+- **No implementado:** selección por operación, resolución de UUID ausente, hash geométrico, trayectorias.
 
-Para cada cono, α = ángulo total/2 (semiángulo respecto al eje). Si R es el radio de la punta esférica, la tangencia sucede en `r = R cos α` y `z = R(1 − sin α)`. Desde esa tangencia el radio crece como `tan α` por unidad axial. El radio máximo `D/2` debe exceder `R cos α`, y la longitud cortante debe alcanzar la altura necesaria. Para la punta plana, la altura cónica es `(D − d_punta)/(2 tan α)`; para V pura es `D/(2 tan α)`. Si sobra longitud de corte, se representa un tramo cilíndrico cortante a Ø máximo.
+## 7. Huella de herramienta: definición aceptada, implementación pendiente
 
-La parte no cortante se modela inicialmente con **diámetro de mango** y **longitud total** desde la punta axial hasta el extremo superior del mango representado. Debe ser mayor o igual a la longitud cortante. **No es la salida de pinza** y no modela el portaherramientas. Los registros anteriores con `free_length_mm` se leen sin alterar su número y pasan a `total_length_mm` al guardar; revisar esas longitudes si se introdujeron como salida de pinza. No se modelan cuello estrechado ni portaherramientas; se añadirán antes de evaluar colisiones. RPM, avance y número de filos son opcionales.
+**SHA-256** sobre una codificación **binaria canónica y versionada** de la geometría efectiva, no sobre el JSON de presentación.
 
-El archivo global portable está en `config/tools.json`, junto al ejecutable, en Windows, Linux y macOS (salvo restricciones de distribución del sistema). Esquema versión 1; UUIDv4 y revisión de herramienta permiten identificar cambios y marcar resultados como obsoletos. No se crean instantáneas de herramienta en los proyectos.
+| Incluir | Excluir |
+| --- | --- |
+| Tipo; diámetros, radios, ángulos; longitud de corte; diámetro de mango; longitud total; futuras cotas físicas relevantes | UUID, revisión, nombre, notas, referencia comercial, RPM y avances recomendados |
 
-Esta convención corresponde a la primera implementación solicitada; no implica aprobar automáticamente decisiones abiertas ni certificar contactos o colisiones.
+Dos geometrías idénticas deben producir el mismo hash incluso con revisiones distintas. En la secuencia **Ø6 → Ø4 → Ø6**, el hash podrá volver al original si se restablecen todos los parámetros pertinentes. Modificar el nombre no debe provocar recálculo geométrico; cambiar feeds/speeds puede exigir regenerar G-code. La igualdad de huella de herramienta, por sí sola, **no demuestra vigencia de una trayectoria**: habrá que contrastar geometría fuente, bruto, origen, estrategia y versión de cálculo. Ninguna de estas verificaciones CAM existe todavía.

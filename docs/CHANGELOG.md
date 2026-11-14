@@ -1,61 +1,18 @@
 # Historial de LaguCAM
 
-## Ajuste 019 — ToolId UUID compartido (sin commit)
-- `src/tools/model.rs` define `ToolId = String` para el UUID de herramienta y una validación de formato reutilizable; `Tool`, `ToolLibrary::add`, `Operation` y `SavedOperation` comparten el mismo alias.
-- El proyecto guarda `tool_id` como cadena UUID o `null`, sin convertir a un identificador numérico ni almacenar copias de fresas.
-- El esquema `.lagucam` pasa de versión 1 a 2: los documentos antiguos se rechazan explícitamente; no hay migración en esta etapa de desarrollo.
-- Se añaden pruebas de ida/vuelta JSON, UUID incorrecto, identificador numérico antiguo y versión anterior.
-- Sin cambios en OpenGL, importador STL, trayectorias CAM, interfaz ni biblioteca física de herramientas.
-- Base verificada: `599ca50eec0c6a716d9bd5ffdf7511c35d94df7d`. Compilación y pruebas Cargo: pendientes de ejecutar con el instalador en Windows.
-## Ajuste 018 — Pulido visual del docking
-- Se retira el botón «Posición». Los paneles acoplados tienen asa de seis puntos dibujada por egui y cabecera compacta.
-- Al arrastrar un panel acoplado aparece su silueta flotante translúcida, siguiendo el cursor. Los paneles ya flotantes mantienen el arrastre por su barra nativa.
-- Las cuatro guías son pictogramas geométricos sin los textos «ARRIBA» y «ABAJO». El destino seleccionado y la región final se resaltan con el acento correspondiente al tema Claro/Oscuro.
-- Se mantiene el docking a ambos laterales, orden superior/inferior, tamaños, `config/panels.json`, los tests de acoplamiento y Vista > Restablecer paneles.
-- Sin cambios a navegación 3D, geometría, herramientas, configuraciones portables o proyectos.
-- Validación Cargo y prueba gráfica: a ejecutar en Windows con el instalador; no verificadas aquí.
-## Ajuste 017 — Portable por defecto y temas claro/oscuro
-- `config/settings.json`, `config/panels.json` y `config/tools.json` se ubican junto al ejecutable (en desarrollo: junto a `target/release/cam-libre-visor.exe`).
-- Herramientas > Opciones… permite seleccionar tema Claro u Oscuro, sin reiniciar; Oscuro es el predeterminado.
-- Apariencia centralizada, con paletas grafito y gris claro y acentos azules. El fondo del visor OpenGL permanece igual.
-- Se descartan las ubicaciones antiguas en AppData/HOME sin migración ni borrado, por decisión expresa del responsable durante desarrollo.
-- `portable.rs` proporciona rutas comunes y reemplazo seguro para configuraciones; la biblioteca conserva su guardado transaccional existente.
-- No se alteran proyectos `.lagucam`, geometría, origen CNC, importación STL, navegación o cálculo CAM.
-- Compilación y verificación gráfica en Windows pendientes de ejecutar por el usuario.
-## Ajuste 016 — Acoplamiento directo con guías visuales (sin commit)
-- Arrastrar por la cabecera de Proyecto o Propiedades muestra cuatro guías de acoplamiento y la previsualización del lugar de destino.
-- Soltar cerca del borde izquierdo/derecho acopla el panel en la mitad superior/inferior. Soltar en el centro convierte un panel acoplado en flotante.
-- Las ventanas flotantes usan su propia barra de título para moverlas y acoplarlas; redimensionar o editar su contenido no las acopla por accidente.
-- Se conserva el menú Posición como alternativa, los divisores, los tamaños, el archivo `panels.json` existente y Vista > Restablecer paneles.
-- Sin dependencias nuevas y sin cambios en el visor OpenGL, el importador STL, `.lagucam`, los ejes CNC o la biblioteca de herramientas.
-- Validación Cargo y prueba gráfica mediante el instalador en Windows, no realizadas aquí.
-## Ajuste 015 — Paneles acoplables y flotantes (sin commit)
-- Proyecto y Propiedades son dos paneles independientes. Inicialmente se apilan en el lateral izquierdo, con divisor vertical y dimensiones no dependientes del contenido.
-- Se pueden acoplar a izquierda o derecha, desacoplar mediante Posición, arrastrar una ventana flotante hasta un borde para acoplarla, redimensionar y cambiar su orden vertical.
-- Se guarda la disposición de usuario en `panels.json`, fuera del proyecto `.lagucam`; el menú Vista permite Restablecer paneles.
-- La carga/cancelación de modelos y el indicador de cambios pasan a una barra de estado, manteniendo sus acciones.
-- No se modifica la importación de STL, la geometría, el sistema CNC ni las herramientas.
-- Validaciones Cargo y prueba gráfica: se realizan en Windows mediante este instalador; no se afirma que se hayan ejecutado previamente.
-## Ajuste 014 — Abrir modelo desde Propiedades (sin commit)
-- En proyectos sin modelo, Propiedades > Modelo ofrece el boton «Abrir modelo…».
-- El panel devuelve la solicitud a `App`; se usa el flujo existente `file_dialog` / `FileAction::OpenStl`, con las mismas protecciones de cambios sin guardar.
-- El nombre del boton es generico, pero el importador actual admite STL binario; no se han incorporado otros formatos.
-- Sin cambios en navegacion 3D, pivote, origen CNC, biblioteca de herramientas ni `.lagucam`.
-- Validacion del instalador con Cargo y comprobacion grafica: pendientes de ejecutar en Windows.
-## Ajuste 008 v6 — Perfil siempre visible y longitud total (sin nuevo commit)
-- Perfil técnico permanente en Herramientas, con esquema **sin escala** cuando no hay medidas.
-- Campo de longitud total desde la punta al final del mango representado. Prueba de persistencia migrada al nuevo nombre.
-- Compatibilidad de lectura con `free_length_mm`; revisar los datos históricos si eran salidas de pinza.
-- Sin cambio de importador STL, OpenGL, operaciones ni `.lagucam`.
-- Compilación y prueba gráfica pendientes del equipo Windows.
+## Documentación consolidada — 14-11-2026, sin commit remoto
 
-## 2026-11-14 — Biblioteca global de herramientas, primera implementación (sin commit)
+- **Base de código inspeccionada:** [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee), «ajuste htas».
+- Documentados lector STL grande, persistencia `.lagucam` v2, cinco geometrías de fresas, UUID global, configuración portable, docking y temas.
+- Incluidas las decisiones D-024–D-032 registradas en el desarrollo, D-033 (sin compatibilidad obligatoria durante desarrollo) y D-034 (huella geométrica SHA-256: aceptada pero **sin código**).
+- Corrección de afirmaciones históricas del README sobre límite del STL y CI. Documentación y pruebas **no se han publicado/ejecutado** en esta preparación local.
 
-- **Base:** `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f`.
-- Cinco tipos de fresa con perfiles geométricos `f64` y validación; ID UUID y revisión; biblioteca global JSON versionada con sustitución segura; UI de listado, filtros, editor y dibujo técnico.
-- Sin modificación de STL, renderizador o proyectos `.lagucam` existentes. No se asigna número T ni herramientas a operaciones.
-- **Pruebas:** el instalador ejecuta `fmt`, `clippy`, `test`, `build --release` en el equipo Windows; resultados pendientes de su ejecución. No hay validación gráfica ni benchmark de STL grande en esta entrega.
-- **Documentos actualizados:** LIBRARIES, ARCHITECTURE, STATUS, REQUIREMENTS, ROADMAP, DECISIONS, CHANGELOG.
+## Ajuste 019 — UUID compartido, commit [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee)
+
+- `tools/model.rs`: `ToolId = String` y validación de UUID centralizada; `Operation` y `SavedOperation` usan ese identificador.
+- `.lagucam` pasa a **versión 2**: UUID textual o `null` para `tool_id`; documentos v1 se rechazan expresamente, comportamiento permitido durante desarrollo.
+- Pruebas de serialización, UUID incorrecto y versión antigua incluidas en el código; **no se ejecutaron aquí**. No se modificó la geometría del motor STL ni se incorporó CAM.
+
 
 Este documento resume commits y cambios visibles de la línea base. **No es un listado exhaustivo de todos los cambios**; consultar GitHub para la historia completa. No equivale a informe de pruebas ejecutadas en la revisión documental.
 
@@ -72,6 +29,16 @@ Este documento resume commits y cambios visibles de la línea base. **No es un l
 
 | SHA | Fecha UTC de commit | Mensaje y cambio relevante |
 | --- | --- | --- |
+| [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee) | 2026-11-14 | «ajuste htas»: ToolId compartido, validación UUID, `.lagucam` v2; sin migración v1 |
+| [`599ca50`](https://github.com/aik3n/LaguCAM/commit/599ca50eec0c6a716d9bd5ffdf7511c35d94df7d) | 2026-11-14 | «mejorar paneles mobiles, cerrar ui de momento»: asa visual y docking |
+| [`020016a`](https://github.com/aik3n/LaguCAM/commit/020016a0904a9e484f81accc9859d8a884061c30) | 2026-11-14 | «tema claro/oscuro»: apariencia configurable |
+| [`836cd1d`](https://github.com/aik3n/LaguCAM/commit/836cd1dd17b4588d23b72c38577c92e4b2257661) | 2026-11-14 | «ui paneles mobiles»: evolución de paneles |
+| [`cff5fc9`](https://github.com/aik3n/LaguCAM/commit/cff5fc999c7faa671371e25e82f236ec94d7e570) | 2026-11-14 | «posicion paneles»: acoplamiento de paneles |
+| [`185b99a`](https://github.com/aik3n/LaguCAM/commit/185b99a5c50b9873efb09a3bb756212f2f2cfe98) | 2026-11-14 | «mejora pibote camara»: gestos de navegación |
+| [`a1532c4`](https://github.com/aik3n/LaguCAM/commit/a1532c456173c10341715067072e303b45de9150) | 2026-11-14 | «mejora rotacion camara»: interacción orbital |
+| [`46f66fc`](https://github.com/aik3n/LaguCAM/commit/46f66fce07236e296a0c92dc27645b3b2e3e6cf8) | 2026-11-14 | «biblioteca htas»: primera biblioteca global de fresas |
+| [`1e5d586`](https://github.com/aik3n/LaguCAM/commit/1e5d5868547fb49e7d151e3d4402d9edfdd1c87f) | 2026-11-14 | «add doc»: primera documentación en repositorio |
+| [`6eb12e1`](https://github.com/aik3n/LaguCAM/commit/6eb12e156d3538b73c4d9358c0b4c108c357fc5b) | 2026-11-14 | «abrir y guardar»: persistencia inicial `.lagucam` |
 | [`0e56d3f`](https://github.com/aik3n/LaguCAM/commit/0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9) | 2026-11-14 | «puntos de origen»: marcadores de selección del cero CNC, referencias de origen y color del STL |
 | [`c482baa`](https://github.com/aik3n/LaguCAM/commit/c482baaa8b3737ef9cbf5484171331c4c10447e4) | 2026-11-14 | «definir bruto y alguna mejora»: sólido translúcido/aristas, color y opacidad, render independiente |
 | [`016c618`](https://github.com/aik3n/LaguCAM/commit/016c618957f5b4a25edfb906bd20441ae7dfae6f) | 2026-11-14 | «definir bruto»: árbol de proyecto, extras y sistema de referencia |
@@ -95,41 +62,3 @@ Documentos actualizados:
 ```
 
 La documentación se actualiza con el cambio; no añadir pruebas inexistentes ni cerrar hitos sin aceptación.
-
-## 2026-11-14 — Ajuste 009: acceso global y cielo degradado (sin commit)
-
-- Base Git: `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f`, biblioteca 008 v6 ya instalada localmente.
-- La biblioteca pasa al menú principal `Herramientas`; se elimina el nodo del árbol del proyecto, la variante de selección obsoleta y el retorno booleano del panel de proyecto.
-- Decisión D-024: operaciones futuras con referencia al UUID global, nunca snapshots ni parámetros ocultos. D-010 sustituida. No se implementan aún operaciones ni cambios de formato `.lagucam`.
-- Fondo de visor en degradado azul cielo mediante malla egui; el renderizador borra únicamente profundidad. STL grande, stock, origen y rendimiento pendientes de validación gráfica.
-- Controles Rust: el instalador ejecuta `fmt --check`, `clippy -D warnings`, `test --locked`, `build --release`; resultados por confirmar en el equipo Windows.
-
-## 2026-11-14 — Pivote visual independiente del formato (010)
-
-- **Base:** `46f66fce07236e296a0c92dc27645b3b2e3e6cf8`. Sin commit nuevo.
-- Doble clic para elegir un pivote de rotación sobre una superficie renderizada, sin leer ni alterar STL, malla, bruto, origen CNC o datos `.lagucam`.
-- Matriz de cámara compartida y servicio de consulta de profundidad 1×1 compatible con MSAA; restituye estado GL al terminar y no utiliza memoria proporcional al número de caras.
-- Pivote recuperable desde `Vista > Centrar vista` y marca discreta cuando hay pivote personalizado.
-- **Pruebas:** el instalador ejecutará fmt, clippy, test y release en el equipo del usuario; prueba funcional OpenGL y regresión STL grande pendientes.
-
-## 2026-11-14 — Pivote por clic simple sin salto (011)
-
-- Base de Git: `46f66fce07236e296a0c92dc27645b3b2e3e6cf8` con la 010 v2 instalada localmente. Sin commit automatico.
-- Sustituido doble clic por clic simple; se elige el pivote sin alterar la proyeccion actual. El siguiente arrastre orbita alrededor de ese punto y la marca se muestra donde realmente fue seleccionado.
-- Se mantiene el servicio de consulta de escena independiente de los importadores y no se modifican STL grande, bruto, origen CNC, biblioteca ni formato `.lagucam`.
-- Pruebas matematicas adicionales; compilacion, interfaz GPU y regresion de STL grande pendientes en la instalacion Windows.
-
-## 2026-11-14 — Ajuste 012: mouse down y giro inmediato
-
-- Base verificada: `a1532c456173c10341715067072e303b45de9150`. Sin nuevo commit automatico.
-- El boton izquierdo fija el pivote en la pulsacion inicial; manteniendolo pulsado se gira en el mismo gesto. El movimiento anterior al resultado de picking se conserva y se aplica despues del nuevo pivote.
-- La marca se sigue dibujando a partir del pivote persistente, sin condicion de boton pulsado. Clic en fondo: conservar pivote.
-- Sin cambios en formato `.lagucam`, STL, GPU streaming, biblioteca de fresas ni origen CNC.
-- Pruebas de estado de gesto incorporadas; Cargo y validacion grafica pendientes de Windows.
-
-## 2026-11-14 — Ajuste 013: marcador temporal de pivote
-
-- Base: 012 v2 instalada sin commit sobre HEAD `a1532c456173c10341715067072e303b45de9150`.
-- Pulsar sobre el modelo sigue seleccionando el punto de giro; el mismo gesto sigue arrastrando en torno a el. Solo cambia la visibilidad del indicador: al soltar se oculta pero el pivote permanece activo.
-- `NavigationBindings` reune los botones de orbita y desplazamiento, con valores actuales por defecto y sin introducir todavia ajustes persistentes.
-- Se agregan pruebas de ciclo de vida del indicador y mapeo por defecto. No hay cambios en CAM, STL, origen CNC, almacenamiento `.lagucam` ni herramientas.

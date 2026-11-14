@@ -2,9 +2,9 @@
 
 **Versión del documento:** 1.0 · **Fecha:** 2026-11-14  
 **Repositorio:** https://github.com/aik3n/LaguCAM  
-**Línea base revisada:** `0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9`
+**Código de referencia actual:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
 
-Este archivo orienta a cualquier chat o agente que participe en LaguCAM. Debe leerse junto a `docs/INDEX.md`, `docs/STATUS.md`, `docs/DECISIONS.md` y `docs/WORKFLOW.md`. Es una **propuesta de protocolo de colaboración** que se incorpora para revisión y adopción por el responsable del proyecto. No sustituye instrucciones de seguridad ni los requisitos de la tarea actual.
+Este archivo orienta a cualquier chat o agente que participe en LaguCAM. Debe leerse junto a `docs/INDEX.md`, `docs/STATUS.md`, `docs/DECISIONS.md` y `docs/WORKFLOW.md`. Recoge el **protocolo vigente** de colaboración aprobado para la etapa experimental. No sustituye instrucciones de seguridad ni los requisitos de la tarea actual.
 
 ## 1. Dos funciones distintas
 
@@ -48,9 +48,12 @@ Este archivo orienta a cualquier chat o agente que participe en LaguCAM. Debe le
 - Aplicación actual: Rust, `egui`/`eframe`, OpenGL mediante `glow`.
 - Uso inicial: STL topográficos de QGIS/DEMto3D, algunos cercanos a 1 GB y decenas de millones de triángulos.
 - El usuario ha logrado **abrir y mover fluidamente un STL real de casi 1 GB**. No hay benchmark cuantitativo archivado.
-- Existe árbol lateral, bruto editable y origen CNC; la persistencia de proyectos, bibliotecas de herramientas/máquinas/postprocesadores y cálculo CAM están pendientes.
+- Existen árbol lateral, bruto, origen CNC, persistencia `.lagucam` **v2**, biblioteca global de cinco geometrías de fresa, configuración portable, temas y docking de paneles. **Pendientes:** selección de herramientas por operación, cálculo CAM, máquina y postprocesadores.
 - Tres ejes al principio, herramienta paralela a Z del sistema de preparación. Sin suponer que `G54` rota por sí mismo los ejes o que `M6` gestiona cambios automáticos en FluidNC.
 - FluidNC es el **primer postprocesador objetivo**, no una dependencia del motor CAM. La máquina de pruebas cambia herramientas manualmente, otras máquinas podrán tener ATC.
+- **UUID:** biblioteca, operación y `.lagucam` v2 usan `ToolId`. La biblioteca sigue siendo la única definición editable; no hay snapshots de fresa en el proyecto.
+- **Huella SHA-256:** se han acordado los parámetros geométricos y una codificación canónica/versionada, pero la función aún **no está implementada**.
+- **Compatibilidad en desarrollo:** no se exigen migraciones ni soporte de formatos antiguos. Se documentan cambios incompatibles y nunca se borran datos personales sin autorización.
 - **No usar posiciones normalizadas de GPU (`f32`) para cálculo CAM**. Geometría y transformaciones de proyecto en `f64` según corresponda.
 
 ## 4. Inicio de tarea en el chat de desarrollo
@@ -69,3 +72,10 @@ Responder al inicio con: **objetivo entendido, límites del cambio y posibles bl
 - Documentación actualizada en el mismo cambio, siguiendo `docs/WORKFLOW.md`.
 
 **Principio rector:** el usuario dirige las prioridades; el chat de desarrollo implementa un alcance aprobado; la documentación refleja el código y las pruebas, nunca lo sustituye.
+
+## 6. Convenciones adicionales para el chat de desarrollo
+
+- Si la tarea es solo documental, no afirmar que se han ejecutado Rust, GUI o pruebas en la máquina.
+- Tratar `LAGUCAM_004.md`–`LAGUCAM_007.md` y `AUDITORIA.md` como documentos históricos; verificar siempre HEAD y `docs/STATUS.md`.
+- No convertir la decisión de SHA-256 en código sin encargo expreso. La próxima tarea acordada sería exclusivamente función de huella y tests; sin operaciones ni cambios adicionales de `.lagucam`.
+- Separar **UUID (identidad)**, **revisión (historial)**, **hash geométrico (equivalencia de forma)** y **parámetros tecnológicos/G-code (vigencia aparte)**.

@@ -1,6 +1,6 @@
 # Visión y alcance de LaguCAM
 
-**Estado:** visión acordada · **Revisión:** 2026-11-14
+**Estado:** visión acordada · **Código de referencia:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Revisión:** 2026-11-14
 
 ## 1. Propósito
 
@@ -42,3 +42,7 @@ La posible integración futura con SolidCraft **no condiciona el desarrollo actu
 Permitir seleccionar geometría, bruto, sistema de trabajo, herramientas, máquina y operaciones; calcular trayectorias verificables; obtener G-code compatible con el control seleccionado; conservar un proyecto reproducible y volver a editarlo sin pérdida de configuración.
 
 **El éxito no se mide por cantidad de pantallas, sino por trabajos reales repetibles con resultados comprobables.**
+
+## 6. Estado actual y reglas experimentales
+
+El visor ha sido probado por el usuario con STL real de casi 1 GB; existen proyectos `.lagucam` v2, una biblioteca global de fresas y UUID compartidos. **No existe todavía motor CAM ni G-code.** Durante el desarrollo se permite romper compatibilidad de esquemas para evitar migraciones prematuras, siempre documentando cambios y conservando archivos personales. Se ha acordado un hash geométrico SHA-256 para futuras trayectorias, **no implementado**.
