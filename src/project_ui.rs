@@ -7,8 +7,7 @@ use crate::project::{
 };
 use eframe::egui;
 
-pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
-    ui.heading("Proyecto");
+pub fn tree(ui: &mut egui::Ui, project: &mut Project) {
     ui.separator();
     egui::CollapsingHeader::new("LaguCAM")
         .default_open(true)
@@ -61,8 +60,10 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
                 }
             });
         });
-    ui.separator();
-    ui.heading("Propiedades");
+}
+
+pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) -> bool {
+    let mut open_model = false;
     match project.selection {
         Selection::Model => {
             if let Some(model) = &project.model {
@@ -82,7 +83,10 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
                 ui.small("El color conserva iluminación y relieve; el STL sigue opaco.");
                 ui.small("Coordenadas originales f64. STL sin unidades definidas.");
             } else {
-                ui.label("Abre un STL para iniciar el proyecto.");
+                ui.label("Abre un modelo para iniciar el proyecto.");
+                if ui.button("Abrir modelo…").clicked() {
+                    open_model = true;
+                }
             }
         }
         Selection::Stock => {
@@ -274,6 +278,7 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
     if !error.is_empty() {
         ui.colored_label(egui::Color32::RED, error.as_str());
     }
+    open_model
 }
 
 fn vector(ui: &mut egui::Ui, values: &mut [f64; 3]) -> bool {

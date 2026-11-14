@@ -80,3 +80,10 @@ La petición específica de implementar cinco geometrías autoriza el alcance de
 - **Estado:** ACEPTADA por el responsable el 2026-11-14. Sustituye solo la regla de visibilidad del marcador de D-027, no la persistencia del pivote ni el comportamiento del arrastre.
 - **Regla:** el pivote se conserva despues de soltar la accion de rotar; la marca solo es visible durante esa pulsacion. No debe depender permanentemente del boton fisico izquierdo: las asignaciones de acciones se centralizan para admitir remapeo futuro.
 - **Alcance:** la version actual conserva izquierdo=orbita, derecho/central=pan; no hay UI ni persistencia de mapeo y no se promete hasta otra decision. No se modifica origen CNC, geometria ni proyecto.
+
+## D-029 — Proyecto y Propiedades como paneles independientes
+- **Estado:** ACEPTADA por el responsable el 2026-11-14.
+- **Regla:** se mantienen Proyecto y Propiedades separados, apilados arriba/abajo por defecto; cada uno puede ser flotante o anclado a izquierda/derecha. No hace falta un docking de grupo entre sí.
+- **Tamaño:** no depende del contenido; redimensionamiento manual y scroll interno.
+- **Persistencia:** disposición global de usuario y comando Vista > Restablecer paneles, sin cambios en `.lagucam`.
+- **Implementación:** sistema liviano basado en egui existente, sin biblioteca externa de docking.

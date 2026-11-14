@@ -1,5 +1,18 @@
 # Historial de LaguCAM
 
+## Ajuste 015 — Paneles acoplables y flotantes (sin commit)
+- Proyecto y Propiedades son dos paneles independientes. Inicialmente se apilan en el lateral izquierdo, con divisor vertical y dimensiones no dependientes del contenido.
+- Se pueden acoplar a izquierda o derecha, desacoplar mediante Posición, arrastrar una ventana flotante hasta un borde para acoplarla, redimensionar y cambiar su orden vertical.
+- Se guarda la disposición de usuario en `panels.json`, fuera del proyecto `.lagucam`; el menú Vista permite Restablecer paneles.
+- La carga/cancelación de modelos y el indicador de cambios pasan a una barra de estado, manteniendo sus acciones.
+- No se modifica la importación de STL, la geometría, el sistema CNC ni las herramientas.
+- Validaciones Cargo y prueba gráfica: se realizan en Windows mediante este instalador; no se afirma que se hayan ejecutado previamente.
+## Ajuste 014 — Abrir modelo desde Propiedades (sin commit)
+- En proyectos sin modelo, Propiedades > Modelo ofrece el boton «Abrir modelo…».
+- El panel devuelve la solicitud a `App`; se usa el flujo existente `file_dialog` / `FileAction::OpenStl`, con las mismas protecciones de cambios sin guardar.
+- El nombre del boton es generico, pero el importador actual admite STL binario; no se han incorporado otros formatos.
+- Sin cambios en navegacion 3D, pivote, origen CNC, biblioteca de herramientas ni `.lagucam`.
+- Validacion del instalador con Cargo y comprobacion grafica: pendientes de ejecutar en Windows.
 ## Ajuste 008 v6 — Perfil siempre visible y longitud total (sin nuevo commit)
 - Perfil técnico permanente en Herramientas, con esquema **sin escala** cuando no hay medidas.
 - Campo de longitud total desde la punta al final del mango representado. Prueba de persistencia migrada al nuevo nombre.

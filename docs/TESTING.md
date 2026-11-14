@@ -1,5 +1,11 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Pruebas manuales del ajuste 015
+- Arrastrar una ventana flotante cerca de los bordes izquierdo/derecho y soltar para acoplarla.
+- Probar ambos paneles arriba/abajo, redimensionar separador horizontal y anchuras de cada lateral.
+- Probar posición flotante y tamaño persistentes al cerrar y volver a abrir; Vista > Restablecer paneles.
+- Probar textos largos y muchas propiedades: scroll interno sin modificación automática del tamaño.
+- Comprobar Cancelar importación y errores, Abrir modelo en proyecto vacío, origen CNC y pivote de navegación, proyecto `.lagucam` sin cambios.
 **Estado:** criterios para futuras etapas; no constituye certificación del software. **Fecha:** 2026-11-14.
 
 ## 1. Comandos de calidad de Rust

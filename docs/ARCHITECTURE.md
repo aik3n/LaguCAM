@@ -1,5 +1,8 @@
 # Arquitectura de LaguCAM
 
+## Interfaz de paneles del ajuste 015
+`src/panel_layout.rs` administra dos paneles independientes (Proyecto y Propiedades), acoplamiento lateral, apilamiento vertical, ventanas flotantes y persistencia en `panels.json` de configuración global.
+`src/project_ui.rs` separa el árbol (`tree`) de las propiedades (`properties`); la acción Abrir modelo sigue delegada en `App`. El visor 3D no conoce el layout. No se modifica el modelo del proyecto ni `.lagucam`.
 **Fotografía del código:** commit `0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9`, rama `main` al 2026-11-14.  
 **Leyenda:** [ACTUAL] verificado en archivos; [OBJETIVO] diseño acordado o propuesto, aún no implementado.
 

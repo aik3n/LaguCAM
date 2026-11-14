@@ -2,6 +2,7 @@
 
 mod navigation;
 mod overlay;
+mod panel_layout;
 mod preview;
 mod project;
 mod project_ui;
@@ -162,6 +163,7 @@ struct App {
     orbit_pivot: Option<glam::Vec3>,
     pivot_press: PivotPress,
     navigation_bindings: NavigationBindings,
+    panels: panel_layout::PanelLayout,
 }
 
 impl App {
@@ -217,6 +219,7 @@ impl App {
             orbit_pivot: None,
             pivot_press: PivotPress::default(),
             navigation_bindings: NavigationBindings::default(),
+            panels: panel_layout::PanelLayout::load(),
         };
         if let Some(path) = std::env::args_os().nth(1) {
             app.open(PathBuf::from(path), cc.egui_ctx.clone());
@@ -725,47 +728,44 @@ impl App {
                     ui.ctx().request_repaint();
                     ui.close();
                 }
+                if ui.button("Restablecer paneles").clicked() {
+                    self.panels.reset();
+                    ui.close();
+                }
             });
         });
     }
-    // LaguCAM 003: panel limpio. El arbol y sus propiedades son la vista principal.
-    fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_enabled_ui(!self.busy(), |ui| {
-            project_ui::show(ui, &mut self.project, &mut self.property_error);
-        });
-        if let Some(path) = &self.project_path {
-            ui.small(format!("Proyecto: {}", path.display()));
-        }
-        if self.is_dirty() {
-            ui.colored_label(egui::Color32::YELLOW, "Cambios sin guardar");
-        }
-        // Progreso y cancelacion solo mientras se importa. Se conserva el flujo STL original.
-        if self.busy() {
-            ui.separator();
-            if let Some(name) = &self.pending_filename {
-                ui.label(format!("Importando: {name}"));
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            if let Some(path) = &self.project_path {
+                ui.small(format!("Proyecto: {}", path.display()));
             }
-            if ui.button("Cancelar importación").clicked() {
-                self.cancel.store(true, Ordering::Relaxed);
-                self.renderer.lock().abort_upload();
-                if self.receiving.is_none() {
-                    self.pending_success = None;
-                    self.pending_filename = None;
-                    self.message = stl::CANCELLED.into();
-                } else {
-                    self.message = "Cancelando importación...".into();
+            if self.is_dirty() {
+                ui.colored_label(egui::Color32::YELLOW, "Cambios sin guardar");
+            }
+            if self.busy() {
+                if let Some(name) = &self.pending_filename {
+                    ui.label(format!("Importando: {name}"));
                 }
+                let fraction = self.progress.load(Ordering::Relaxed) as f32 / 100.0;
+                ui.add(egui::ProgressBar::new(fraction.min(0.99)).show_percentage());
+                ui.small(&self.message);
+                if ui.button("Cancelar importación").clicked() {
+                    self.cancel.store(true, Ordering::Relaxed);
+                    self.renderer.lock().abort_upload();
+                    if self.receiving.is_none() {
+                        self.pending_success = None;
+                        self.pending_filename = None;
+                        self.message = stl::CANCELLED.into();
+                    } else {
+                        self.message = "Cancelando importación...".into();
+                    }
+                }
+            } else if self.message.starts_with("ERROR") {
+                ui.colored_label(egui::Color32::RED, &self.message);
             }
-            let fraction = self.progress.load(Ordering::Relaxed) as f32 / 100.0;
-            ui.add(egui::ProgressBar::new(fraction.min(0.99)).show_percentage());
-            ui.label(&self.message);
-        } else if self.message.starts_with("ERROR") {
-            // No ocultar errores de importacion ni de GPU tras limpiar el panel.
-            ui.separator();
-            ui.colored_label(egui::Color32::RED, &self.message);
-        }
+        });
     }
-
     fn viewport(&mut self, ui: &mut egui::Ui) {
         // El indicador sigue la accion de orbita, no un boton fisico fijo.
         // Si se suelta incluso fuera de la vista, desaparece en el siguiente frame.
@@ -969,16 +969,28 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll(ui.ctx());
         egui::Panel::top("main_menu").show(ui, |ui| self.menu(ui));
-        // SidePanel y CentralPanel ocupan toda la altura disponible, a diferencia
-        // de un horizontal cuyo alto se ajustaba al contenido de la barra lateral.
-        egui::Panel::left("stl_sidebar")
-            .resizable(true)
-            .default_size(290.0)
-            .min_size(220.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.sidebar(ui));
-            });
+        if self.busy()
+            || self.is_dirty()
+            || self.project_path.is_some()
+            || self.message.starts_with("ERROR")
+        {
+            egui::Panel::top("lagucam_status").show(ui, |ui| self.status_bar(ui));
+        }
+        let enabled = !self.busy();
+        let open_docked =
+            self.panels
+                .show_docked(ui, &mut self.project, &mut self.property_error, enabled);
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui));
+        let open_floating = self.panels.show_floating(
+            ui.ctx(),
+            &mut self.project,
+            &mut self.property_error,
+            enabled,
+        );
+        if open_docked || open_floating {
+            self.file_dialog(ui.ctx().clone());
+        }
+        self.panels.save_if_needed(ui.ctx());
         if ui.ctx().input(|i| i.viewport().close_requested())
             && !self.exit_approved
             && self.is_dirty()
@@ -999,6 +1011,7 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {
+        self.panels.save();
         self.cancel.store(true, Ordering::Relaxed);
         self.receiving = None;
         if let Some(gl) = gl {
