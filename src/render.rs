@@ -19,6 +19,7 @@ pub struct Render3d {
     pending: Option<PreviewMesh>,
     finishing: bool,
     aborting: bool,
+    clear_requested: bool,
     completed: bool,
     error: Option<String>,
 }
@@ -104,6 +105,7 @@ void main() {
                 pending: None,
                 finishing: false,
                 aborting: false,
+                clear_requested: false,
                 completed: false,
                 error: None,
             })
@@ -131,6 +133,12 @@ void main() {
     pub fn finish_upload(&mut self) {
         self.finishing = true;
     }
+    /// Nuevo proyecto: se retiran los VBO solamente dentro del callback GL.
+    pub fn clear_scene(&mut self) {
+        self.abort_upload();
+        self.clear_requested = true;
+    }
+
     pub fn abort_upload(&mut self) {
         self.aborting = true;
         self.pending = None;
@@ -154,6 +162,12 @@ void main() {
         pan: Vec3,
     ) {
         unsafe {
+            if self.clear_requested {
+                for chunk in self.active.drain(..) {
+                    gl.delete_buffer(chunk.buffer);
+                }
+                self.clear_requested = false;
+            }
             if self.aborting {
                 for chunk in self.staging.drain(..) {
                     gl.delete_buffer(chunk.buffer);

@@ -2,6 +2,7 @@ pub mod display;
 pub mod model;
 pub mod operations;
 pub mod origin;
+pub mod persistence;
 pub mod selection;
 pub mod stock;
 

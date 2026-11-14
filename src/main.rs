@@ -11,6 +11,7 @@ mod stock_render;
 use eframe::{egui, egui_glow, glow};
 use egui::mutex::Mutex;
 use preview::LoadEvent;
+use project::persistence;
 use std::{
     path::PathBuf,
     sync::{
@@ -26,11 +27,34 @@ struct PendingSuccess {
     time_seconds: f32,
 }
 
+struct OpeningProject {
+    document: persistence::ProjectDocument,
+    path: PathBuf,
+    relocated: bool,
+    warning: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum FileAction {
+    New,
+    OpenProject,
+    OpenStl,
+    Exit,
+}
+
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
     project: project::Project,
     property_error: String,
+    project_path: Option<PathBuf>,
+    current_stl_path: Option<PathBuf>,
+    pending_stl_path: Option<PathBuf>,
+    opening_project: Option<OpeningProject>,
+    saved_state: Option<persistence::ProjectState>,
+    pending_action: Option<FileAction>,
+    ask_unsaved: bool,
+    exit_approved: bool,
     receiving: Option<Receiver<LoadEvent>>,
     progress: Arc<AtomicU32>,
     cancel: Arc<AtomicBool>,
@@ -60,6 +84,16 @@ impl App {
             stock_renderer: Arc::new(Mutex::new(stock_renderer)),
             project: project::Project::default(),
             property_error: String::new(),
+            project_path: None,
+            current_stl_path: None,
+            pending_stl_path: None,
+            opening_project: None,
+            saved_state: Some(persistence::ProjectState::capture(
+                &project::Project::default(),
+            )),
+            pending_action: None,
+            ask_unsaved: false,
+            exit_approved: false,
             receiving: None,
             progress: Arc::new(AtomicU32::new(0)),
             cancel: Arc::new(AtomicBool::new(false)),
@@ -83,9 +117,20 @@ impl App {
     }
 
     fn open(&mut self, path: PathBuf, ctx: egui::Context) {
+        self.open_with_context(path, ctx, None);
+    }
+
+    fn open_with_context(
+        &mut self,
+        path: PathBuf,
+        ctx: egui::Context,
+        opening: Option<OpeningProject>,
+    ) {
         if self.busy() {
             return;
         }
+        self.opening_project = opening;
+        self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
         self.pending_filename = Some(
             path.file_name()
@@ -109,6 +154,8 @@ impl App {
         if let Err(error) = worker {
             self.receiving = None;
             self.pending_filename = None;
+            self.pending_stl_path = None;
+            self.opening_project = None;
             self.renderer.lock().abort_upload();
             self.message = format!("No se pudo iniciar la importación: {error}");
         }
@@ -129,17 +176,44 @@ impl App {
             self.renderer.lock().abort_upload();
             self.pending_success = None;
             self.pending_filename = None;
+            self.pending_stl_path = None;
+            self.opening_project = None;
             self.message = format!("ERROR GPU: {error}. Se conserva el modelo anterior.");
         }
         if completed {
             if let Some(success) = self.pending_success.take() {
                 self.filename = self.pending_filename.take().unwrap_or_default();
-                self.project.loaded(self.filename.clone(), success.info);
+                self.current_stl_path = self.pending_stl_path.take();
+                if let Some(opening) = self.opening_project.take() {
+                    // Se ha validado el estado y los límites antes del commit GPU.
+                    let project = opening
+                        .document
+                        .state
+                        .restore(self.filename.clone(), Some(success.info))
+                        .expect("Proyecto verificado antes de finalizar subida GPU");
+                    self.project = project;
+                    self.saved_state = if opening.relocated {
+                        None // Permite guardar la nueva ruta del STL.
+                    } else {
+                        Some(persistence::ProjectState::capture(&self.project))
+                    };
+                    self.project_path = Some(opening.path);
+                    self.message = match opening.warning {
+                        Some(warning) => {
+                            format!("Proyecto recuperado: {}. {warning}", self.filename)
+                        }
+                        None => format!("Proyecto recuperado correctamente: {}", self.filename),
+                    };
+                } else {
+                    self.project.loaded(self.filename.clone(), success.info);
+                    self.project_path = None;
+                    self.saved_state = None;
+                    self.message = format!(
+                        "STL cargado (CPU {:.1} s). Guarda un proyecto para conservar la configuración.",
+                        success.time_seconds
+                    );
+                }
                 self.property_error.clear();
-                self.message = format!(
-                    "STL cargado completamente (lectura y preparación CPU: {:.1} s)",
-                    success.time_seconds
-                );
                 self.center_view();
             }
         }
@@ -154,10 +228,33 @@ impl App {
                     }
                     Ok(LoadEvent::Finished { info, time_seconds }) => {
                         self.receiving = None;
-                        if self.cancel.load(Ordering::Relaxed) {
+                        // Se valida antes de finish_upload(); la malla anterior sigue activa.
+                        let validation_error = self.opening_project.as_ref().and_then(|opening| {
+                            opening.document.check_loaded(info).err().or_else(|| {
+                                opening
+                                    .document
+                                    .state
+                                    .restore(
+                                        self.pending_filename.clone().unwrap_or_default(),
+                                        Some(info),
+                                    )
+                                    .err()
+                            })
+                        });
+                        let cancelled = self.cancel.load(Ordering::Relaxed);
+                        if cancelled || validation_error.is_some() {
                             self.renderer.lock().abort_upload();
                             self.pending_filename = None;
-                            self.message = stl::CANCELLED.into();
+                            self.pending_stl_path = None;
+                            self.opening_project = None;
+                            self.message = if cancelled {
+                                stl::CANCELLED.into()
+                            } else {
+                                format!(
+                                    "ERROR: {}. Se conserva el proyecto anterior.",
+                                    validation_error.unwrap_or_default()
+                                )
+                            };
                         } else {
                             self.pending_success = Some(PendingSuccess { info, time_seconds });
                             self.renderer.lock().finish_upload();
@@ -168,6 +265,8 @@ impl App {
                         self.receiving = None;
                         self.renderer.lock().abort_upload();
                         self.pending_filename = None;
+                        self.pending_stl_path = None;
+                        self.opening_project = None;
                         if !self.message.starts_with("ERROR GPU:") {
                             self.message = if error == stl::CANCELLED {
                                 error
@@ -180,6 +279,8 @@ impl App {
                         self.receiving = None;
                         self.renderer.lock().abort_upload();
                         self.pending_filename = None;
+                        self.pending_stl_path = None;
+                        self.opening_project = None;
                         self.message = "ERROR: se interrumpió la lectura".into();
                     }
                     Err(mpsc::TryRecvError::Empty) => {}
@@ -199,6 +300,164 @@ impl App {
     }
 
     fn file_dialog(&mut self, ctx: egui::Context) {
+        self.request_action(FileAction::OpenStl, ctx);
+    }
+    fn is_dirty(&self) -> bool {
+        let current = persistence::ProjectState::capture(&self.project);
+        match &self.saved_state {
+            Some(saved) => *saved != current,
+            None => self.project.model.is_some() || !self.project.operations.items.is_empty(),
+        }
+    }
+
+    fn request_action(&mut self, action: FileAction, ctx: egui::Context) {
+        if self.busy() {
+            return;
+        }
+        if self.is_dirty() {
+            self.pending_action = Some(action);
+            self.ask_unsaved = true;
+        } else {
+            self.execute_action(action, ctx);
+        }
+    }
+
+    fn execute_action(&mut self, action: FileAction, ctx: egui::Context) {
+        match action {
+            FileAction::New => {
+                self.renderer.lock().clear_scene();
+                self.project = project::Project::default();
+                self.saved_state = Some(persistence::ProjectState::capture(&self.project));
+                self.current_stl_path = None;
+                self.project_path = None;
+                self.filename = "Ningún STL abierto".into();
+                self.message = "Nuevo proyecto sin guardar".into();
+                self.property_error.clear();
+                self.center_view();
+            }
+            FileAction::OpenProject => self.open_project_dialog(ctx),
+            FileAction::OpenStl => self.file_dialog_raw(ctx),
+            FileAction::Exit => {
+                self.exit_approved = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    fn save_project(&mut self, save_as: bool) -> bool {
+        if self.busy() {
+            self.message = "ERROR: espera a que finalice la importación STL".into();
+            return false;
+        }
+        let target = if !save_as {
+            self.project_path.clone()
+        } else {
+            None
+        };
+        let target = match target {
+            Some(path) => path,
+            None => {
+                let mut dialog =
+                    rfd::FileDialog::new().add_filter("Proyecto LaguCAM", &["lagucam"]);
+                if let Some(stl) = &self.current_stl_path
+                    && let Some(stem) = stl.file_stem().and_then(|v| v.to_str())
+                {
+                    dialog = dialog.set_file_name(format!("{stem}.lagucam"));
+                }
+                let Some(path) = dialog.save_file() else {
+                    return false;
+                };
+                if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("lagucam"))
+                {
+                    path
+                } else {
+                    path.with_extension("lagucam")
+                }
+            }
+        };
+        let result = (|| -> Result<(), String> {
+            let doc = persistence::ProjectDocument::from_project(
+                &self.project,
+                self.current_stl_path.as_deref(),
+                &target,
+            )?;
+            persistence::write_project(&target, &doc)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.project_path = Some(target.clone());
+                self.saved_state = Some(persistence::ProjectState::capture(&self.project));
+                self.message = format!("Proyecto guardado: {}", target.display());
+                true
+            }
+            Err(error) => {
+                self.message = format!("ERROR al guardar proyecto: {error}");
+                false
+            }
+        }
+    }
+
+    fn open_project_dialog(&mut self, ctx: egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Proyecto LaguCAM", &["lagucam"])
+            .pick_file()
+        else {
+            return;
+        };
+        let result = (|| -> Result<(), String> {
+            let doc = persistence::read_project(&path)?;
+            let Some(mut stl_path) = doc.resolve_stl(&path) else {
+                let restored = doc.state.restore(String::new(), None)?;
+                self.renderer.lock().clear_scene();
+                self.project = restored;
+                self.project_path = Some(path.clone());
+                self.current_stl_path = None;
+                self.saved_state = Some(persistence::ProjectState::capture(&self.project));
+                self.filename = "Ningún STL abierto".into();
+                self.property_error.clear();
+                self.message = format!("Proyecto abierto: {}", path.display());
+                return Ok(());
+            };
+            // Si la referencia se perdió o difiere, no importar un STL equivocado.
+            // Ofrecemos localizarlo y volvemos a verificar las muestras.
+            let warning = if doc.check_stl(&stl_path).is_err() {
+                let Some(located) = rfd::FileDialog::new()
+                    .set_title("STL no encontrado o diferente: selecciona el original")
+                    .add_filter("STL binario", &["stl"])
+                    .pick_file()
+                else {
+                    return Err("No se seleccionó el STL original".into());
+                };
+                let warning = doc.check_stl(&located)?;
+                stl_path = located;
+                warning
+            } else {
+                doc.check_stl(&stl_path)?
+            };
+            let relocated = doc.resolve_stl(&path).as_deref() != Some(stl_path.as_path());
+            // El estado anterior permanece activo hasta confirmar carga y metadatos.
+            self.open_with_context(
+                stl_path,
+                ctx,
+                Some(OpeningProject {
+                    document: doc,
+                    path,
+                    relocated,
+                    warning,
+                }),
+            );
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.message = format!("ERROR al abrir proyecto: {error}");
+        }
+    }
+
+    fn file_dialog_raw(&mut self, ctx: egui::Context) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("STL binario", &["stl"])
             .pick_file()
@@ -207,15 +466,96 @@ impl App {
         }
     }
 
+    fn unsaved_dialog(&mut self, ctx: &egui::Context) {
+        if !self.ask_unsaved {
+            return;
+        }
+        let mut choice: Option<u8> = None;
+        egui::Window::new("Cambios sin guardar")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label("Este proyecto contiene modificaciones sin guardar.");
+                ui.label("¿Quieres guardarlas antes de continuar?");
+                ui.horizontal(|ui| {
+                    if ui.button("Guardar").clicked() {
+                        choice = Some(0);
+                    }
+                    if ui.button("Descartar").clicked() {
+                        choice = Some(1);
+                    }
+                    if ui.button("Cancelar").clicked() {
+                        choice = Some(2);
+                    }
+                });
+            });
+        match choice {
+            Some(0) => {
+                if self.save_project(false) {
+                    self.ask_unsaved = false;
+                    if let Some(action) = self.pending_action.take() {
+                        self.execute_action(action, ctx.clone());
+                    }
+                }
+            }
+            Some(1) => {
+                self.ask_unsaved = false;
+                if let Some(action) = self.pending_action.take() {
+                    self.execute_action(action, ctx.clone());
+                }
+            }
+            Some(2) => {
+                self.ask_unsaved = false;
+                self.pending_action = None;
+            }
+            _ => {}
+        }
+    }
     fn menu(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("Archivo", |ui| {
+                let enabled = !self.busy();
                 if ui
-                    .add_enabled(!self.busy(), egui::Button::new("Abrir STL…"))
+                    .add_enabled(enabled, egui::Button::new("Nuevo proyecto"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.request_action(FileAction::New, ui.ctx().clone());
+                }
+                if ui
+                    .add_enabled(enabled, egui::Button::new("Abrir proyecto…"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.request_action(FileAction::OpenProject, ui.ctx().clone());
+                }
+                if ui
+                    .add_enabled(enabled, egui::Button::new("Guardar proyecto"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.save_project(false);
+                }
+                if ui
+                    .add_enabled(enabled, egui::Button::new("Guardar proyecto como…"))
+                    .clicked()
+                {
+                    ui.close();
+                    self.save_project(true);
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(enabled, egui::Button::new("Abrir STL…"))
                     .clicked()
                 {
                     ui.close();
                     self.file_dialog(ui.ctx().clone());
+                }
+                ui.separator();
+                if ui.button("Salir").clicked() {
+                    ui.close();
+                    self.request_action(FileAction::Exit, ui.ctx().clone());
                 }
             });
             ui.menu_button("Vista", |ui| {
@@ -227,10 +567,17 @@ impl App {
             });
         });
     }
-
     // LaguCAM 003: panel limpio. El arbol y sus propiedades son la vista principal.
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        project_ui::show(ui, &mut self.project, &mut self.property_error);
+        ui.add_enabled_ui(!self.busy(), |ui| {
+            project_ui::show(ui, &mut self.project, &mut self.property_error);
+        });
+        if let Some(path) = &self.project_path {
+            ui.small(format!("Proyecto: {}", path.display()));
+        }
+        if self.is_dirty() {
+            ui.colored_label(egui::Color32::YELLOW, "Cambios sin guardar");
+        }
         // Progreso y cancelacion solo mientras se importa. Se conserva el flujo STL original.
         if self.busy() {
             ui.separator();
@@ -375,6 +722,18 @@ impl eframe::App for App {
                 egui::ScrollArea::vertical().show(ui, |ui| self.sidebar(ui));
             });
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui));
+        if ui.ctx().input(|i| i.viewport().close_requested())
+            && !self.exit_approved
+            && self.is_dirty()
+        {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if !self.ask_unsaved {
+                self.pending_action = Some(FileAction::Exit);
+                self.ask_unsaved = true;
+            }
+        }
+        self.unsaved_dialog(ui.ctx());
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {

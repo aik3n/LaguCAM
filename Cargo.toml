@@ -11,6 +11,8 @@ eframe = { version = "=0.37.0", default-features = false, features = ["glow", "d
 glam = "0.30"
 bytemuck = "1.23"
 rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 lto = "thin"
