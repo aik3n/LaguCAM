@@ -67,3 +67,16 @@ La petición específica de implementar cinco geometrías autoriza el alcance de
 - **Regla:** elegir una superficie cambia solo el pivote; ni punto de vista ni encuadre cambian durante el clic. Girar posteriormente usa el pivote elegido, con indicador situado sobre la proyeccion real del punto.
 - **Sin superficie:** conservar el pivote. **Centrar vista:** volver al pivote central. **Origen CNC:** sus puntos de seleccion tienen prioridad, no deben interferir con el pivote visual.
 - **Pruebas:** proyeccion invariada al elegir, punto fijo en pantalla durante arrastre, ventanas redimensionadas, MSAA y mallas grandes. Sin cambios de proyecto, herramientas ni G-code.
+
+## D-027 — Pulsacion inicial y arrastre de pivote
+
+- **Estado:** ACEPTADA por el responsable el 2026-11-14; perfecciona D-026.
+- **Regla:** pulsacion primaria sobre una superficie = establecer pivote sin salto; desplazar con boton mantenido = rotar alrededor del pivote que se acaba de elegir. El marcador se mantiene visible tras soltar hasta otra eleccion o «Centrar vista».
+- **Resolucion diferida:** el resultado de picking GL se procesa antes de cualquier movimiento acumulado, evitando rotar inicialmente sobre el pivote antiguo. Pulsacion sin superficie conserva el pivote; prioridad para puntos rojos del origen CNC.
+- **Alcance:** solo navegacion visual, independiente de formatos; no afecta a origen CNC, CAM, STL ni proyecto.
+
+## D-028 — Marca de pivote temporal y mapeo de acciones
+
+- **Estado:** ACEPTADA por el responsable el 2026-11-14. Sustituye solo la regla de visibilidad del marcador de D-027, no la persistencia del pivote ni el comportamiento del arrastre.
+- **Regla:** el pivote se conserva despues de soltar la accion de rotar; la marca solo es visible durante esa pulsacion. No debe depender permanentemente del boton fisico izquierdo: las asignaciones de acciones se centralizan para admitir remapeo futuro.
+- **Alcance:** la version actual conserva izquierdo=orbita, derecho/central=pan; no hay UI ni persistencia de mapeo y no se promete hasta otra decision. No se modifica origen CNC, geometria ni proyecto.

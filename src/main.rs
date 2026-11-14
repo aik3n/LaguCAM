@@ -50,6 +50,86 @@ enum FileAction {
 type PickResult = Result<Option<glam::Vec3>, String>;
 type PickMailbox = Arc<Mutex<Option<PickResult>>>;
 
+/// El clic se procesa en el callback GL. Un arrastre que llegue antes del
+/// resultado se acumula y se ejecuta solo cuando se conoce el nuevo pivote.
+/// Este estado pertenece a la UI, no a un formato de geometria.
+#[derive(Default)]
+struct PivotPress {
+    active: bool,
+    waiting_for_hit: bool,
+    deferred_drag: egui::Vec2,
+}
+
+impl PivotPress {
+    fn start(&mut self) {
+        self.active = true;
+        self.waiting_for_hit = true;
+        self.deferred_drag = egui::Vec2::ZERO;
+    }
+
+    /// La liberacion oculta la marca; no elimina el pivote seleccionado.
+    /// Tampoco cancela una consulta GPU pendiente de resultado.
+    fn sync_held(&mut self, held: bool) {
+        if !held {
+            self.active = false;
+        }
+    }
+
+    fn marker_visible(&self) -> bool {
+        self.active && !self.waiting_for_hit
+    }
+
+    fn motion(&mut self, delta: egui::Vec2) -> Option<egui::Vec2> {
+        if self.waiting_for_hit {
+            self.deferred_drag += delta;
+            None
+        } else {
+            Some(delta)
+        }
+    }
+
+    fn complete(&mut self) -> egui::Vec2 {
+        self.waiting_for_hit = false;
+        std::mem::take(&mut self.deferred_drag)
+    }
+}
+
+/// Asigna acciones de navegacion a botones. No depende del tipo de modelo.
+/// Las asignaciones son iniciales; una futura UI podra cambiarlas sin reescribir
+/// la orbita, el zoom o el selector de superficies.
+#[derive(Clone, Copy)]
+struct NavigationBindings {
+    orbit: egui::PointerButton,
+    pan: [egui::PointerButton; 2],
+}
+
+impl Default for NavigationBindings {
+    fn default() -> Self {
+        Self {
+            orbit: egui::PointerButton::Primary,
+            pan: [egui::PointerButton::Secondary, egui::PointerButton::Middle],
+        }
+    }
+}
+
+impl NavigationBindings {
+    fn orbit_down(self, ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.pointer.button_down(self.orbit))
+    }
+
+    fn orbit_pressed(self, ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.pointer.button_pressed(self.orbit))
+    }
+
+    fn orbit_dragged(self, response: &egui::Response) -> bool {
+        response.dragged_by(self.orbit)
+    }
+
+    fn pan_dragged(self, response: &egui::Response) -> bool {
+        self.pan.iter().any(|button| response.dragged_by(*button))
+    }
+}
+
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
@@ -80,6 +160,8 @@ struct App {
     pending_pick: Option<egui::Pos2>,
     pick_result: PickMailbox,
     orbit_pivot: Option<glam::Vec3>,
+    pivot_press: PivotPress,
+    navigation_bindings: NavigationBindings,
 }
 
 impl App {
@@ -133,6 +215,8 @@ impl App {
             pending_pick: None,
             pick_result: Arc::new(Mutex::new(None)),
             orbit_pivot: None,
+            pivot_press: PivotPress::default(),
+            navigation_bindings: NavigationBindings::default(),
         };
         if let Some(path) = std::env::args_os().nth(1) {
             app.open(PathBuf::from(path), cc.egui_ctx.clone());
@@ -159,6 +243,7 @@ impl App {
         }
         self.pending_pick = None;
         *self.pick_result.lock() = None;
+        self.pivot_press = PivotPress::default();
         self.opening_project = opening;
         self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
@@ -333,6 +418,13 @@ impl App {
                     self.message = format!("ERROR: No se pudo establecer el pivote: {error}");
                 }
             }
+            // Resolver primero el pivote y luego aplicar el movimiento retenido.
+            // Si no se encontro superficie, giramos con el pivote anterior.
+            let deferred = self.pivot_press.complete();
+            if deferred != egui::Vec2::ZERO {
+                self.orbit_by(deferred);
+            }
+            ctx.request_repaint();
         }
         if self.busy() {
             ctx.request_repaint_after(Duration::from_millis(16));
@@ -347,6 +439,19 @@ impl App {
         self.orbit_pivot = None;
         self.pending_pick = None;
         *self.pick_result.lock() = None;
+        self.pivot_press = PivotPress::default();
+    }
+
+    fn orbit_by(&mut self, drag: egui::Vec2) {
+        let next_yaw = self.yaw - drag.x * 0.008;
+        let next_pitch = (self.pitch + drag.y * 0.008).clamp(-1.45, 1.45);
+        if let Some(pivot) = self.orbit_pivot {
+            self.pan = navigation::orbit_target_around_pivot(
+                self.pan, pivot, self.yaw, self.pitch, next_yaw, next_pitch,
+            );
+        }
+        self.yaw = next_yaw;
+        self.pitch = next_pitch;
     }
 
     fn file_dialog(&mut self, ctx: egui::Context) {
@@ -662,6 +767,10 @@ impl App {
     }
 
     fn viewport(&mut self, ui: &mut egui::Ui) {
+        // El indicador sigue la accion de orbita, no un boton fisico fijo.
+        // Si se suelta incluso fuera de la vista, desaparece en el siguiente frame.
+        let bindings = self.navigation_bindings;
+        self.pivot_press.sync_held(bindings.orbit_down(ui.ctx()));
         let size = ui.available_size();
         if size.x <= 5.0 || size.y <= 5.0 {
             return;
@@ -679,33 +788,30 @@ impl App {
         sky.add_triangle(0, 1, 2);
         sky.add_triangle(0, 2, 3);
         ui.painter().add(egui::Shape::mesh(sky));
-        if response.clicked()
+        // No esperar a clicked(): ese evento llega al SOLTAR y no existe
+        // si el mismo gesto se transforma en arrastre.
+        if bindings.orbit_pressed(ui.ctx())
+            && response.hovered()
             && !self.busy()
             && self.project.model.is_some()
             && self.project.selection != project::selection::Selection::Origin
-        {
-            self.pending_pick = response
+            && let Some(pos) = response
                 .interact_pointer_pos()
-                .filter(|p| rect.contains(*p));
-            ui.ctx().request_repaint();
-        }
-        if response.dragged_by(egui::PointerButton::Primary) {
-            let drag = response.drag_motion();
-            let new_yaw = self.yaw - drag.x * 0.008;
-            let new_pitch = (self.pitch + drag.y * 0.008).clamp(-1.45, 1.45);
-            if let Some(pivot) = self.orbit_pivot {
-                // Rotar la camara alrededor del punto elegido, sin moverlo en pantalla.
-                self.pan = navigation::orbit_target_around_pivot(
-                    self.pan, pivot, self.yaw, self.pitch, new_yaw, new_pitch,
-                );
-            }
-            self.yaw = new_yaw;
-            self.pitch = new_pitch;
-            ui.ctx().request_repaint();
-        }
-        if response.dragged_by(egui::PointerButton::Secondary)
-            || response.dragged_by(egui::PointerButton::Middle)
+                .filter(|p| rect.contains(*p))
         {
+            self.pending_pick = Some(pos);
+            self.pivot_press.start();
+            ui.ctx().request_repaint();
+        }
+        if bindings.orbit_dragged(&response) {
+            // La seleccion mediante GL termina antes de ejecutar el arrastre.
+            // La primera fraccion de movimiento no se pierde ni usa el pivote viejo.
+            if let Some(drag) = self.pivot_press.motion(response.drag_motion()) {
+                self.orbit_by(drag);
+            }
+            ui.ctx().request_repaint();
+        }
+        if bindings.pan_dragged(&response) {
             let drag = response.drag_motion();
             let direction = glam::Vec3::new(
                 self.pitch.cos() * self.yaw.cos(),
@@ -811,7 +917,9 @@ impl App {
             response.clicked(),
             response.hover_pos(),
         );
-        if let Some(pivot) = self.orbit_pivot {
+        if self.pivot_press.marker_visible()
+            && let Some(pivot) = self.orbit_pivot
+        {
             // El indicador marca el punto REAL seleccionado, no el centro de pantalla.
             let mvp = navigation::view_projection(
                 self.yaw,
@@ -850,7 +958,7 @@ impl App {
         ui.painter().text(
             rect.left_top() + egui::vec2(12.0, 12.0),
             egui::Align2::LEFT_TOP,
-            "VISTA 3D  ·  Rotar: arrastrar  ·  Clic: pivote  ·  Zoom: rueda  ·  Desplazar: botón derecho",
+            "VISTA 3D  ·  Pulsar + arrastrar: pivote y rotación  ·  Zoom: rueda  ·  Desplazar: botón derecho",
             egui::FontId::monospace(12.0),
             egui::Color32::LIGHT_GRAY,
         );
@@ -920,4 +1028,60 @@ fn main() -> eframe::Result {
                 .map_err(|e| std::io::Error::other(e).into())
         }),
     )
+}
+
+#[cfg(test)]
+mod pivot_press_tests {
+    use super::PivotPress;
+    use eframe::egui;
+
+    #[test]
+    fn buffers_drag_until_hit_is_resolved() {
+        let mut press = PivotPress::default();
+        press.start();
+        assert_eq!(press.motion(egui::vec2(3.0, -1.0)), None);
+        assert_eq!(press.motion(egui::vec2(2.0, 4.0)), None);
+        assert_eq!(press.complete(), egui::vec2(5.0, 3.0));
+        assert_eq!(
+            press.motion(egui::vec2(1.0, 2.0)),
+            Some(egui::vec2(1.0, 2.0))
+        );
+    }
+
+    #[test]
+    fn cancellation_drops_old_motion_before_next_press() {
+        let mut press = PivotPress::default();
+        press.start();
+        assert_eq!(press.motion(egui::vec2(12.0, 8.0)), None);
+        press = PivotPress::default();
+        press.start();
+        assert_eq!(press.complete(), egui::Vec2::ZERO);
+    }
+
+    #[test]
+    fn marker_follows_press_release_without_forgetting_pivot_request() {
+        let mut press = PivotPress::default();
+        assert!(!press.marker_visible());
+        press.start();
+        assert!(!press.marker_visible()); // Aun esperando la superficie de GL.
+        assert_eq!(press.complete(), egui::Vec2::ZERO);
+        assert!(press.marker_visible());
+        press.sync_held(false);
+        assert!(!press.marker_visible());
+        press.start();
+        assert!(press.waiting_for_hit);
+        press.sync_held(false);
+        assert!(press.waiting_for_hit); // El clic sigue eligiendo pivote al soltar.
+        assert!(!press.marker_visible());
+    }
+
+    #[test]
+    fn default_action_bindings_match_existing_mouse_controls() {
+        let bindings = super::NavigationBindings::default();
+        assert_eq!(bindings.orbit, egui::PointerButton::Primary);
+        assert_eq!(
+            bindings.pan,
+            [egui::PointerButton::Secondary, egui::PointerButton::Middle]
+        );
+    }
 }

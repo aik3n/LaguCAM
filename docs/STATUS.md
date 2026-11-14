@@ -91,3 +91,15 @@ A continuación: modelo y biblioteca de herramientas, empezando por acordar geom
 - Cambio solicitado y aprobado: un clic simple sobre el modelo elige el pivote SIN mover la vista. Girar posteriormente orbita alrededor de ese punto. Un indicador marca su posicion sobre la geometria y «Vista > Centrar vista» lo restablece.
 - El usuario confirmo que la 010 v2 compila y arranca en Windows; este ajuste 011 y el comportamiento grafico siguen pendientes de prueba funcional.
 - `cargo fmt`, `clippy`, `test` y `build --release` se ejecutaran en el instalador del usuario; no se atribuyen resultados antes de su ejecucion.
+
+## Ajuste 012 — Pivote al presionar el raton
+
+- El responsable confirmo funcionamiento de LaguCAM 011, pero solicito poder pulsar y arrastrar en un mismo gesto y mantener visible la marca al soltar.
+- Implementacion preparada en `src/main.rs`: `mouse down` fija el pivote mediante consulta GL; el arrastre se pospone hasta disponer del punto. No se alteran los datos ni el origen CNC.
+- La compilacion Rust, la prueba con DPI/MSAA y la regresion con STL grande estan pendientes de ejecucion en Windows. No se asumen superadas en este documento.
+
+## Ajuste 013 — Indicador transitorio del pivote
+
+- El responsable confirma que LaguCAM 012 v2 compila y funciona; solicita que el indicador solo sea visible mientras se mantiene la pulsacion para rotar.
+- Implementacion 013: el pivote sigue seleccionado al soltar, pero la marca se oculta. La asignacion de botones queda centralizada y preparada para una futura configuracion.
+- Compilacion, Clippy, tests, release y prueba grafica de 013 pendientes de ejecucion en Windows; sin commit automatico.

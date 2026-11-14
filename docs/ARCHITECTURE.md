@@ -168,3 +168,17 @@ No hay cambios en `src/stl.rs`, `src/preview.rs`, `src/render.rs`, `src/stock_re
 - En el siguiente arrastre, el centro de cámara se transforma en torno al pivote mediante las bases ortonormales de las orientaciones anterior y nueva. El punto elegido permanece estable en pantalla mientras gira.
 - El marcador se proyecta sobre su posicion real en pantalla, no sobre el centro del viewport. Un clic sin geometria conserva la seleccion anterior.
 - No hay dependencia del formato: la escena aporta la profundidad visible. El modo Origen CNC mantiene prioridad para elegir sus puntos rojos.
+
+## Ajuste 012 — Pulsar y arrastrar en un solo gesto
+
+- La UI detecta la pulsacion primaria al comienzo del gesto, no el evento `clicked()` de liberacion. Se solicita una lectura de profundidad en el callback GL de la escena.
+- `PivotPress` acumula desplazamientos mientras esta pendiente la consulta: el primer arrastre no gira alrededor de un pivote obsoleto. Tras recibir la respuesta, se fija el pivote y se aplica el desplazamiento acumulado.
+- Un clic sin arrastre cambia solo el pivote y deja la vista intacta. El marcador queda asociado al pivote y NO depende del boton pulsado. En el fondo se conserva el anterior.
+- La navegacion no conoce STL/STEP/IGES; los modelos proporcionan superficies a traves de la representacion visible de la escena. El modo Origen CNC conserva la prioridad de sus puntos rojos.
+
+## Ajuste 013 — Visibilidad del pivote y acciones configurables
+
+- `PivotPress` diferencia el pivote persistente de la visibilidad temporal de su indicador. Soltar la accion de orbita oculta la marca, pero NO restablece ni modifica el pivote.
+- `NavigationBindings` centraliza la asignacion de la accion orbital y de desplazamiento (boton izquierdo para orbitar, derecho/central para desplazar). Son ajustes por defecto, no una interfaz de configuracion todavia.
+- La marca solamente se dibuja mientras esta activo el gesto y la consulta de profundidad ha resuelto el punto. La vista y las formulas de camara no cambian.
+- El binding se mantiene ajeno al formato del archivo. STL/STEP/IGES son proveedores de superficies de la escena, no tipos de camara.

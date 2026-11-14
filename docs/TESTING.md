@@ -100,3 +100,20 @@ La lectura GPU es visual, no una consulta geométrica exacta para CAM.
 4. En Origen CNC, seleccionar puntos rojos sin cambiar el pivote de navegacion. Verificar pan derecho, zoom y bruto.
 5. Repetir en el STL real cercano a 1 GB, comprobando fluidez, ausencia de otra lectura del archivo y funcionamiento de biblioteca y `.lagucam`.
 6. Verificar en Windows con DPI distinto de 100% y MSAA 4x.
+
+## Ensayos 012 — Pulsacion y arrastre continuos
+
+1. En el STL, pulsar boton izquierdo sin soltar: se selecciona y marca un pivote sin mover la vista.
+2. Manteniendo pulsado, arrastrar inmediatamente: la orbita empieza alrededor de ese mismo punto. Probar movimientos rapidos para comprobar que no hay salto ni desplazamiento inicial alrededor del pivote antiguo.
+3. Soltar: el marcador persiste; volver a girar y comprobar que el ultimo pivote se conserva. «Vista > Centrar vista» lo restablece.
+4. Pulsar en el cielo: no sustituye el pivote. Arrastrar desde el cielo puede girar con el pivote anterior.
+5. Verificar puntos rojos de Origen CNC, bruto, zoom y pan; repetir con DPI alto, MSAA y STL real de gran volumen.
+6. Comprobar tests de `PivotPress` y de `navigation.rs`, Clippy y compilacion release.
+
+## Ensayos 013 — Indicador solo mientras se rota
+
+1. Pulsar en la superficie y mantener: aparece la marca amarilla en el punto, sin salto de camara. Arrastrar sin soltar: rota alrededor de ese pivote.
+2. Soltar sobre el modelo y tambien tras salir del viewport: la marca desaparece. Girar de nuevo debe seguir seleccionando de inmediato el nuevo pivote.
+3. Clic breve: establece pivote aunque no llegue a verse la marca al soltarse inmediatamente. Girar desde el fondo debe conservar el pivote anterior; si se pulsa para rotar, la marca solo aparece durante el gesto.
+4. Probar boton derecho/central para desplazar, rueda para zoom, prioridad de puntos rojos del origen CNC y «Vista > Centrar vista».
+5. Revisar pruebas Rust del estado del gesto y botones por defecto; Cargo fmt, clippy, test, release, rendimiento con STL grande, DPI y MSAA.

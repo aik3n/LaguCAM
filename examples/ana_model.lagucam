@@ -1,0 +1,66 @@
+{
+  "format": "LaguCAM",
+  "version": 1,
+  "units": "mm",
+  "stl": {
+    "path": "..\\..\\..\\..\\..\\Modelos\\Anayet\\ana_model.stl",
+    "size_bytes": 1021710484,
+    "triangles": 20434208,
+    "bounds_min": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bounds_max": [
+      255.16000366210938,
+      200.0,
+      72.18000030517578
+    ],
+    "sample_fnv64": "ffce4963ec2eccdd",
+    "modified_unix_ms": 1794609105829
+  },
+  "state": {
+    "stock": {
+      "min": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "size": [
+        255.16000366210938,
+        200.0,
+        72.18000030517578
+      ],
+      "visible": true
+    },
+    "stock_display": {
+      "mode": "solid_edges",
+      "color": "amber",
+      "opacity_percent": 25
+    },
+    "origin": {
+      "reference": "stock",
+      "point": {
+        "kind": "corner",
+        "index": 4
+      },
+      "offset": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "visible": true
+    },
+    "model_color": [
+      160,
+      180,
+      150
+    ],
+    "operations": []
+  }
+}

@@ -76,3 +76,18 @@ La documentación se actualiza con el cambio; no añadir pruebas inexistentes ni
 - Sustituido doble clic por clic simple; se elige el pivote sin alterar la proyeccion actual. El siguiente arrastre orbita alrededor de ese punto y la marca se muestra donde realmente fue seleccionado.
 - Se mantiene el servicio de consulta de escena independiente de los importadores y no se modifican STL grande, bruto, origen CNC, biblioteca ni formato `.lagucam`.
 - Pruebas matematicas adicionales; compilacion, interfaz GPU y regresion de STL grande pendientes en la instalacion Windows.
+
+## 2026-11-14 — Ajuste 012: mouse down y giro inmediato
+
+- Base verificada: `a1532c456173c10341715067072e303b45de9150`. Sin nuevo commit automatico.
+- El boton izquierdo fija el pivote en la pulsacion inicial; manteniendolo pulsado se gira en el mismo gesto. El movimiento anterior al resultado de picking se conserva y se aplica despues del nuevo pivote.
+- La marca se sigue dibujando a partir del pivote persistente, sin condicion de boton pulsado. Clic en fondo: conservar pivote.
+- Sin cambios en formato `.lagucam`, STL, GPU streaming, biblioteca de fresas ni origen CNC.
+- Pruebas de estado de gesto incorporadas; Cargo y validacion grafica pendientes de Windows.
+
+## 2026-11-14 — Ajuste 013: marcador temporal de pivote
+
+- Base: 012 v2 instalada sin commit sobre HEAD `a1532c456173c10341715067072e303b45de9150`.
+- Pulsar sobre el modelo sigue seleccionando el punto de giro; el mismo gesto sigue arrastrando en torno a el. Solo cambia la visibilidad del indicador: al soltar se oculta pero el pivote permanece activo.
+- `NavigationBindings` reune los botones de orbita y desplazamiento, con valores actuales por defecto y sin introducir todavia ajustes persistentes.
+- Se agregan pruebas de ciclo de vida del indicador y mapeo por defecto. No hay cambios en CAM, STL, origen CNC, almacenamiento `.lagucam` ni herramientas.
