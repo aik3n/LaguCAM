@@ -13,14 +13,28 @@ use origin::WorkOrigin;
 use selection::Selection;
 use stock::Stock;
 
-#[derive(Default)]
 pub struct Project {
     pub model: Option<ModelReference>,
     pub stock: Option<Stock>,
     pub stock_display: StockDisplay,
+    pub model_color: [u8; 3],
     pub origin: WorkOrigin,
     pub operations: Operations,
     pub selection: Selection,
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            model: None,
+            stock: None,
+            stock_display: StockDisplay::default(),
+            model_color: [160, 180, 150],
+            origin: WorkOrigin::default(),
+            operations: Operations::default(),
+            selection: Selection::default(),
+        }
+    }
 }
 
 impl Project {

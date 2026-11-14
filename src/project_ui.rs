@@ -2,7 +2,7 @@
 use crate::project::{
     Project,
     display::{StockColor, StockMode},
-    origin::OriginPreset,
+    origin::{OriginPoint, OriginReference},
     selection::Selection,
 };
 use eframe::egui;
@@ -81,6 +81,11 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
                         model.bounds.min[i], model.bounds.max[i]
                     ));
                 }
+                ui.horizontal(|ui| {
+                    ui.label("Color del modelo STL");
+                    ui.color_edit_button_srgb(&mut project.model_color);
+                });
+                ui.small("El color conserva iluminación y relieve; el STL sigue opaco.");
                 ui.small("Coordenadas originales f64. STL sin unidades definidas.");
             } else {
                 ui.label("Abre un STL para iniciar el proyecto.");
@@ -195,34 +200,55 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
             }
         }
         Selection::Origin => {
-            if let Some(stock) = &project.stock {
+            if let (Some(stock), Some(model)) = (&project.stock, &project.model) {
                 let mut candidate = project.origin.clone();
                 let mut changed = ui
                     .checkbox(&mut candidate.visible, "Mostrar ejes CNC")
                     .changed();
-                let previous_preset = candidate.preset;
-                egui::ComboBox::from_label("Posición")
-                    .selected_text(candidate.preset.label())
+                ui.label("Referencia del cero CNC");
+                let old_reference = candidate.reference;
+                egui::ComboBox::from_label("Referencia")
+                    .selected_text(candidate.reference.label())
                     .show_ui(ui, |ui| {
-                        for preset in OriginPreset::ALL {
-                            ui.selectable_value(&mut candidate.preset, preset, preset.label());
+                        for reference in OriginReference::ALL {
+                            ui.selectable_value(
+                                &mut candidate.reference,
+                                reference,
+                                reference.label(),
+                            );
                         }
                     });
-                changed |= candidate.preset != previous_preset;
-                if candidate.preset == OriginPreset::Custom {
-                    ui.label("Desplazamiento desde esquina mínima del bruto");
-                    changed |= vector(ui, &mut candidate.custom_offset);
+                changed |= candidate.reference != old_reference;
+                let old_point = candidate.point;
+                egui::ComboBox::from_label("Punto")
+                    .selected_text(candidate.point.label())
+                    .show_ui(ui, |ui| {
+                        for point in OriginPoint::ALL {
+                            ui.selectable_value(&mut candidate.point, point, point.label());
+                        }
+                    });
+                changed |= candidate.point != old_point;
+                ui.small("También puedes pulsar los puntos rojos del visor. Aparecen solo al configurar el origen.");
+                ui.separator();
+                ui.label("Offset XYZ (ejes originales del modelo)");
+                changed |= vector(ui, &mut candidate.offset);
+                if ui.button("Restablecer offset a cero").clicked() {
+                    candidate.offset = [0.0; 3];
+                    changed = true;
                 }
                 ui.separator();
                 ui.label("Rotación del sistema CNC (grados)");
                 changed |= vector(ui, &mut candidate.rotation_degrees);
-                ui.small("Convención: R = Rz · Ry · Rx, ejes fijos del modelo, mano derecha.");
+                ui.small("Convención: R = Rz · Ry · Rx, mano derecha.");
                 if ui.button("Restablecer rotación a 0°").clicked() {
                     candidate.rotation_degrees = [0.0; 3];
                     changed = true;
                 }
                 if changed {
-                    match (candidate.model_position(stock), candidate.rotation_basis()) {
+                    match (
+                        candidate.model_position(stock, &model.bounds),
+                        candidate.rotation_basis(),
+                    ) {
                         (Ok(_), Ok(_)) => {
                             project.origin = candidate;
                             error.clear();
@@ -230,13 +256,13 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
                         (Err(message), _) | (_, Err(message)) => *error = message.into(),
                     }
                 }
-                if let Ok(point) = project.origin.model_position(stock) {
+                if let Ok(point) = project.origin.model_position(stock, &model.bounds) {
                     ui.label(format!(
                         "Origen en modelo: X {:.6}, Y {:.6}, Z {:.6}",
                         point[0], point[1], point[2]
                     ));
                 }
-                ui.small("La rotación orienta los ejes CNC; no gira el STL ni el bruto.");
+                ui.small("Seleccionar un punto rojo restablece el offset a cero. La rotación solo orienta los ejes CNC.");
             } else {
                 ui.label("Define primero el modelo y el bruto.");
             }

@@ -12,6 +12,7 @@ struct GpuChunk {
 
 pub struct Render3d {
     program: glow::Program,
+    model_color: [f32; 3],
     vao: glow::VertexArray,
     active: Vec<GpuChunk>,
     staging: Vec<GpuChunk>,
@@ -59,15 +60,14 @@ void main() {
                 r#"#version 330 core
 in vec3 v_normal;
 in float v_height;
+uniform vec3 u_model_color;
 out vec4 out_color;
 void main() {
     vec3 n = normalize(v_normal);
     vec3 light = normalize(vec3(0.35, -0.5, 0.8));
     float diffuse = max(dot(n, light), 0.0);
-    vec3 low = vec3(0.16, 0.34, 0.27);
-    vec3 high = vec3(0.80, 0.73, 0.54);
     float t = clamp(0.5 + v_height * 0.7, 0.0, 1.0);
-    vec3 base = mix(low, high, t);
+    vec3 base = u_model_color * (0.75 + 0.25 * t);
     out_color = vec4(base * (0.35 + 0.65 * diffuse), 1.0);
 }"#,
             );
@@ -96,6 +96,7 @@ void main() {
                 .create_vertex_array()
                 .inspect_err(|_| gl.delete_program(program))?;
             Ok(Self {
+                model_color: [160.0 / 255.0, 180.0 / 255.0, 150.0 / 255.0],
                 program,
                 vao,
                 active: vec![],
@@ -107,6 +108,11 @@ void main() {
                 error: None,
             })
         }
+    }
+
+    /// Solo cambia un uniform; no se reenvían vertices del STL.
+    pub fn set_model_color(&mut self, color: [u8; 3]) {
+        self.model_color = color.map(|v| f32::from(v) / 255.0);
     }
 
     pub fn begin_upload(&mut self) {
@@ -219,6 +225,13 @@ void main() {
                 );
                 let mvp = proj * view;
                 gl.use_program(Some(self.program));
+                gl.uniform_3_f32(
+                    gl.get_uniform_location(self.program, "u_model_color")
+                        .as_ref(),
+                    self.model_color[0],
+                    self.model_color[1],
+                    self.model_color[2],
+                );
                 gl.uniform_matrix_4_f32_slice(
                     gl.get_uniform_location(self.program, "u_mvp").as_ref(),
                     false,

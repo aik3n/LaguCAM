@@ -263,7 +263,7 @@ impl App {
         if size.x <= 5.0 || size.y <= 5.0 {
             return;
         }
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         if response.dragged_by(egui::PointerButton::Primary) {
             let drag = response.drag_motion();
             self.yaw -= drag.x * 0.008;
@@ -298,6 +298,7 @@ impl App {
         let distance = self.distance;
         let pan = self.pan;
         let aspect = rect.width() / rect.height().max(1.0);
+        let model_color = self.project.model_color;
         let renderer = Arc::clone(&self.renderer);
         let stock_renderer = Arc::clone(&self.stock_renderer);
         let stock_geometry = stock_render::StockGeometry::from_project(&self.project);
@@ -318,9 +319,11 @@ impl App {
                         clip.height_px,
                     );
                 }
-                renderer
-                    .lock()
-                    .paint(painter.gl(), yaw, pitch, distance, aspect, pan);
+                {
+                    let mut mesh = renderer.lock();
+                    mesh.set_model_color(model_color);
+                    mesh.paint(painter.gl(), yaw, pitch, distance, aspect, pan);
+                }
                 // El STL ya ha escrito el depth buffer. No se modifica su importador.
                 stock_renderer.lock().paint(
                     painter.gl(),
@@ -335,7 +338,19 @@ impl App {
                 );
             })),
         });
-        overlay::paint(ui, rect, &self.project, yaw, pitch, distance, pan);
+        overlay::paint(
+            ui,
+            rect,
+            &mut self.project,
+            overlay::Camera {
+                yaw,
+                pitch,
+                zoom: distance,
+                pan,
+            },
+            response.clicked(),
+            response.hover_pos(),
+        );
         ui.painter().text(
             rect.left_top() + egui::vec2(12.0, 12.0),
             egui::Align2::LEFT_TOP,
