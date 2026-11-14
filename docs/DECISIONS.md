@@ -87,3 +87,9 @@ La petición específica de implementar cinco geometrías autoriza el alcance de
 - **Tamaño:** no depende del contenido; redimensionamiento manual y scroll interno.
 - **Persistencia:** disposición global de usuario y comando Vista > Restablecer paneles, sin cambios en `.lagucam`.
 - **Implementación:** sistema liviano basado en egui existente, sin biblioteca externa de docking.
+
+## D-030 — Acoplamiento por arrastre y guías visuales
+- **Estado:** ACEPTADA por el responsable el 2026-11-14; complementa D-029.
+- **Regla:** Proyecto y Propiedades siguen independientes y pueden desplazarse arrastrando sus cabeceras. Se muestran zonas de acoplamiento y la posición previa; soltar en el centro desacopla; izquierda/derecha permiten orden superior/inferior.
+- **Persistencia:** mantener esquema existente `panels.json` v1 y tamaños desacoplados del contenido; no incorporar layout al proyecto.
+- **Implementación:** evolución local del docking egui, sin nuevas dependencias ni cambios OpenGL. El menú Posición permanece como alternativa.

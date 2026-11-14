@@ -1,5 +1,12 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Pruebas manuales del ajuste 016
+- Arrastrar desde la cabecera de Proyecto hasta el centro y soltar: debe convertirse en flotante sin alterar Propiedades.
+- Arrastrar el título de una ventana flotante hasta cada uno de los cuatro destinos: izquierda/derecha y arriba/abajo; comprobar guía y vista previa antes de soltar.
+- Probar un panel acoplado sobre el otro y volver a invertir el orden de apilamiento mediante arrastre.
+- Soltar una ventana flotante tras redimensionarla (sin arrastrar título): no debe acoplarse de forma involuntaria.
+- Reiniciar: preservar la posición, tamaño y distribución anteriores mediante `panels.json`; comprobar Vista > Restablecer paneles.
+- Probar proyecto nuevo, Abrir modelo, barra de estado, cancelación STL, pivote y origen CNC. Probar STL grande para detectar pérdida de fluidez.
 ## Pruebas manuales del ajuste 015
 - Arrastrar una ventana flotante cerca de los bordes izquierdo/derecho y soltar para acoplarla.
 - Probar ambos paneles arriba/abajo, redimensionar separador horizontal y anchuras de cada lateral.

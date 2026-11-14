@@ -1,5 +1,7 @@
 # Arquitectura de LaguCAM
 
+## Interfaz 016 — Guías de acoplamiento
+`src/panel_layout.rs` mantiene el estado del gesto transitorio `DockDrag` separado de la configuración persistente `Settings`. La cabecera de cada panel acoplado y el título de cada ventana flotante inician arrastre; `target_at` calcula el destino por cursor; una capa de pintado superior muestra cuatro guías y el rectángulo de vista previa. La suelta confirma el destino o desacopla. El fichero global `panels.json` conserva el esquema v1; no se migra ni altera `.lagucam`.
 ## Interfaz de paneles del ajuste 015
 `src/panel_layout.rs` administra dos paneles independientes (Proyecto y Propiedades), acoplamiento lateral, apilamiento vertical, ventanas flotantes y persistencia en `panels.json` de configuración global.
 `src/project_ui.rs` separa el árbol (`tree`) de las propiedades (`properties`); la acción Abrir modelo sigue delegada en `App`. El visor 3D no conoce el layout. No se modifica el modelo del proyecto ni `.lagucam`.

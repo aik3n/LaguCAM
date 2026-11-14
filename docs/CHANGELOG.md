@@ -1,5 +1,12 @@
 # Historial de LaguCAM
 
+## Ajuste 016 — Acoplamiento directo con guías visuales (sin commit)
+- Arrastrar por la cabecera de Proyecto o Propiedades muestra cuatro guías de acoplamiento y la previsualización del lugar de destino.
+- Soltar cerca del borde izquierdo/derecho acopla el panel en la mitad superior/inferior. Soltar en el centro convierte un panel acoplado en flotante.
+- Las ventanas flotantes usan su propia barra de título para moverlas y acoplarlas; redimensionar o editar su contenido no las acopla por accidente.
+- Se conserva el menú Posición como alternativa, los divisores, los tamaños, el archivo `panels.json` existente y Vista > Restablecer paneles.
+- Sin dependencias nuevas y sin cambios en el visor OpenGL, el importador STL, `.lagucam`, los ejes CNC o la biblioteca de herramientas.
+- Validación Cargo y prueba gráfica mediante el instalador en Windows, no realizadas aquí.
 ## Ajuste 015 — Paneles acoplables y flotantes (sin commit)
 - Proyecto y Propiedades son dos paneles independientes. Inicialmente se apilan en el lateral izquierdo, con divisor vertical y dimensiones no dependientes del contenido.
 - Se pueden acoplar a izquierda o derecha, desacoplar mediante Posición, arrastrar una ventana flotante hasta un borde para acoplarla, redimensionar y cambiar su orden vertical.
