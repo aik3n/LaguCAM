@@ -1,5 +1,12 @@
 # Historial de LaguCAM
 
+## Ajuste 018 — Pulido visual del docking
+- Se retira el botón «Posición». Los paneles acoplados tienen asa de seis puntos dibujada por egui y cabecera compacta.
+- Al arrastrar un panel acoplado aparece su silueta flotante translúcida, siguiendo el cursor. Los paneles ya flotantes mantienen el arrastre por su barra nativa.
+- Las cuatro guías son pictogramas geométricos sin los textos «ARRIBA» y «ABAJO». El destino seleccionado y la región final se resaltan con el acento correspondiente al tema Claro/Oscuro.
+- Se mantiene el docking a ambos laterales, orden superior/inferior, tamaños, `config/panels.json`, los tests de acoplamiento y Vista > Restablecer paneles.
+- Sin cambios a navegación 3D, geometría, herramientas, configuraciones portables o proyectos.
+- Validación Cargo y prueba gráfica: a ejecutar en Windows con el instalador; no verificadas aquí.
 ## Ajuste 017 — Portable por defecto y temas claro/oscuro
 - `config/settings.json`, `config/panels.json` y `config/tools.json` se ubican junto al ejecutable (en desarrollo: junto a `target/release/cam-libre-visor.exe`).
 - Herramientas > Opciones… permite seleccionar tema Claro u Oscuro, sin reiniciar; Oscuro es el predeterminado.

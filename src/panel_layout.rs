@@ -59,6 +59,42 @@ struct DockDrag {
 
 /// Las zonas se definen por la posición del CURSOR, no por el marco de la ventana:
 /// evita acoplar accidentalmente al redimensionar o al soltar dentro del contenido.
+/// Asa de seis puntos dibujada por egui: no depende de glifos ni fuentes.
+fn panel_drag_handle(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(26.0, 23.0), egui::Sense::drag());
+    let highlighted = response.hovered() || response.dragged();
+    if highlighted {
+        ui.painter()
+            .rect_filled(rect, 4.0, ui.visuals().widgets.hovered.bg_fill);
+    }
+    let ink = if highlighted {
+        ui.visuals().widgets.hovered.fg_stroke.color
+    } else {
+        ui.visuals().widgets.noninteractive.fg_stroke.color
+    };
+    for dx in [-4.0_f32, 4.0] {
+        for dy in [-5.0_f32, 0.0, 5.0] {
+            ui.painter()
+                .circle_filled(rect.center() + egui::vec2(dx, dy), 1.5, ink);
+        }
+    }
+    response
+        .on_hover_cursor(egui::CursorIcon::Grab)
+        .on_hover_text("Arrastrar panel")
+}
+
+/// La representación flotante sigue al puntero sin salirse de la pantalla.
+fn ghost_bounds(pointer: egui::Pos2, screen: egui::Rect, size: egui::Vec2) -> egui::Rect {
+    let min_x = screen.left() + 6.0;
+    let min_y = screen.top() + 6.0;
+    let max_x = (screen.right() - size.x - 6.0).max(min_x);
+    let max_y = (screen.bottom() - size.y - 6.0).max(min_y);
+    let pos = egui::pos2(
+        (pointer.x + 22.0).clamp(min_x, max_x),
+        (pointer.y + 16.0).clamp(min_y, max_y),
+    );
+    egui::Rect::from_min_size(pos, size)
+}
 fn target_at(pointer: egui::Pos2, screen: egui::Rect) -> Option<DockTarget> {
     if !screen.contains(pointer) || screen.width() < 350.0 || screen.height() < 280.0 {
         return None;
@@ -198,10 +234,6 @@ impl PanelLayout {
         }
     }
 
-    fn both_in(&self, place: Place) -> bool {
-        self.settings.project.place == place && self.settings.properties.place == place
-    }
-
     fn panes_for(&self, place: Place) -> Vec<Pane> {
         let mut panes = Vec::with_capacity(2);
         for pane in [Pane::Project, Pane::Properties] {
@@ -225,19 +257,14 @@ impl PanelLayout {
         floating: bool,
     ) -> bool {
         let mut open_model = false;
-        ui.horizontal(|ui| {
-            if !floating {
-                // La cabecera es el asa de arrastre; los campos de datos no lo son.
-                let header = ui
-                    .add(
-                        egui::Label::new(format!("⠿  {}", pane.title())).sense(egui::Sense::drag()),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab);
-                if header.drag_started_by(egui::PointerButton::Primary) {
+        if !floating {
+            ui.horizontal(|ui| {
+                let handle = panel_drag_handle(ui);
+                if handle.drag_started_by(egui::PointerButton::Primary) {
                     let start = ui
                         .ctx()
                         .input(|i| i.pointer.interact_pos())
-                        .unwrap_or(header.rect.center());
+                        .unwrap_or(handle.rect.center());
                     self.dragging = Some(DockDrag {
                         pane,
                         start,
@@ -245,31 +272,13 @@ impl PanelLayout {
                     });
                     ui.ctx().request_repaint();
                 }
-            }
-            ui.menu_button("Posición", |ui| {
-                for (place, title) in [
-                    (Place::Left, "Acoplar a la izquierda"),
-                    (Place::Right, "Acoplar a la derecha"),
-                    (Place::Floating, "Desacoplar / Flotante"),
-                ] {
-                    if ui.button(title).clicked() {
-                        self.move_to(pane, place, ui.ctx());
-                        ui.close();
-                    }
-                }
-                if !floating && self.both_in(self.state(pane).place) {
-                    ui.separator();
-                    if ui.button("Intercambiar arriba / abajo").clicked() {
-                        self.settings.project_first = !self.settings.project_first;
-                        self.dirty = true;
-                        ui.close();
-                    }
-                }
+                ui.add_space(2.0);
+                ui.strong(pane.title());
             });
-        });
-        ui.separator();
+            ui.separator();
+        }
+        // En modo flotante, la cabecera nativa de egui ya permite arrastrar.
         ui.add_enabled_ui(enabled, |ui| {
-            // Área de desplazamiento que no cambia el tamaño de la ventana.
             egui::ScrollArea::vertical()
                 .id_salt((pane.title(), "scroll"))
                 .auto_shrink([false, false])
@@ -446,7 +455,7 @@ impl PanelLayout {
         open_model
     }
 
-    /// Guías no interactivas sobre el visor y las ventanas, sin interceptar el ratón.
+    /// Vista previa visual sin etiquetas; no intercepta los eventos del ratón.
     fn drag_preview_and_drop(&mut self, ctx: &egui::Context) {
         let Some(mut drag) = self.dragging else {
             return;
@@ -479,7 +488,6 @@ impl PanelLayout {
                 if let Some(target) = target {
                     self.dock_drop(drag.pane, target, ctx);
                 } else if self.state(drag.pane).place != Place::Floating {
-                    // Soltar un panel acoplado sobre el centro lo convierte en flotante.
                     self.float_drop(drag.pane, pointer, screen, ctx);
                 }
             }
@@ -495,55 +503,120 @@ impl PanelLayout {
             egui::Id::unique("lagucam_docking_guides"),
         );
         let painter = ctx.layer_painter(layer);
-        let guide_fill = egui::Color32::from_rgba_unmultiplied(30, 105, 175, 180);
-        let guide_stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(142, 205, 252));
-        for (side, x) in [
-            (Place::Left, screen.left() + 43.0),
-            (Place::Right, screen.right() - 43.0),
-        ] {
-            for (slot, dy, label) in [(Slot::Top, -30.0, "ARRIBA"), (Slot::Bottom, 30.0, "ABAJO")] {
-                let box_rect = egui::Rect::from_center_size(
-                    egui::pos2(x, screen.center().y + dy),
-                    egui::vec2(76.0, 48.0),
-                );
-                let selected = target == Some(DockTarget { side, slot });
-                let fill = if selected {
-                    egui::Color32::from_rgba_unmultiplied(38, 145, 223, 230)
-                } else {
-                    guide_fill
-                };
-                painter.rect_filled(box_rect, 5.0, fill);
-                painter.rect_stroke(box_rect, 5.0, guide_stroke, egui::StrokeKind::Inside);
-                painter.text(
-                    box_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::FontId::proportional(11.0),
-                    egui::Color32::WHITE,
-                );
-            }
-        }
+        let dark = ctx.theme() == egui::Theme::Dark;
+        let (guide_bg, guide_border, interior, accent, ghost_bg, ghost_header, ghost_text) = if dark
+        {
+            (
+                egui::Color32::from_rgba_unmultiplied(31, 43, 57, 224),
+                egui::Color32::from_rgb(104, 135, 163),
+                egui::Color32::from_rgb(64, 82, 102),
+                egui::Color32::from_rgb(86, 173, 240),
+                egui::Color32::from_rgba_unmultiplied(31, 40, 52, 205),
+                egui::Color32::from_rgba_unmultiplied(58, 76, 96, 224),
+                egui::Color32::from_rgb(232, 242, 250),
+            )
+        } else {
+            (
+                egui::Color32::from_rgba_unmultiplied(247, 250, 253, 238),
+                egui::Color32::from_rgb(127, 154, 177),
+                egui::Color32::from_rgb(219, 229, 238),
+                egui::Color32::from_rgb(37, 115, 187),
+                egui::Color32::from_rgba_unmultiplied(240, 246, 252, 224),
+                egui::Color32::from_rgba_unmultiplied(211, 226, 240, 240),
+                egui::Color32::from_rgb(33, 56, 79),
+            )
+        };
+        // La zona final ocupa el espacio real que tendrá el panel.
         if let Some(target) = target {
             let rect = self.preview_rect(drag.pane, target, screen);
             painter.rect_filled(
                 rect,
-                2.0,
-                egui::Color32::from_rgba_unmultiplied(72, 161, 228, 65),
+                3.0,
+                egui::Color32::from_rgba_unmultiplied(72, 161, 228, 52),
             );
             painter.rect_stroke(
                 rect,
-                2.0,
-                egui::Stroke::new(3.0, egui::Color32::from_rgb(74, 172, 240)),
+                3.0,
+                egui::Stroke::new(2.0, accent),
                 egui::StrokeKind::Inside,
             );
-        } else {
-            painter.text(
-                pointer + egui::vec2(18.0, 18.0),
-                egui::Align2::LEFT_TOP,
-                format!("{} · soltar para desacoplar", drag.pane.title()),
-                egui::FontId::proportional(12.0),
-                egui::Color32::WHITE,
+        }
+        // Cuatro pictogramas geométricos: izquierda/derecha, superior/inferior.
+        for (side, x) in [
+            (Place::Left, screen.left() + 39.0),
+            (Place::Right, screen.right() - 39.0),
+        ] {
+            for (slot, dy) in [(Slot::Top, -29.0), (Slot::Bottom, 29.0)] {
+                let box_rect = egui::Rect::from_center_size(
+                    egui::pos2(x, screen.center().y + dy),
+                    egui::vec2(62.0, 46.0),
+                );
+                let selected = target == Some(DockTarget { side, slot });
+                painter.rect_filled(box_rect, 5.0, if selected { accent } else { guide_bg });
+                painter.rect_stroke(
+                    box_rect,
+                    5.0,
+                    egui::Stroke::new(if selected { 2.0 } else { 1.0 }, guide_border),
+                    egui::StrokeKind::Inside,
+                );
+                let outline = box_rect.shrink2(egui::vec2(13.0, 9.0));
+                painter.rect_filled(outline, 2.0, interior);
+                let half = match slot {
+                    Slot::Top => egui::Rect::from_min_max(
+                        outline.min,
+                        egui::pos2(outline.right(), outline.center().y),
+                    ),
+                    Slot::Bottom => egui::Rect::from_min_max(
+                        egui::pos2(outline.left(), outline.center().y),
+                        outline.max,
+                    ),
+                };
+                painter.rect_filled(
+                    half.shrink(1.0),
+                    1.0,
+                    if selected { guide_bg } else { accent },
+                );
+                painter.rect_stroke(
+                    outline,
+                    2.0,
+                    egui::Stroke::new(1.0, guide_border),
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        // Un panel acoplado no tiene ventana real: mostrar su silueta flotante.
+        // Si ya es flotante, la ventana nativa de egui sigue el ratón.
+        if self.state(drag.pane).place != Place::Floating {
+            let pane_size = self.state(drag.pane).size;
+            let size = egui::vec2(pane_size[0].clamp(245.0, 335.0), 155.0);
+            let ghost = ghost_bounds(pointer, screen, size);
+            let header = egui::Rect::from_min_size(ghost.min, egui::vec2(ghost.width(), 34.0));
+            painter.rect_filled(ghost, 6.0, ghost_bg);
+            painter.rect_filled(header, 6.0, ghost_header);
+            painter.rect_stroke(
+                ghost,
+                6.0,
+                egui::Stroke::new(1.25, accent),
+                egui::StrokeKind::Inside,
             );
+            painter.text(
+                header.left_center() + egui::vec2(16.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                drag.pane.title(),
+                egui::FontId::proportional(14.0),
+                ghost_text,
+            );
+            // Trazos abstractos: insinúan el contenido sin duplicar controles.
+            for i in 0..3 {
+                let bar = egui::Rect::from_min_size(
+                    egui::pos2(
+                        ghost.left() + 17.0,
+                        header.bottom() + 17.0 + i as f32 * 26.0,
+                    ),
+                    egui::vec2(ghost.width() * (0.57 - i as f32 * 0.08), 7.0),
+                );
+                painter.rect_filled(bar, 3.0, guide_border);
+            }
         }
     }
 
@@ -639,6 +712,17 @@ impl PanelLayout {
 mod tests {
     use super::*;
 
+    #[test]
+    fn visual_ghost_remains_inside_normal_viewport() {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0));
+        let size = egui::vec2(335.0, 155.0);
+        for pointer in [egui::pos2(0.0, 0.0), egui::pos2(1279.0, 799.0)] {
+            let rect = ghost_bounds(pointer, screen, size);
+            assert!(screen.contains(rect.min));
+            assert!(screen.contains(rect.max));
+            assert_eq!(rect.size(), size);
+        }
+    }
     #[test]
     fn default_is_stacked_at_left() {
         let layout = PanelLayout::load();
@@ -762,7 +846,8 @@ mod tests {
         layout.move_to(Pane::Properties, Place::Right, &ctx);
         assert_eq!(layout.state(Pane::Properties).place, Place::Right);
         layout.reset();
-        assert!(layout.both_in(Place::Left));
+        assert_eq!(layout.state(Pane::Project).place, Place::Left);
+        assert_eq!(layout.state(Pane::Properties).place, Place::Left);
     }
 
     #[test]

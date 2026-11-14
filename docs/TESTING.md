@@ -1,5 +1,13 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Pruebas manuales 018 — Docking estético
+- Confirmar que no hay menú «Posición» y aparecen seis puntos junto al título de los paneles acoplados.
+- Mantener pulsado sobre el asa, arrastrar hacia el centro: ver silueta semitransparente siguiendo el cursor, soltar para desacoplar.
+- Arrastrar sobre cada uno de los cuatro destinos: comprobar que son pictogramas sin texto, y que se previsualiza el lugar final.
+- Arrastrar desde barra de título de ventana flotante al lateral: acopla sin activar por redimensionar o editar controles.
+- Probar en Claro y Oscuro; comprobar contraste de guías, fantasma, títulos y contenido de propiedades.
+- Reiniciar: persiste la distribución portable `config/panels.json`; Vista > Restablecer paneles funciona.
+- Comprobar pivote, carga/cancelación STL, origen CNC y biblioteca de herramientas sin cambios.
 ## Pruebas manuales del ajuste 017
 - Ejecutar el EXE compilado sin instalación: `config/` debe crearse a su lado al guardar preferencias, paneles o herramientas.
 - Cambiar Claro/Oscuro en Herramientas > Opciones y comprobar actualización inmediata de menús, paneles y herramientas, manteniendo el cielo del visor.

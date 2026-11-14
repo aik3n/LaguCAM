@@ -99,3 +99,7 @@ La petición específica de implementar cinco geometrías autoriza el alcance de
 - **Durante el desarrollo:** no mantener compatibilidad ni migraciones de configuraciones anteriores; no borrar los archivos antiguos, simplemente no leerlos.
 - **Apariencia:** tema Oscuro por defecto y Claro opcional, cambio inmediato mediante Herramientas > Opciones; paletas globales egui, fondo del visor 3D sin cambios.
 - **Alcance:** configuración de usuario separada de `.lagucam`; preparado para ampliar Opciones cuando se aprueben otras preferencias.
+## D-032 — Docking visual sin menú de posición
+- **Estado:** ACEPTADA por el responsable durante desarrollo.
+- **Decisión:** sustituir el menú Posición por asa de arrastre, ghost del panel durante el movimiento y guías de acoplamiento sin etiquetas de texto; mantener las reglas de acoplamiento y la configuración portable actuales.
+- **Consecuencia:** interacción de docking más cercana a IDE/CAD; los pictogramas no sustituyen las ayudas contextuales del asa para descubrir la función.

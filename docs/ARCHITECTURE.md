@@ -1,5 +1,7 @@
 # Arquitectura de LaguCAM
 
+## Docking visual 018
+`src/panel_layout.rs` pinta un asa de seis puntos mediante egui (sin depender de fuentes), una silueta flotante no interactiva y cuatro guías geométricas para la posición de acoplamiento. No se modifica `DockTarget`, el formato serializado de `Settings` ni `config/panels.json`. Las guías y la silueta se dibujan en una capa `Tooltip`, sin consumir interacción. Los colores siguen el tema visual activo de egui.
 ## Configuración portable y apariencia 017
 `src/portable.rs` resuelve los tres JSON globales en `config/`, como subcarpeta de la carpeta del ejecutable. `src/options.rs` conserva preferencias de apariencia versionadas y aplica temas en caliente mediante `egui::Visuals`. No existe dependencia de AppData ni migración de ubicaciones previas; el archivo `.lagucam` sigue independiente. En desarrollo `cargo run`/`target/release` escriben la configuración junto al ejecutable de compilación, no necesariamente en la raíz del repositorio.
 ## Interfaz 016 — Guías de acoplamiento
