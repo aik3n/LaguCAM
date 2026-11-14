@@ -1,10 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod navigation;
 mod overlay;
 mod preview;
 mod project;
 mod project_ui;
 mod render;
+mod scene_pick;
 mod stl;
 mod stock_render;
 mod tools;
@@ -45,6 +47,9 @@ enum FileAction {
     Exit,
 }
 
+type PickResult = Result<Option<glam::Vec3>, String>;
+type PickMailbox = Arc<Mutex<Option<PickResult>>>;
+
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
@@ -72,6 +77,9 @@ struct App {
     pitch: f32,
     distance: f32,
     pan: glam::Vec3,
+    pending_pick: Option<egui::Pos2>,
+    pick_result: PickMailbox,
+    orbit_pivot: Option<glam::Vec3>,
 }
 
 impl App {
@@ -122,6 +130,9 @@ impl App {
             pitch: 35f32.to_radians(),
             distance: 1.0,
             pan: glam::Vec3::ZERO,
+            pending_pick: None,
+            pick_result: Arc::new(Mutex::new(None)),
+            orbit_pivot: None,
         };
         if let Some(path) = std::env::args_os().nth(1) {
             app.open(PathBuf::from(path), cc.egui_ctx.clone());
@@ -146,6 +157,8 @@ impl App {
         if self.busy() {
             return;
         }
+        self.pending_pick = None;
+        *self.pick_result.lock() = None;
         self.opening_project = opening;
         self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
@@ -304,6 +317,23 @@ impl App {
                 }
             }
         }
+        // El callback de OpenGL deja el resultado para el siguiente frame egui.
+        let hit = { self.pick_result.lock().take() };
+        if let Some(hit) = hit {
+            match hit {
+                Ok(Some(point)) => {
+                    self.orbit_pivot = Some(point);
+                    self.message = "Pivote seleccionado. Arrastra para girar a su alrededor; Vista > Centrar para restablecer.".into();
+                }
+                Ok(None) => {
+                    self.message =
+                        "No hay superficie bajo el clic; pivote anterior conservado.".into();
+                }
+                Err(error) => {
+                    self.message = format!("ERROR: No se pudo establecer el pivote: {error}");
+                }
+            }
+        }
         if self.busy() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -314,6 +344,9 @@ impl App {
         self.pitch = 35f32.to_radians();
         self.distance = 1.0;
         self.pan = glam::Vec3::ZERO;
+        self.orbit_pivot = None;
+        self.pending_pick = None;
+        *self.pick_result.lock() = None;
     }
 
     fn file_dialog(&mut self, ctx: egui::Context) {
@@ -646,10 +679,28 @@ impl App {
         sky.add_triangle(0, 1, 2);
         sky.add_triangle(0, 2, 3);
         ui.painter().add(egui::Shape::mesh(sky));
+        if response.clicked()
+            && !self.busy()
+            && self.project.model.is_some()
+            && self.project.selection != project::selection::Selection::Origin
+        {
+            self.pending_pick = response
+                .interact_pointer_pos()
+                .filter(|p| rect.contains(*p));
+            ui.ctx().request_repaint();
+        }
         if response.dragged_by(egui::PointerButton::Primary) {
             let drag = response.drag_motion();
-            self.yaw -= drag.x * 0.008;
-            self.pitch = (self.pitch + drag.y * 0.008).clamp(-1.45, 1.45);
+            let new_yaw = self.yaw - drag.x * 0.008;
+            let new_pitch = (self.pitch + drag.y * 0.008).clamp(-1.45, 1.45);
+            if let Some(pivot) = self.orbit_pivot {
+                // Rotar la camara alrededor del punto elegido, sin moverlo en pantalla.
+                self.pan = navigation::orbit_target_around_pivot(
+                    self.pan, pivot, self.yaw, self.pitch, new_yaw, new_pitch,
+                );
+            }
+            self.yaw = new_yaw;
+            self.pitch = new_pitch;
             ui.ctx().request_repaint();
         }
         if response.dragged_by(egui::PointerButton::Secondary)
@@ -684,6 +735,9 @@ impl App {
         let renderer = Arc::clone(&self.renderer);
         let stock_renderer = Arc::clone(&self.stock_renderer);
         let stock_geometry = stock_render::StockGeometry::from_project(&self.project);
+        let picking = self.pending_pick.take();
+        let pick_result = Arc::clone(&self.pick_result);
+        let pick_ctx = ui.ctx().clone();
         ui.painter().add(egui::PaintCallback {
             rect,
             callback: Arc::new(egui_glow::CallbackFn::new(move |info, painter| {
@@ -705,6 +759,30 @@ impl App {
                     let mut mesh = renderer.lock();
                     mesh.set_model_color(model_color);
                     mesh.paint(painter.gl(), yaw, pitch, distance, aspect, pan);
+                }
+                // Consultar la escena renderizada: no se relee el fichero ni se
+                // inspeccionan triángulos desde la UI. Solo una vez por clic sobre el modelo.
+                if let Some(pos) = picking {
+                    let viewport = info.viewport_in_pixels();
+                    let x = (pos.x * info.pixels_per_point).floor() as i32;
+                    let y = info.screen_size_px[1] as i32
+                        - 1
+                        - (pos.y * info.pixels_per_point).floor() as i32;
+                    let hit = scene_pick::pick_visible_surface(
+                        painter.gl(),
+                        painter.intermediate_fbo(),
+                        scene_pick::PixelViewport {
+                            left: viewport.left_px,
+                            bottom: viewport.from_bottom_px,
+                            width: viewport.width_px,
+                            height: viewport.height_px,
+                        },
+                        x,
+                        y,
+                        navigation::view_projection(yaw, pitch, distance, aspect, pan),
+                    );
+                    *pick_result.lock() = Some(hit);
+                    pick_ctx.request_repaint();
                 }
                 // El STL ya ha escrito el depth buffer. No se modifica su importador.
                 stock_renderer.lock().paint(
@@ -733,10 +811,46 @@ impl App {
             response.clicked(),
             response.hover_pos(),
         );
+        if let Some(pivot) = self.orbit_pivot {
+            // El indicador marca el punto REAL seleccionado, no el centro de pantalla.
+            let mvp = navigation::view_projection(
+                self.yaw,
+                self.pitch,
+                self.distance,
+                rect.width() / rect.height().max(1.0),
+                self.pan,
+            );
+            let clip = mvp * pivot.extend(1.0);
+            if clip.is_finite() && clip.w > 0.0 {
+                let ndc = clip.truncate() / clip.w;
+                if ndc.is_finite()
+                    && ndc.x.abs() <= 1.0
+                    && ndc.y.abs() <= 1.0
+                    && (-1.0..=1.0).contains(&ndc.z)
+                {
+                    let p = rect.center()
+                        + egui::vec2(ndc.x * rect.width() * 0.5, -ndc.y * rect.height() * 0.5);
+                    // Dos trazos contrastados: visible sobre cielo y malla oscura.
+                    let outside = egui::Stroke::new(3.0, egui::Color32::BLACK);
+                    let inside = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 230, 70));
+                    for stroke in [outside, inside] {
+                        ui.painter().circle_stroke(p, 6.0, stroke);
+                        ui.painter().line_segment(
+                            [p + egui::vec2(-10.0, 0.0), p + egui::vec2(10.0, 0.0)],
+                            stroke,
+                        );
+                        ui.painter().line_segment(
+                            [p + egui::vec2(0.0, -10.0), p + egui::vec2(0.0, 10.0)],
+                            stroke,
+                        );
+                    }
+                }
+            }
+        }
         ui.painter().text(
             rect.left_top() + egui::vec2(12.0, 12.0),
             egui::Align2::LEFT_TOP,
-            "VISTA 3D  ·  Rotar: arrastrar  ·  Zoom: rueda  ·  Desplazar: botón derecho",
+            "VISTA 3D  ·  Rotar: arrastrar  ·  Clic: pivote  ·  Zoom: rueda  ·  Desplazar: botón derecho",
             egui::FontId::monospace(12.0),
             egui::Color32::LIGHT_GRAY,
         );

@@ -61,3 +61,18 @@ La documentación se actualiza con el cambio; no añadir pruebas inexistentes ni
 - Decisión D-024: operaciones futuras con referencia al UUID global, nunca snapshots ni parámetros ocultos. D-010 sustituida. No se implementan aún operaciones ni cambios de formato `.lagucam`.
 - Fondo de visor en degradado azul cielo mediante malla egui; el renderizador borra únicamente profundidad. STL grande, stock, origen y rendimiento pendientes de validación gráfica.
 - Controles Rust: el instalador ejecuta `fmt --check`, `clippy -D warnings`, `test --locked`, `build --release`; resultados por confirmar en el equipo Windows.
+
+## 2026-11-14 — Pivote visual independiente del formato (010)
+
+- **Base:** `46f66fce07236e296a0c92dc27645b3b2e3e6cf8`. Sin commit nuevo.
+- Doble clic para elegir un pivote de rotación sobre una superficie renderizada, sin leer ni alterar STL, malla, bruto, origen CNC o datos `.lagucam`.
+- Matriz de cámara compartida y servicio de consulta de profundidad 1×1 compatible con MSAA; restituye estado GL al terminar y no utiliza memoria proporcional al número de caras.
+- Pivote recuperable desde `Vista > Centrar vista` y marca discreta cuando hay pivote personalizado.
+- **Pruebas:** el instalador ejecutará fmt, clippy, test y release en el equipo del usuario; prueba funcional OpenGL y regresión STL grande pendientes.
+
+## 2026-11-14 — Pivote por clic simple sin salto (011)
+
+- Base de Git: `46f66fce07236e296a0c92dc27645b3b2e3e6cf8` con la 010 v2 instalada localmente. Sin commit automatico.
+- Sustituido doble clic por clic simple; se elige el pivote sin alterar la proyeccion actual. El siguiente arrastre orbita alrededor de ese punto y la marca se muestra donde realmente fue seleccionado.
+- Se mantiene el servicio de consulta de escena independiente de los importadores y no se modifican STL grande, bruto, origen CNC, biblioteca ni formato `.lagucam`.
+- Pruebas matematicas adicionales; compilacion, interfaz GPU y regresion de STL grande pendientes en la instalacion Windows.

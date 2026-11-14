@@ -2,7 +2,7 @@
 //! hasta confirmar la subida completa del reemplazo.
 use crate::preview::PreviewMesh;
 use eframe::glow;
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use glow::HasContext as _;
 
 struct GpuChunk {
@@ -224,21 +224,7 @@ void main() {
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
             if !self.active.is_empty() {
-                let distance = fit_distance(aspect) * distance;
-                let eye = pan
-                    + Vec3::new(
-                        distance * pitch.cos() * yaw.cos(),
-                        distance * pitch.cos() * yaw.sin(),
-                        distance * pitch.sin(),
-                    );
-                let view = Mat4::look_at_rh(eye, pan, Vec3::Z);
-                let proj = Mat4::perspective_rh_gl(
-                    45f32.to_radians(),
-                    aspect.max(0.001),
-                    0.001,
-                    (distance + pan.length() + 10.0).max(100.0),
-                );
-                let mvp = proj * view;
+                let mvp = crate::navigation::view_projection(yaw, pitch, distance, aspect, pan);
                 gl.use_program(Some(self.program));
                 gl.uniform_3_f32(
                     gl.get_uniform_location(self.program, "u_model_color")
@@ -279,9 +265,7 @@ void main() {
 }
 
 pub fn fit_distance(aspect: f32) -> f32 {
-    let vertical = 22.5_f32.to_radians();
-    let horizontal = (vertical.tan() * aspect.max(0.001)).atan();
-    3.0_f32.sqrt() / vertical.min(horizontal).sin() * 1.05
+    crate::navigation::fit_distance(aspect)
 }
 
 #[cfg(test)]

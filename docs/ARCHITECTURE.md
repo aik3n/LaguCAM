@@ -152,3 +152,19 @@ No hay cambios en `src/stl.rs`, `src/preview.rs`, `src/render.rs`, `src/stock_re
 - La biblioteca `App::tool_library` sigue siendo **global** y existe sin STL/proyecto. Solo se abre desde `Herramientas -> Biblioteca de herramientas` en el menú principal.
 - Se elimina el acceso a la biblioteca desde el árbol y la variante obsoleta `Selection::Tools`, sin modificar los archivos `.lagucam` porque la selección visual no se persiste. Las operaciones todavía no asignan herramientas; cuando se implementen guardarán el UUID global sin copiar propiedades.
 - El degradado del viewport se dibuja como `egui::Mesh` de cuatro vértices, **antes** del callback OpenGL. En `Render3d::paint` se limpia solo `DEPTH_BUFFER_BIT`; se conserva la carga GPU por bloques y la profundidad para malla y bruto. Requiere prueba gráfica y con STL grande en Windows.
+
+## Implementación 010 — Navegación por pivote genérico
+
+- `src/navigation.rs` define la matriz de cámara orbital y la desproyección en coordenadas visuales, sin depender del formato STL/STEP/IGES ni de egui.
+- `src/scene_pick.rs` consulta la profundidad del renderizado de la escena en un único píxel mediante un FBO 1×1 para resolver MSAA. No almacena duplicados de geometría ni abre el STL del disco.
+- `src/main.rs` registra el doble clic y comunica el resultado del callback GL al siguiente frame. Solo cambia el pivote de cámara; no modifica el origen CNC, las coordenadas de geometría ni `.lagucam`.
+- La primera superficie seleccionable es la malla que produce el renderizador actual; futuros backends podrán aportar profundidad al mismo mecanismo de escena sin cambios en la navegación. La lectura de profundidad es para **interacción visual**, no para cálculo CAM.
+- Pivote inicial y `Vista > Centrar vista`: centro de bounds del modelo; si no hay hit o el driver no permite el readback, se conserva el anterior. El arrastre derecho desplaza vista/pivote como hasta ahora.
+- Pendiente validación en GPU real, incluida muestra única/MSAA, bruto y malla de ~1 GB.
+
+## Ajuste 011 — Pivote por clic sin salto
+
+- `src/navigation.rs` mantiene separados el centro de la vista (`target`) y el pivote orbital seleccionado. Elegir un punto no cambia la matriz de cámara ni desplaza la vista.
+- En el siguiente arrastre, el centro de cámara se transforma en torno al pivote mediante las bases ortonormales de las orientaciones anterior y nueva. El punto elegido permanece estable en pantalla mientras gira.
+- El marcador se proyecta sobre su posicion real en pantalla, no sobre el centro del viewport. Un clic sin geometria conserva la seleccion anterior.
+- No hay dependencia del formato: la escena aporta la profundidad visible. El modo Origen CNC mantiene prioridad para elegir sus puntos rojos.

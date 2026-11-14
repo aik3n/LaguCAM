@@ -80,3 +80,23 @@ La cadena de verificación debe incluir:
 - Prueba de máquina: requiere procedimiento controlado; nunca derivarla de una revisión de código.
 
 Registrar explícitamente cuál se realizó y cuál falta.
+
+## Ensayos de pivote de navegación (010)
+
+1. Abrir STL pequeño; doble clic en una cara: debe aparecer una cruz discreta en el centro de giro. Girar y hacer zoom sin que el punto se desplace con respecto al modelo.
+2. Doble clic en el cielo: se mantiene el pivote y aparece mensaje, sin salto de cámara.
+3. `Vista > Centrar vista`: restaura centro visual de bounds y encuadre inicial; desaparece la marca de pivote personalizado.
+4. Girar, hacer zoom y desplazar; comprobar bruto, marcadores de origen CNC y proyectos `.lagucam` previos.
+5. Repetir sobre STL cercano a 1 GB: comprobar que no se vuelve a leer desde disco, que no aumenta memoria de forma proporcional al STL y que el clic no bloquea perceptiblemente el visor.
+6. Con GPU y driver de Windows, comprobar profundidad con MSAA 4×, vistas en perspectiva, bordes de triángulo, paneles redimensionados y escalado DPI distinto de 100%.
+
+La lectura GPU es visual, no una consulta geométrica exacta para CAM.
+
+## Ensayos 011 — Clic simple sin movimiento inmediato
+
+1. Sobre una zona reconocible del STL, hacer clic simple. Confirmar que ni el modelo ni el encuadre saltan en ese instante, y que la marca aparece sobre el punto elegido.
+2. Arrastrar con el boton izquierdo: la escena rota alrededor de ese punto manteniendolo fijo en pantalla. Probar otros puntos, pendientes fuertes y modelos planos.
+3. Clic sobre el cielo: conserva el pivote anterior. «Vista > Centrar vista» recupera pivote y encuadre iniciales.
+4. En Origen CNC, seleccionar puntos rojos sin cambiar el pivote de navegacion. Verificar pan derecho, zoom y bruto.
+5. Repetir en el STL real cercano a 1 GB, comprobando fluidez, ausencia de otra lectura del archivo y funcionamiento de biblioteca y `.lagucam`.
+6. Verificar en Windows con DPI distinto de 100% y MSAA 4x.

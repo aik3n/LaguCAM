@@ -77,3 +77,17 @@ A continuación: modelo y biblioteca de herramientas, empezando por acordar geom
 - **Preparado para probar en Windows:** el fondo del visor 3D usa degradado azul cielo; STL y bruto conservan el render por profundidad. Es una modificación visual; no se ha medido rendimiento con STL de casi 1 GB.
 - **Diseño acordado / no implementado aún:** cada operación futura referenciará el UUID global de una fresa; no habrá colección de fresas del proyecto ni copias ocultas. La operación fallará ante herramienta ausente; cambios invalidarán resultados anteriores.
 - **Evidencia:** lectura del HEAD `1e5d5868547fb49e7d151e3d4402d9edfdd1c87f` y preparación del instalador 009; `fmt`, `clippy`, `test`, `release` y prueba gráfica pendientes de ejecución en Windows.
+
+## Implementación 010 — Pivote visual
+
+- **CÓDIGO PREPARADO, PENDIENTE DE COMPILAR Y PROBAR EN WINDOWS:** doble clic sobre la superficie visible para fijar el pivote orbital. Marca cruzada en pantalla; `Vista > Centrar vista` recupera centro y zoom inicial.
+- Arquitectura independiente del formato. Nueva implementación de picking sobre la profundidad que ya existe en GPU; no se añade memoria proporcional al número de triángulos ni se vuelve a leer el archivo STL.
+- Un fallo de driver o clic en el cielo no modifica el pivote. Persistencia `.lagucam`, herramienta global, bruto, origen CNC, formato de STL y operaciones no cambian.
+- **Validaciones pendientes:** `cargo fmt --check`, `cargo clippy`, `cargo test`, `cargo build --release`, Windows/OpenGL y prueba del STL grande. No se atribuyen resultados no ejecutados.
+- Base de esta modificación: `46f66fce07236e296a0c92dc27645b3b2e3e6cf8`; entrega sin commit nuevo.
+
+## Ajuste 011 — Interaccion de pivote
+
+- Cambio solicitado y aprobado: un clic simple sobre el modelo elige el pivote SIN mover la vista. Girar posteriormente orbita alrededor de ese punto. Un indicador marca su posicion sobre la geometria y «Vista > Centrar vista» lo restablece.
+- El usuario confirmo que la 010 v2 compila y arranca en Windows; este ajuste 011 y el comportamiento grafico siguen pendientes de prueba funcional.
+- `cargo fmt`, `clippy`, `test` y `build --release` se ejecutaran en el instalador del usuario; no se atribuyen resultados antes de su ejecucion.

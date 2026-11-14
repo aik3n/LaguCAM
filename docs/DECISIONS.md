@@ -50,3 +50,20 @@ No convertir automáticamente una recomendación de un asistente en **ACEPTADA**
 ## Nota de implementación de herramientas (sin cambiar decisiones previas)
 
 La petición específica de implementar cinco geometrías autoriza el alcance de este cambio. Se documentan aquí las fórmulas en `LIBRARIES.md`, pero **D-020 conserva su estado de PROPUESTA** hasta la aceptación expresa del catálogo definitivo por el responsable. No se ratifican otras propuestas del registro ni se añaden decisiones sobre máquinas o postprocesado.
+
+## Decisión D-025 — Navegación y formatos
+
+- **Fecha:** 2026-11-14. **Estado:** ACEPTADA expresamente por el responsable en la conversación de desarrollo.
+- **Contexto:** necesidad de fijar el pivote de órbita mediante doble clic, hoy sobre STL, sin condicionar STEP, IGES ni ningún formato futuro.
+- **Criterio:** cámara/navegación independiente de importadores. La escena proporciona una consulta genérica de superficie visible; los importadores y renderizadores resuelven su propia representación. No cambiar el origen CNC ni los datos originales.
+- **Alternativas:** recorrer el STL desde CPU (descartado por coste de STL grandes); construir un índice geométrico de todos los formatos ahora (fuera de alcance); lectura de profundidad renderizada (seleccionada para interacción visual).
+- **Consecuencias:** la precisión del hit es la precisión visual/rasterizada y no es válida para CAM; MSAA requiere resolver profundidad. Si falla la lectura, no se mueve el pivote.
+- **Pruebas requeridas:** matemáticas de proyección/desproyección, fondo sin superficie, MSAA, cambios de pivote, centrado y malla grande en la GPU real.
+- **SHA de base:** `46f66fce07236e296a0c92dc27645b3b2e3e6cf8`; sin SHA de nuevo commit.
+
+## D-026 — Clic simple sin desplazamiento de camara
+
+- **Estado:** ACEPTADA por el responsable el 2026-11-14. Modifica el gesto de D-025 (doble clic -> clic simple); mantiene su principio de independencia de formatos.
+- **Regla:** elegir una superficie cambia solo el pivote; ni punto de vista ni encuadre cambian durante el clic. Girar posteriormente usa el pivote elegido, con indicador situado sobre la proyeccion real del punto.
+- **Sin superficie:** conservar el pivote. **Centrar vista:** volver al pivote central. **Origen CNC:** sus puntos de seleccion tienen prioridad, no deben interferir con el pivote visual.
+- **Pruebas:** proyeccion invariada al elegir, punto fijo en pantalla durante arrastre, ventanas redimensionadas, MSAA y mallas grandes. Sin cambios de proyecto, herramientas ni G-code.
