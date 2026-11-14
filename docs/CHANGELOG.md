@@ -1,5 +1,13 @@
 # Historial de LaguCAM
 
+## Ajuste 017 — Portable por defecto y temas claro/oscuro
+- `config/settings.json`, `config/panels.json` y `config/tools.json` se ubican junto al ejecutable (en desarrollo: junto a `target/release/cam-libre-visor.exe`).
+- Herramientas > Opciones… permite seleccionar tema Claro u Oscuro, sin reiniciar; Oscuro es el predeterminado.
+- Apariencia centralizada, con paletas grafito y gris claro y acentos azules. El fondo del visor OpenGL permanece igual.
+- Se descartan las ubicaciones antiguas en AppData/HOME sin migración ni borrado, por decisión expresa del responsable durante desarrollo.
+- `portable.rs` proporciona rutas comunes y reemplazo seguro para configuraciones; la biblioteca conserva su guardado transaccional existente.
+- No se alteran proyectos `.lagucam`, geometría, origen CNC, importación STL, navegación o cálculo CAM.
+- Compilación y verificación gráfica en Windows pendientes de ejecutar por el usuario.
 ## Ajuste 016 — Acoplamiento directo con guías visuales (sin commit)
 - Arrastrar por la cabecera de Proyecto o Propiedades muestra cuatro guías de acoplamiento y la previsualización del lugar de destino.
 - Soltar cerca del borde izquierdo/derecho acopla el panel en la mitad superior/inferior. Soltar en el centro convierte un panel acoplado en flotante.

@@ -149,7 +149,7 @@ pub struct PanelLayout {
 
 impl PanelLayout {
     pub fn load() -> Self {
-        let path = layout_path();
+        let path = crate::portable::config_file("panels.json").ok();
         let settings = path
             .as_ref()
             .and_then(|p| fs::read(p).ok())
@@ -623,7 +623,7 @@ impl PanelLayout {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 let json = serde_json::to_vec_pretty(&self.settings).map_err(|e| e.to_string())?;
                 // Solo configuración visual, nunca la biblioteca ni el proyecto.
-                fs::write(path, json).map_err(|e| e.to_string())?;
+                crate::portable::atomic_write(path, &json)?;
                 Ok(())
             })();
             if let Err(e) = result {
@@ -632,28 +632,6 @@ impl PanelLayout {
             }
             self.dirty = false;
         }
-    }
-}
-
-fn layout_path() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .map(|p| p.join("LaguCAM").join("panels.json"))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|p| p.join("Library/Application Support/LaguCAM/panels.json"))
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
-            .map(|p| p.join("lagucam").join("panels.json"))
     }
 }
 

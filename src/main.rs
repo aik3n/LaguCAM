@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod navigation;
+mod options;
 mod overlay;
 mod panel_layout;
+mod portable;
 mod preview;
 mod project;
 mod project_ui;
@@ -164,6 +166,7 @@ struct App {
     pivot_press: PivotPress,
     navigation_bindings: NavigationBindings,
     panels: panel_layout::PanelLayout,
+    options: options::Options,
 }
 
 impl App {
@@ -220,6 +223,7 @@ impl App {
             pivot_press: PivotPress::default(),
             navigation_bindings: NavigationBindings::default(),
             panels: panel_layout::PanelLayout::load(),
+            options: options::Options::load(&cc.egui_ctx),
         };
         if let Some(path) = std::env::args_os().nth(1) {
             app.open(PathBuf::from(path), cc.egui_ctx.clone());
@@ -721,6 +725,11 @@ impl App {
                     self.tool_ui.open = true;
                     ui.close();
                 }
+                ui.separator();
+                if ui.button("Opciones…").clicked() {
+                    self.options.open = true;
+                    ui.close();
+                }
             });
             ui.menu_button("Vista", |ui| {
                 if ui.button("Centrar vista").clicked() {
@@ -1008,6 +1017,7 @@ impl eframe::App for App {
             &mut self.tool_library,
             self.tool_library_path.as_deref(),
         );
+        self.options.show(ui.ctx());
     }
 
     fn on_exit(&mut self, gl: Option<&glow::Context>) {

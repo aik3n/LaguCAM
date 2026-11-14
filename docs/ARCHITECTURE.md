@@ -1,5 +1,7 @@
 # Arquitectura de LaguCAM
 
+## Configuración portable y apariencia 017
+`src/portable.rs` resuelve los tres JSON globales en `config/`, como subcarpeta de la carpeta del ejecutable. `src/options.rs` conserva preferencias de apariencia versionadas y aplica temas en caliente mediante `egui::Visuals`. No existe dependencia de AppData ni migración de ubicaciones previas; el archivo `.lagucam` sigue independiente. En desarrollo `cargo run`/`target/release` escriben la configuración junto al ejecutable de compilación, no necesariamente en la raíz del repositorio.
 ## Interfaz 016 — Guías de acoplamiento
 `src/panel_layout.rs` mantiene el estado del gesto transitorio `DockDrag` separado de la configuración persistente `Settings`. La cabecera de cada panel acoplado y el título de cada ventana flotante inician arrastre; `target_at` calcula el destino por cursor; una capa de pintado superior muestra cuatro guías y el rectángulo de vista previa. La suelta confirma el destino o desacopla. El fichero global `panels.json` conserva el esquema v1; no se migra ni altera `.lagucam`.
 ## Interfaz de paneles del ajuste 015

@@ -1,5 +1,13 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Pruebas manuales del ajuste 017
+- Ejecutar el EXE compilado sin instalación: `config/` debe crearse a su lado al guardar preferencias, paneles o herramientas.
+- Cambiar Claro/Oscuro en Herramientas > Opciones y comprobar actualización inmediata de menús, paneles y herramientas, manteniendo el cielo del visor.
+- Reiniciar y comprobar que tema, paneles y biblioteca siguen la configuración de esa carpeta de EXE.
+- Ejecutar una segunda copia del programa desde otra carpeta y comprobar preferencias y herramientas independientes.
+- Confirmar que `%APPDATA%\\LaguCAM` no se consulta, copia, migra ni borra; la biblioteca nueva puede aparecer vacía.
+- Probar carpeta de programa sin permisos de escritura: debe mostrarse error al guardar preferencias, sin caída ni ruta alternativa oculta.
+- Verificar operaciones existentes: carga/cancelación STL, pivote, origen CNC, paneles flotantes y tamaño de ventana.
 ## Pruebas manuales del ajuste 016
 - Arrastrar desde la cabecera de Proyecto hasta el centro y soltar: debe convertirse en flotante sin alterar Propiedades.
 - Arrastrar el título de una ventana flotante hasta cada uno de los cuatro destinos: izquierda/derecha y arriba/abajo; comprobar guía y vista previa antes de soltar.

@@ -93,3 +93,9 @@ La petición específica de implementar cinco geometrías autoriza el alcance de
 - **Regla:** Proyecto y Propiedades siguen independientes y pueden desplazarse arrastrando sus cabeceras. Se muestran zonas de acoplamiento y la posición previa; soltar en el centro desacopla; izquierda/derecha permiten orden superior/inferior.
 - **Persistencia:** mantener esquema existente `panels.json` v1 y tamaños desacoplados del contenido; no incorporar layout al proyecto.
 - **Implementación:** evolución local del docking egui, sin nuevas dependencias ni cambios OpenGL. El menú Posición permanece como alternativa.
+## D-031 — Portabilidad por defecto y temas
+- **Estado:** ACEPTADA expresamente por el responsable el 2026-11-14.
+- **Decisión:** LaguCAM se distribuye como carpeta descomprimible con ejecutable y `config/` para preferencias, paneles y biblioteca. No usar AppData/Registro para datos propios.
+- **Durante el desarrollo:** no mantener compatibilidad ni migraciones de configuraciones anteriores; no borrar los archivos antiguos, simplemente no leerlos.
+- **Apariencia:** tema Oscuro por defecto y Claro opcional, cambio inmediato mediante Herramientas > Opciones; paletas globales egui, fondo del visor 3D sin cambios.
+- **Alcance:** configuración de usuario separada de `.lagucam`; preparado para ampliar Opciones cuando se aprueben otras preferencias.

@@ -10,30 +10,11 @@ use uuid::Uuid;
 
 const MAX_LIBRARY_BYTES: u64 = 32 * 1024 * 1024;
 
-/// Windows: %APPDATA%\LaguCAM\tools.json
-/// macOS: ~/Library/Application Support/LaguCAM/tools.json
-/// Linux/BSD: $XDG_CONFIG_HOME/lagucam/tools.json o ~/.config/lagucam/tools.json
+/// Biblioteca portable junto al ejecutable: config/tools.json.
+/// La configuración antigua no se lee ni se migra durante el desarrollo.
 pub fn config_path() -> Result<PathBuf, String> {
-    #[cfg(windows)]
-    {
-        let dir = std::env::var_os("APPDATA").ok_or("No se ha encontrado APPDATA")?;
-        Ok(PathBuf::from(dir).join("LaguCAM").join("tools.json"))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let home = std::env::var_os("HOME").ok_or("No se ha encontrado HOME")?;
-        Ok(PathBuf::from(home).join("Library/Application Support/LaguCAM/tools.json"))
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|s| PathBuf::from(s).join(".config")))
-            .ok_or("No se ha encontrado directorio de configuración del usuario")?;
-        Ok(base.join("lagucam").join("tools.json"))
-    }
+    crate::portable::config_file("tools.json")
 }
-
 /// Fichero ausente en primera ejecución: biblioteca vacía SOLO en memoria.
 /// JSON corrupto: error; no se trunca ni reescribe silenciosamente.
 pub fn load(path: &Path) -> Result<ToolLibrary, String> {
