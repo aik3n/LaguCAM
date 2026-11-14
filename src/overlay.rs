@@ -1,5 +1,5 @@
 //! 3D-projected construction overlays; no changes to OpenGL mesh uploads.
-//! Lines are drawn over the mesh (not depth-tested).
+//! Solo el indicador CNC permanece como dibujo 2D; el bruto usa OpenGL con depth test.
 use crate::project::Project;
 use eframe::egui;
 use glam::{Mat4, Vec3, Vec4};
@@ -48,41 +48,6 @@ pub fn paint(
             rect.center().y - y * rect.height() * 0.5,
         ))
     };
-    if stock.visible
-        && let Some(max) = stock.max()
-    {
-        let min = stock.min;
-        let corners = [
-            [min[0], min[1], min[2]],
-            [max[0], min[1], min[2]],
-            [min[0], max[1], min[2]],
-            [max[0], max[1], min[2]],
-            [min[0], min[1], max[2]],
-            [max[0], min[1], max[2]],
-            [min[0], max[1], max[2]],
-            [max[0], max[1], max[2]],
-        ];
-        let edges = [
-            (0, 1),
-            (0, 2),
-            (1, 3),
-            (2, 3),
-            (4, 5),
-            (4, 6),
-            (5, 7),
-            (6, 7),
-            (0, 4),
-            (1, 5),
-            (2, 6),
-            (3, 7),
-        ];
-        let stroke = egui::Stroke::new(1.8, egui::Color32::from_rgb(245, 184, 62));
-        for (a, b) in edges {
-            if let (Some(a), Some(b)) = (screen(corners[a]), screen(corners[b])) {
-                ui.painter().line_segment([a, b], stroke);
-            }
-        }
-    }
     if project.origin.visible
         && let Ok(origin) = project.origin.model_position(stock)
     {

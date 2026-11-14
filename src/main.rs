@@ -6,6 +6,7 @@ mod project;
 mod project_ui;
 mod render;
 mod stl;
+mod stock_render;
 
 use eframe::{egui, egui_glow, glow};
 use egui::mutex::Mutex;
@@ -27,6 +28,7 @@ struct PendingSuccess {
 
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
+    stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
     project: project::Project,
     property_error: String,
     receiving: Option<Receiver<LoadEvent>>,
@@ -45,8 +47,17 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, String> {
         let gl = cc.gl.as_ref().ok_or("Se necesita OpenGL")?;
+        let mut mesh_renderer = render::Render3d::new(gl)?;
+        let stock_renderer = match stock_render::StockRenderer::new(gl) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                mesh_renderer.destroy(gl);
+                return Err(error);
+            }
+        };
         let mut app = Self {
-            renderer: Arc::new(Mutex::new(render::Render3d::new(gl)?)),
+            renderer: Arc::new(Mutex::new(mesh_renderer)),
+            stock_renderer: Arc::new(Mutex::new(stock_renderer)),
             project: project::Project::default(),
             property_error: String::new(),
             receiving: None,
@@ -288,6 +299,8 @@ impl App {
         let pan = self.pan;
         let aspect = rect.width() / rect.height().max(1.0);
         let renderer = Arc::clone(&self.renderer);
+        let stock_renderer = Arc::clone(&self.stock_renderer);
+        let stock_geometry = stock_render::StockGeometry::from_project(&self.project);
         ui.painter().add(egui::PaintCallback {
             rect,
             callback: Arc::new(egui_glow::CallbackFn::new(move |info, painter| {
@@ -308,6 +321,18 @@ impl App {
                 renderer
                     .lock()
                     .paint(painter.gl(), yaw, pitch, distance, aspect, pan);
+                // El STL ya ha escrito el depth buffer. No se modifica su importador.
+                stock_renderer.lock().paint(
+                    painter.gl(),
+                    stock_geometry.as_ref(),
+                    stock_render::Camera {
+                        yaw,
+                        pitch,
+                        zoom: distance,
+                        aspect,
+                        pan,
+                    },
+                );
             })),
         });
         overlay::paint(ui, rect, &self.project, yaw, pitch, distance, pan);
@@ -341,6 +366,7 @@ impl eframe::App for App {
         self.cancel.store(true, Ordering::Relaxed);
         self.receiving = None;
         if let Some(gl) = gl {
+            self.stock_renderer.lock().destroy(gl);
             self.renderer.lock().destroy(gl);
         }
     }

@@ -1,5 +1,10 @@
 //! UI only: editable properties commit atomically after data-level validation.
-use crate::project::{Project, origin::OriginPreset, selection::Selection};
+use crate::project::{
+    Project,
+    display::{StockColor, StockMode},
+    origin::OriginPreset,
+    selection::Selection,
+};
 use eframe::egui;
 
 pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
@@ -83,7 +88,35 @@ pub fn show(ui: &mut egui::Ui, project: &mut Project, error: &mut String) {
         }
         Selection::Stock => {
             if let Some(stock) = &mut project.stock {
-                ui.checkbox(&mut stock.visible, "Mostrar aristas del bruto");
+                ui.checkbox(&mut stock.visible, "Mostrar bruto");
+                ui.label("Representación visual");
+                egui::ComboBox::from_label("Modo")
+                    .selected_text(project.stock_display.mode.label())
+                    .show_ui(ui, |ui| {
+                        for mode in StockMode::ALL {
+                            ui.selectable_value(
+                                &mut project.stock_display.mode,
+                                mode,
+                                mode.label(),
+                            );
+                        }
+                    });
+                egui::ComboBox::from_label("Color")
+                    .selected_text(project.stock_display.color.label())
+                    .show_ui(ui, |ui| {
+                        for color in StockColor::ALL {
+                            ui.selectable_value(
+                                &mut project.stock_display.color,
+                                color,
+                                color.label(),
+                            );
+                        }
+                    });
+                ui.add_enabled(
+                    project.stock_display.mode.has_faces(),
+                    egui::Slider::new(&mut project.stock_display.opacity_percent, 0..=100)
+                        .text("Opacidad (%)"),
+                );
                 let mut candidate = stock.clone();
                 ui.label("Posición de esquina mínima (modelo)");
                 let pos_changed = vector(ui, &mut candidate.min);
