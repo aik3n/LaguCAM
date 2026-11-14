@@ -1,5 +1,8 @@
 # Requisitos de LaguCAM
 
+## Actualización 019 — TL-06 y PRJ-03
+- **TL-06, parcialmente implementado:** las operaciones ya representan la referencia a herramienta mediante el mismo tipo UUID de la biblioteca; se almacena sin copia de geometría. La selección por operación, resolución en biblioteca, bloqueo por herramienta ausente e invalidación de trayectorias siguen pendientes.
+- **PRJ-03, esquema versionado:** versión `.lagucam` 2, que rechaza explícitamente documentos con versión 1 durante esta fase de desarrollo; valida el formato UUID de cada referencia de herramienta.
 **Estado:** borrador vivo, no todo implementado · **Base:** `0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9`
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.

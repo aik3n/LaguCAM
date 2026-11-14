@@ -10,6 +10,7 @@ use crate::{
         stock::Stock,
     },
     stl::{Bounds, StlInfo},
+    tools::model::{ToolId, validate_tool_id},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -19,7 +20,7 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 const MAX_PROJECT_FILE: u64 = 16 * 1024 * 1024;
 const SAMPLE_LENGTH: usize = 65_536;
 
@@ -97,7 +98,7 @@ pub struct SavedOperation {
     pub name: String,
     pub kind: String,
     pub status: String,
-    pub tool_id: Option<u64>,
+    pub tool_id: Option<ToolId>,
     pub toolpath_id: Option<u64>,
 }
 
@@ -173,7 +174,7 @@ impl ProjectState {
                         OperationStatus::Error => "error",
                     }
                     .into(),
-                    tool_id: op.tool_id,
+                    tool_id: op.tool_id.clone(),
                     toolpath_id: op.toolpath_id,
                 })
                 .collect(),
@@ -211,6 +212,9 @@ impl ProjectState {
             return Err("El bruto y el modelo deben existir juntos".into());
         }
         for op in &self.operations {
+            if let Some(id) = &op.tool_id {
+                validate_tool_id(id)?;
+            }
             if op.name.is_empty() || op.name.len() > 4096 {
                 return Err("Nombre de operación inválido".into());
             }
@@ -283,7 +287,7 @@ impl ProjectState {
                         "error" => OperationStatus::Error,
                         _ => OperationStatus::NotCalculated,
                     },
-                    tool_id: op.tool_id,
+                    tool_id: op.tool_id.clone(),
                     toolpath_id: op.toolpath_id,
                 })
                 .collect(),
@@ -663,7 +667,7 @@ mod tests {
                 name: "Primera".into(),
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Ready,
-                tool_id: Some(2),
+                tool_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
                 toolpath_id: None,
             },
             Operation {
@@ -711,6 +715,43 @@ mod tests {
         }
         fs::remove_dir_all(dir).unwrap();
     }
+    #[test]
+    fn operation_tool_id_is_uuid_in_json_and_restores_without_conversion() {
+        const UUID: &str = "550e8400-e29b-41d4-a716-446655440000";
+        let mut project = Project::default();
+        project.operations.items.push(Operation {
+            name: "Acabado".into(),
+            kind: OperationKind::Placeholder,
+            status: OperationStatus::NotCalculated,
+            tool_id: Some(UUID.into()),
+            toolpath_id: None,
+        });
+        let saved = ProjectState::capture(&project);
+        let value = serde_json::to_value(&saved).unwrap();
+        assert_eq!(value["operations"][0]["tool_id"].as_str(), Some(UUID));
+        let loaded: ProjectState = serde_json::from_value(value.clone()).unwrap();
+        let restored = loaded.restore(String::new(), None).unwrap();
+        assert_eq!(restored.operations.items[0].tool_id.as_deref(), Some(UUID));
+
+        let mut malformed = loaded;
+        malformed.operations[0].tool_id = Some("not-a-uuid".into());
+        assert!(malformed.validate(None).is_err());
+        let mut numeric = value;
+        numeric["operations"][0]["tool_id"] = serde_json::json!(42);
+        assert!(serde_json::from_value::<ProjectState>(numeric).is_err());
+    }
+
+    #[test]
+    fn old_numeric_project_schema_is_explicitly_rejected() {
+        let dir = workspace();
+        let file = dir.join("v1.lagucam");
+        let mut document = ProjectDocument::from_project(&Project::default(), None, &file).unwrap();
+        document.version = FORMAT_VERSION - 1;
+        fs::write(&file, serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(read_project(&file).unwrap_err().contains("Versión"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn relative_move_and_modified_stl_detection() {
         let dir = workspace();

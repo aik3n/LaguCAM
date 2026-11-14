@@ -1,5 +1,12 @@
 # Historial de LaguCAM
 
+## Ajuste 019 — ToolId UUID compartido (sin commit)
+- `src/tools/model.rs` define `ToolId = String` para el UUID de herramienta y una validación de formato reutilizable; `Tool`, `ToolLibrary::add`, `Operation` y `SavedOperation` comparten el mismo alias.
+- El proyecto guarda `tool_id` como cadena UUID o `null`, sin convertir a un identificador numérico ni almacenar copias de fresas.
+- El esquema `.lagucam` pasa de versión 1 a 2: los documentos antiguos se rechazan explícitamente; no hay migración en esta etapa de desarrollo.
+- Se añaden pruebas de ida/vuelta JSON, UUID incorrecto, identificador numérico antiguo y versión anterior.
+- Sin cambios en OpenGL, importador STL, trayectorias CAM, interfaz ni biblioteca física de herramientas.
+- Base verificada: `599ca50eec0c6a716d9bd5ffdf7511c35d94df7d`. Compilación y pruebas Cargo: pendientes de ejecutar con el instalador en Windows.
 ## Ajuste 018 — Pulido visual del docking
 - Se retira el botón «Posición». Los paneles acoplados tienen asa de seis puntos dibujada por egui y cabecera compacta.
 - Al arrastrar un panel acoplado aparece su silueta flotante translúcida, siguiendo el cursor. Los paneles ya flotantes mantienen el arrastre por su barra nativa.

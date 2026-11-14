@@ -1,6 +1,6 @@
 {
   "format": "LaguCAM",
-  "version": 1,
+  "version": 2,
   "units": "mm",
   "stl": {
     "path": "terrain_demo.stl",
@@ -29,7 +29,7 @@
       "size": [
         220.0,
         220.0,
-        67.29622721672058
+        62.29622721672058
       ],
       "visible": true
     },
@@ -39,10 +39,10 @@
       "opacity_percent": 25
     },
     "origin": {
-      "reference": "stock",
+      "reference": "model",
       "point": {
         "kind": "corner",
-        "index": 3
+        "index": 0
       },
       "offset": [
         0.0,

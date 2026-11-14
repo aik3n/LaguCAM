@@ -1,5 +1,11 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Comprobaciones 019 — UUID de herramientas
+- Ejecutar `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, `cargo build --locked --release`.
+- Verificar `ToolId` UUID en operaciones, `tools.json` y `.lagucam` v2 sin conversión a `u64`; `toolpath_id` conserva su tipo numérico propio.
+- Pruebas automáticas: UUID válido en JSON y restauración, UUID inválido rechazado, `tool_id` numérico rechazado, `.lagucam` v1 rechazado por versión.
+- Manual: guardar y reabrir proyecto v2 sin operaciones y con operaciones de prueba; comprobar que una biblioteca global vacía no impide abrir un proyecto. No se implementa resolución de fresas.
+- Regresión en Windows: cargar un STL grande conocido, mover cámara, modificar bruto/origen y comprobar configuración portable y paneles; sin mecanizado real.
 ## Pruebas manuales 018 — Docking estético
 - Confirmar que no hay menú «Posición» y aparecen seis puntos junto al título de los paneles acoplados.
 - Mantener pulsado sobre el asa, arrastrar hacia el centro: ver silueta semitransparente siguiendo el cursor, soltar para desacoplar.

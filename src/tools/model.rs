@@ -5,6 +5,17 @@ use uuid::Uuid;
 
 pub const LIBRARY_VERSION: u32 = 1;
 
+/// Identificador persistente de fresa: UUID representado como texto en JSON.
+/// Compartido por biblioteca, operaciones y documentos de proyecto.
+pub type ToolId = String;
+
+/// Una única validación de formato para todas las referencias a herramientas.
+pub fn validate_tool_id(id: &str) -> Result<(), String> {
+    Uuid::parse_str(id)
+        .map(|_| ())
+        .map_err(|_| "ID de herramienta inválido".into())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKind {
@@ -279,7 +290,7 @@ impl ToolGeometry {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tool {
-    pub id: String,
+    pub id: ToolId,
     pub revision: u64,
     pub name: String,
     pub geometry: ToolGeometry,
@@ -326,9 +337,7 @@ impl Tool {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if Uuid::parse_str(&self.id).is_err() {
-            return Err("ID de herramienta inválido".into());
-        }
+        validate_tool_id(&self.id)?;
         if self.revision == 0 {
             return Err("La revisión debe ser mayor que cero".into());
         }
@@ -403,7 +412,7 @@ impl ToolLibrary {
         self.tools.iter().find(|t| t.id == id)
     }
 
-    pub fn add(&mut self, mut draft: Tool) -> Result<String, String> {
+    pub fn add(&mut self, mut draft: Tool) -> Result<ToolId, String> {
         if !draft.id.is_empty() || draft.revision != 0 {
             return Err("Una herramienta nueva no debe reutilizar una identidad".into());
         }

@@ -1,5 +1,7 @@
 # Bibliotecas de herramientas, máquinas y postprocesadores
 
+## Identificador único de herramienta 019
+Las fresas de `tools.json`, las operaciones del proyecto y la persistencia `.lagucam` v2 comparten `tools::model::ToolId`, un alias de `String` que representa un UUID. Se valida mediante una única función y se conserva el valor exacto en cada referencia; no se copian geometrías ni se asignan números T. La falta de herramienta en la biblioteca aún no se comprueba en esta fase, porque no existe selección/resolución de herramienta por operación.
 **Estado:** diseño funcional acordado con componentes aún pendientes · **Fecha:** 2026-11-14
 
 Las capturas de DeskProto compartidas por el usuario son **referencias funcionales**, no instrucciones de copiar su diseño ni prueba de que sus valores sean capacidades certificadas de una máquina.
@@ -104,6 +106,6 @@ Para cada cono, α = ángulo total/2 (semiángulo respecto al eje). Si R es el r
 
 La parte no cortante se modela inicialmente con **diámetro de mango** y **longitud total** desde la punta axial hasta el extremo superior del mango representado. Debe ser mayor o igual a la longitud cortante. **No es la salida de pinza** y no modela el portaherramientas. Los registros anteriores con `free_length_mm` se leen sin alterar su número y pasan a `total_length_mm` al guardar; revisar esas longitudes si se introdujeron como salida de pinza. No se modelan cuello estrechado ni portaherramientas; se añadirán antes de evaluar colisiones. RPM, avance y número de filos son opcionales.
 
-El archivo global está en `%APPDATA%\LaguCAM\tools.json` (Windows) o el directorio de configuración equivalente (Linux/macOS). Esquema versión 1; UUIDv4 y revisión de herramienta permiten identificar cambios y marcar resultados como obsoletos. No se crean instantáneas de herramienta en los proyectos.
+El archivo global portable está en `config/tools.json`, junto al ejecutable, en Windows, Linux y macOS (salvo restricciones de distribución del sistema). Esquema versión 1; UUIDv4 y revisión de herramienta permiten identificar cambios y marcar resultados como obsoletos. No se crean instantáneas de herramienta en los proyectos.
 
 Esta convención corresponde a la primera implementación solicitada; no implica aprobar automáticamente decisiones abiertas ni certificar contactos o colisiones.

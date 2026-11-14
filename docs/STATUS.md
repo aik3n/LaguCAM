@@ -1,5 +1,10 @@
 # Estado actual de LaguCAM
 
+## Actualización 019 — Referencias UUID de herramientas
+- **Base del código:** `599ca50eec0c6a716d9bd5ffdf7511c35d94df7d`; entrega sin commit. El corte de 2026-11-14 documentado más abajo sigue siendo histórico.
+- **Cambio preparado:** `ToolId` compartido para biblioteca, operaciones y `.lagucam`; referencias `Option<String>` con validación UUID al cargar. No existe todavía selector ni cálculo de operaciones CAM.
+- **Formato de proyecto:** `.lagucam` v2 debido al cambio incompatible de `tool_id`. No se migran documentos v1 en desarrollo.
+- **Nivel de evidencia:** revisión estática del código; `cargo fmt`, `clippy`, `test`, `release` y prueba de apertura STL grande pendientes de ejecutar/confirmar en Windows.
 **Fecha del corte:** 2026-11-14  
 **Rama examinada:** `main`  
 **SHA:** `0e56d3f3f4d5022c1ee6a3d78e442d94c37192c9` — «puntos de origen»  

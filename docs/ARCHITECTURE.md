@@ -1,5 +1,7 @@
 # Arquitectura de LaguCAM
 
+## Referencias de herramienta 019 — Identidad compartida
+`src/tools/model.rs` es el único origen de `ToolId = String`, con formato UUID validado por `validate_tool_id`. La entidad `Tool`, la colección `Operation` y `SavedOperation` usan ese alias; `ProjectState::capture/restore` clonan la referencia sin transformación numérica. El JSON de `.lagucam` v2 serializa `tool_id` como cadena o `null`. `tools.json` sigue siendo independiente del proyecto y no se duplican definiciones de fresas. La validación comprueba formato, no existencia de la herramienta en la biblioteca (resolución pendiente). El modelo de render y la GUI no intervienen en estas referencias.
 ## Docking visual 018
 `src/panel_layout.rs` pinta un asa de seis puntos mediante egui (sin depender de fuentes), una silueta flotante no interactiva y cuatro guías geométricas para la posición de acoplamiento. No se modifica `DockTarget`, el formato serializado de `Settings` ni `config/panels.json`. Las guías y la silueta se dibujan en una capa `Tooltip`, sin consumir interacción. Los colores siguen el tema visual activo de egui.
 ## Configuración portable y apariencia 017

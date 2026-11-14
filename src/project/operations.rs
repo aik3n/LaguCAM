@@ -1,4 +1,5 @@
 /// Data-only ordered operations; no machining logic in this version.
+use crate::tools::model::ToolId;
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OperationKind {
@@ -17,7 +18,7 @@ pub struct Operation {
     pub name: String,
     pub kind: OperationKind,
     pub status: OperationStatus,
-    pub tool_id: Option<u64>,
+    pub tool_id: Option<ToolId>,
     pub toolpath_id: Option<u64>,
 }
 #[derive(Default)]
