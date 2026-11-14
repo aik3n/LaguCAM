@@ -1,6 +1,6 @@
 # Requisitos de LaguCAM
 
-> **Actualización vigente, código `f1e436b` (14-11-2026).** El proyecto `.lagucam` v2, la biblioteca de cinco fresas, la configuración portable y el UUID compartido ya existen en código. La huella geométrica SHA-256 está **acordada, no implementada**. En desarrollo no se exigen migraciones de formatos obsoletos; no borrar datos personales silenciosamente.
+> **Actualización vigente, código `f1e436b` (14-11-2026).** El proyecto `.lagucam` v2, la biblioteca de cinco fresas, la configuración portable y el UUID compartido ya existen en código. La huella geométrica SHA-256 v1 tiene implementación preparada en el ajuste 020, pendiente de pruebas Cargo. En desarrollo no se exigen migraciones de formatos obsoletos; no borrar datos personales silenciosamente.
 
 
 **Estado:** borrador vivo · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
@@ -89,7 +89,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 ## Requisitos añadidos tras D-033 y D-034
 
-- **TL-10 — Huella geométrica (ACEPTADA, pendiente de código):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
+- **TL-10 — Huella geométrica (ACEPTADA, código preparado; validación Cargo pendiente):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
 - **TL-11 — Vigencia de resultados (ACORDADO COMO OBJETIVO, aún sin operaciones):** futuro cálculo resuelve UUID actual y toma copia temporal inmutable; trayectoria identifica hash geométrico y demás dependencias; prohibir exportación si están obsoletas.
 - **PRJ-06 — Compatibilidad experimental (ACEPTADO):** durante desarrollo no mantener versiones anteriores ni migraciones obligatorias; comunicar incompatibilidades y no destruir archivos personales.
 - **CAM-07 — Separación de validez:** cambios tecnológicos como avance y RPM pueden requerir regenerar G-code sin modificar la geometría calculada; una coincidencia de hash geométrico no valida por sí sola máquina, setup ni programa.

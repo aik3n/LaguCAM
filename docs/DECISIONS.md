@@ -39,7 +39,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-031 | **ACEPTADA** | Distribución portable y temas Claro/Oscuro | `config/` junto al ejecutable; sin AppData ni Registro |
 | D-032 | **ACEPTADA** | Docking con asa de seis puntos, silueta y guías sin texto | Sustituye menú «Posición», sin cambios en los datos de proyecto |
 | D-033 | **ACEPTADA** | Durante desarrollo no se exige compatibilidad de formatos ni migraciones | Documentar roturas y conservar datos personales; `.lagucam` v1 se rechaza en el SHA revisado |
-| D-034 | **ACEPTADA COMO DEFINICIÓN; SIN IMPLEMENTAR** | SHA-256 de parámetros geométricos de herramienta, binario canónico y versionado | Igual geometría → mismo hash aunque cambie la revisión; no incluye identidad ni feeds/speeds |
+| D-034 | **ACEPTADA; FUNCIÓN V1 PREPARADA EN 020** | SHA-256 de parámetros geométricos de herramienta, binario canónico y versionado | Igual geometría → mismo hash aunque cambie la revisión; sin identidad ni feeds/speeds; ejecución Cargo pendiente |
 
 ## Cómo registrar una nueva decisión
 
@@ -79,3 +79,10 @@ Las D-025 a D-028 hacen independiente del formato la elección de pivote visual 
 - **Caso Ø6 → Ø4 → Ø6:** igual UUID, revisiones distintas, posibilidad de igual hash final al original **si coinciden todos los parámetros del hash**.
 - **Validez futura de trayectorias:** capturar temporalmente la definición de la biblioteca durante el cálculo y registrar UUID, huella y demás dependencias. Una igualdad del hash de fresa **no autoriza por sí sola** reutilizar trayectoria o G-code si cambiaron modelo, bruto, setup, estrategia, algoritmo u otros factores.
 - **Alcance del siguiente encargo posible:** función de hash y sus pruebas. **No añadir aún campos a operaciones ni formato `.lagucam`**; eso corresponde a otra etapa.
+
+
+## Implementación de D-034 — ajuste 020, sin cambiar el acuerdo
+- **Base:** commit `db5ee13bf70a6cdb861a5e94b279413606bd7b19`; implementación preparada en `src/tools/hash.rs`, pendiente de ejecutar Cargo en Windows y registrar SHA del próximo commit.
+- **Contrato v1:** dominio ASCII + NUL, versión u32 LE, código de tipo u8 fijo y cotas f64 IEEE-754 LE en orden explícito. Se rechazan NaN, infinitos y geometrías físicamente no válidas; el codificador normaliza -0.0 a +0.0 (aunque las cotas incluidas exigen positividad).
+- **Dependencia:** `sha2` 0.10.9 de RustCrypto, licencia MIT o Apache-2.0. Comprobar licencias transitivas resueltas antes de distribución.
+- **Alcance:** ninguna integración con operaciones, JSON `.lagucam`, UI ni motor CAM. Las reglas de validez futura de trayectorias de D-034 siguen pendientes.

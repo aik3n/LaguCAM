@@ -147,7 +147,14 @@ fn apply_theme(ctx: &egui::Context, theme: Theme) {
     visuals.widgets.active.bg_fill = egui::Color32::from_rgb(active[0], active[1], active[2]);
     visuals.selection.bg_fill = egui::Color32::from_rgb(accent[0], accent[1], accent[2]);
     visuals.hyperlink_color = egui::Color32::from_rgb(accent[0], accent[1], accent[2]);
-    ctx.set_visuals(visuals);
+    // En egui 0.37 cambiar solo los Visuals NO cambia el tema activo:
+    // ThemePreference::System puede seleccionar el tema opuesto al guardado.
+    let active_theme = match theme {
+        Theme::Dark => egui::Theme::Dark,
+        Theme::Light => egui::Theme::Light,
+    };
+    ctx.set_visuals_of(active_theme, visuals);
+    ctx.set_theme(active_theme);
     ctx.request_repaint();
 }
 
@@ -168,6 +175,39 @@ mod tests {
             let restored: Settings = serde_json::from_slice(&json).unwrap();
             assert_eq!(restored.theme, theme);
             assert_eq!(restored.version, 1);
+        }
+    }
+
+    #[test]
+    fn switching_theme_changes_real_egui_theme_and_palette() {
+        let ctx = egui::Context::default();
+        apply_theme(&ctx, Theme::Light);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        assert_eq!(
+            ctx.style_of(egui::Theme::Light).visuals.panel_fill,
+            egui::Color32::from_rgb(231, 236, 242)
+        );
+        apply_theme(&ctx, Theme::Dark);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
+        assert_eq!(
+            ctx.style_of(egui::Theme::Dark).visuals.panel_fill,
+            egui::Color32::from_rgb(30, 35, 43)
+        );
+    }
+
+    #[test]
+    fn saved_preference_restores_real_theme() {
+        let ctx = egui::Context::default();
+        for theme in [Theme::Light, Theme::Dark] {
+            let settings = Settings { version: 1, theme };
+            let json = serde_json::to_vec(&settings).unwrap();
+            let restored: Settings = serde_json::from_slice(&json).unwrap();
+            apply_theme(&ctx, restored.theme);
+            let expected = match theme {
+                Theme::Dark => egui::Theme::Dark,
+                Theme::Light => egui::Theme::Light,
+            };
+            assert_eq!(ctx.theme(), expected);
         }
     }
 }

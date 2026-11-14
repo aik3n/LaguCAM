@@ -33,7 +33,7 @@ No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de 
 - Tipos y fórmulas geométricas aprobados.
 - Validación de dimensiones y perfiles de prueba con casos degenerados.
 - Biblioteca global implementada; referencia UUID sin snapshot; selector filtrado desde operación aún pendiente.
-- SHA-256 geométrico canónico acordado, aún sin código; futuras trayectorias compararán huella y otras dependencias para evitar exportar resultados obsoletos.
+- SHA-256 geométrico canónico v1 implementado en el ajuste 020 (pendiente de ejecutar Cargo); futuras trayectorias compararán huella y otras dependencias para evitar exportar resultados obsoletos.
 - Visualización técnica y datos de corte no confundidos con geometría.
 
 ### Motor geométrico
@@ -54,7 +54,7 @@ No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de 
 ## Priorización inmediata tras `f1e436b`
 
 1. **UUID unificado en código:** biblioteca, operaciones y `.lagucam` v2. Comprobaciones de compilación y GUI del commit actual pendientes de acreditar.
-2. **Definición del SHA-256 geométrico:** aceptada. Próxima tarea posible: implementar **solo** hash binario canónico/versionado y tests, incluido Ø6 → Ø4 → Ø6, sin ampliar todavía operaciones ni persistencia.
+2. **Definición del SHA-256 geométrico:** aceptada. Ajuste 020 preparado: hash binario canónico/versionado y tests, incluido Ø6 → Ø4 → Ø6, sin ampliar operaciones ni persistencia; pendiente de validar en Windows.
 3. Posteriormente debatir el registro de dependencias, validez de trayectorias y condiciones de exportación, antes del motor CAM.
 4. Mantener documentación y pruebas de regresión; no invertir ahora en más cambios de interfaz ni en refactorizaciones cosméticas.
 

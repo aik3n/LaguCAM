@@ -1,5 +1,17 @@
 # Historial de LaguCAM
 
+## Ajuste 021 — Preferencia de tema aplicada y restaurada correctamente
+- Corregido `src/options.rs`: la preferencia Claro/Oscuro selecciona `egui::Theme` con `Context::set_theme`, además de aplicar su paleta con `set_visuals_of`.
+- En egui 0.37 `set_visuals` por sí solo no selecciona el tema; el tema del sistema podía quedar activo aunque el selector mostrara el contrario.
+- Se mantiene `config/settings.json` v1 y el guardado portable. Sin cambios en operaciones, hash geométrico 020, `.lagucam`, docking, visor o CAM.
+- Añadidas pruebas para selección efectiva de tema y restauración de la preferencia. Cargo y ensayo gráfico: se ejecutan en el Windows del usuario, no previamente aquí.
+## Ajuste 020 — Huella geométrica SHA-256 v1 (base db5ee13, entrega sin commit)
+- Nuevo `tools/hash.rs`: función pura `geometry_sha256(&Tool) -> Result<[u8; 32], String>`, sin serialización JSON ni dependencia de UI/CAM. Usa SHA-256 de RustCrypto (`sha2` 0.10.9, MIT/Apache-2.0).
+- Contrato binario v1: dominio ASCII terminador NUL, versión u32 little-endian, discriminante u8 por tipo y f64 IEEE-754 little-endian de dimensiones en orden documentado; ceros normalizados. Cotas no finitas/no válidas se rechazan.
+- Incluye tipo, diámetros, radios, ángulos y dimensiones comunes; excluye UUID, revisión, nombre, notas, referencia comercial y recomendaciones de corte.
+- Se añaden pruebas de cinco vectores SHA-256 conocidos, sensibilidad de cada cota, cambios no geométricos, Ø6→Ø4→Ø6 y validación. Cargo y prueba gráfica: pendientes de ejecutar en Windows con instalador.
+- Sin cambios en operaciones, formato `.lagucam`, UI, OpenGL, motor CAM o identidades de fresas. `Cargo.lock` se actualizará en la instalación y se incluirá en la copia de seguridad.
+
 ## Documentación consolidada — 14-11-2026, sin commit remoto
 
 - **Base de código inspeccionada:** [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee), «ajuste htas».

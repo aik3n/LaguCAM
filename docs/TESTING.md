@@ -1,5 +1,16 @@
 # Política de pruebas, regresión y seguridad CNC
 
+## Regresión 021 — tema claro y oscuro
+- En Herramientas > Opciones elegir Claro: la interfaz debe quedar clara y Claro marcado; elegir Oscuro: interfaz oscura y Oscuro marcado, sin reiniciar.
+- Cerrar y abrir el mismo ejecutable portable: comprobar que tema visible y selector coinciden con `config/settings.json` de esa carpeta.
+- Confirmar que los temas no alteran el fondo del visor 3D ni la posición de paneles. Ejecutar `fmt`, `clippy`, `test` y `build --release` antes del ensayo gráfico.
+## Ajuste 020 — SHA-256 de geometría
+- Comprobaciones del instalador: `cargo check` (actualiza `Cargo.lock` por dependencia nueva), `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, `cargo build --locked --release`.
+- Pruebas unitarias: cinco casos y hashes esperados independientes, todas las medidas específicas y comunes, cambios no geométricos sin impacto, Ø6→Ø4→Ø6, errores por cotas no válidas y orden/cero/endian de los `f64`.
+- Contrato v1 versionado: cambios de codificación requieren nueva versión y actualización expresa de vectores.
+- No se ejecutan cálculos CAM ni se validan trayectorias. Regresión manual en Windows: abrir STL grande y verificar que cámara, biblioteca, UI y proyectos no cambian.
+- Evidencia: código preparado y revisado estáticamente; resultados de Cargo, licencia del árbol transitivo resuelto y prueba gráfica quedan pendientes del equipo Windows.
+
 **Código de referencia:** `f1e436b` · 14-11-2026. La actualización de documentación **no ejecuta Cargo ni pruebas gráficas/CNC**. Las secciones de entregas anteriores son histórico de criterios, no evidencia de su ejecución.
 
 ## Comprobaciones de identidad UUID y proyecto v2
@@ -8,7 +19,7 @@
 - El esquema `.lagucam` v1 se rechaza expresamente: **es aceptable durante desarrollo**; no migrar por compatibilidad ni borrar archivos personales.
 - Verificar que `toolpath_id` sigue siendo independiente y que guardar/abrir proyectos sin operaciones o con referencias UUID no altera datos del modelo ni del bruto.
 
-## Próximos tests SHA-256 geométrico (función aún no implementada)
+## Tests SHA-256 geométrico (código preparado en 020; ejecución Cargo pendiente)
 
 - Idéntico tipo y geometría → mismo hash, aunque difieran UUID, revisión, nombre o metadatos.
 - Ø6 → Ø4 → Ø6: primera y tercera huella iguales si todas las cotas relevantes coinciden; la de Ø4 diferente.

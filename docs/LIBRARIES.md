@@ -1,5 +1,8 @@
 # Bibliotecas de herramientas, máquinas y postprocesadores
 
+## Ajuste 020 — Identidad y huella geométrica
+El UUID (`ToolId`) representa la identidad y la revisión `u64` representa el historial. El hash SHA-256 binario v1 de `src/tools/hash.rs` representa exclusivamente la geometría efectiva validada: tipo, sus medidas específicas y longitud de corte, diámetro de mango y longitud total. Es independiente de JSON, nombre, notas, RPM, avances y otros metadatos. Ø6→Ø4→Ø6 restaura la huella inicial si todos los parámetros geométricos coinciden. Aún no hay resolución de herramientas por operación ni invalidación automática de trayectorias. `Cargo.lock` añade la dependencia SHA-256 cuando se aplique la entrega.
+
 **Estado:** herramientas implementadas en código, máquinas y post pendientes · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Fecha:** 2026-11-14
 
 Las capturas de DeskProto compartidas por el usuario son **referencias funcionales**, no instrucciones de copiar su diseño ni prueba de que sus valores sean capacidades certificadas de una máquina.
@@ -95,9 +98,9 @@ La decisión de permitir varias máquinas por proyecto está abierta. La propues
 - **Portabilidad:** `config/tools.json` vive en la carpeta `config/` **junto al ejecutable**, no en AppData.
 - **Semántica:** longitud total de la fresa desde punta a extremo de mango representado **no significa** salida de pinza. No se ha modelado el portaherramientas ni la colisión real.
 - **Geometrías:** plana; esférica (radio Ø/2); V con ángulo **incluido total**; cónica de punta plana; cónica de punta esférica mediante casquete tangente a flanco cónico. No confundir el perfil 2D discretizado con una solución geométrica exacta para CAM.
-- **No implementado:** selección por operación, resolución de UUID ausente, hash geométrico, trayectorias.
+- **No implementado:** selección por operación, resolución de UUID ausente, invalidación de trayectorias ni cálculo CAM. El hash geométrico v1 se prepara en el ajuste 020.
 
-## 7. Huella de herramienta: definición aceptada, implementación pendiente
+## 7. Huella de herramienta: definición aceptada; implementación v1 preparada en 020
 
 **SHA-256** sobre una codificación **binaria canónica y versionada** de la geometría efectiva, no sobre el JSON de presentación.
 

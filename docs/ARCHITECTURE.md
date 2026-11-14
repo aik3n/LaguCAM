@@ -1,5 +1,10 @@
 # Arquitectura de LaguCAM
 
+## Huella geométrica SHA-256 v1 — ajuste 020, sin acoplamiento CAM
+`src/tools/hash.rs` recibe `&Tool` y devuelve 32 bytes SHA-256; usa `ToolGeometry::validate` y valida dimensiones comunes, sin `Tool::validate` (que depende de identidad/metadatos). `sha2` 0.10.9 implementa SHA-256 portable.
+Contrato v1 independiente de Serde/JSON/plataforma: `b"LaguCAM/tool-geometry/SHA-256\0"`, versión `u32 LE = 1`, tipo `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5), campos de variante en orden declarado y finalmente longitud de corte, diámetro de mango, longitud total. Cada valor `f64` se codifica con `to_bits().to_le_bytes()`; cero con signo se normaliza a +0.0, NaN/infinito/cotas inválidas se rechazan antes de codificar.
+**No forma parte del proyecto `.lagucam`, ni de operaciones ni de trayectorias**. Igualdad de hash geométrico no garantiza validez de G-code: faltaría comparar todas las dependencias CAM. Cambiar el contrato requiere incrementar su versión y renovar los vectores de prueba.
+
 **Estado del código:** [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee) · 14-11-2026. Se distingue **[ACTUAL]** de **[ACORDADO, NO IMPLEMENTADO]** y **[FUTURO]**.
 
 ## 1. Stack y distribución [ACTUAL]
@@ -52,13 +57,13 @@ El bruto es un prisma alineado con los ejes de modelo, con límites y extras por
 
 La biblioteca es la **única fuente editable**. Ninguna operación conserva una copia editable ni parámetros ocultos de fresa; no hay número T intrínseco.
 
-## 5. Huella geométrica y dependencias [ACORDADO, SIN CÓDIGO]
+## 5. Huella geométrica [CÓDIGO PREPARADO EN 020] y dependencias CAM [FUTURO]
 
 Crear una función independiente para obtener SHA-256 sobre representación **binaria canónica y versionada** de los parámetros geométricos efectivos: variante, diámetros, radios, ángulos, longitud de corte, diámetro de mango y longitud total, ampliables con otras cotas físicas que influyan en contacto o colisión. Excluir UUID, revisión, nombre, notas, RPM y avances recomendados. Normalizar valores equivalentes y rechazar no finitos.
 
 En un futuro cálculo se tomará una **copia temporal inmutable** de la definición de biblioteca para impedir cambios durante el cálculo. La trayectoria registrará UUID, hash geométrico y dependencias (modelo, bruto, setup, estrategia, versión de algoritmo). Se bloqueará exportación de resultados incompatibles. Ø6 → Ø4 → Ø6 puede restaurar un hash de herramienta idéntico, **pero eso no demuestra por sí solo vigencia de la trayectoria ni del G-code**.
 
-Nada de ese sistema de cálculo, invalidación o exportación existe aún. La siguiente implementación propuesta se limita a la función hash y sus pruebas; no requiere ampliar por ahora `.lagucam`.
+El cálculo CAM, invalidación y exportación siguen sin existir. La función de hash y sus pruebas están preparadas en el ajuste 020; `.lagucam` permanece sin cambios.
 
 ## 6. Capas futuras [FUTURO]
 
@@ -89,7 +94,7 @@ El fresado inicial tendrá tres ejes, herramienta paralela a Z del setup, avance
 ## 7. Riesgos e invariantes
 
 1. UUID con formato válido no equivale a herramienta existente; resolver o bloquear antes del CAM.
-2. Sin SHA-256 ni dependencias implementadas no puede declararse una trayectoria válida.
+2. Sin comprobación de dependencias CAM no puede declararse una trayectoria válida, aunque exista la función SHA-256.
 3. El mango actual no determina salida de pinza; faltan cuello, portaherramientas, sujeciones y comprobación de colisión.
 4. `f32` normalizado y depth buffer son visuales, no precisión CAM.
 5. `.lagucam` v1 se rechaza: **durante desarrollo no se exige compatibilidad**, pero se documentan roturas y no se borran datos personales silenciosamente.
