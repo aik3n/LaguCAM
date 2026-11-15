@@ -1,0 +1,9 @@
+LaguCAM — entrega documental (base 13a439ab15fb5baf8942bcb87af78c6da59d49fb)
+
+Este paquete SOLO contiene archivos Markdown de documentación y un informe de aplicación. No modifica código.
+
+Uso: comprobar que el repositorio está en el commit 13a439a (o revisar los cambios si avanzó), realizar copia de seguridad de cambios locales, extraer la carpeta del ZIP en la RAÍZ del repositorio respetando las rutas, revisar `git diff -- AGENTS.md README.md docs/`, ejecutar la comprobación de enlaces si se desea y hacer commit documental independiente.
+
+No se ha publicado nada en GitHub: acceso de escritura de la conexión actual rechazado (403).
+
+La documentación afirma reflejar código hasta 13a439a, no cualquier commit posterior. Las pruebas ejecutadas previamente están atribuidas al informe Windows sobre 7de83c9.

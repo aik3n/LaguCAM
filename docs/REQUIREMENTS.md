@@ -1,11 +1,9 @@
 # Requisitos de LaguCAM
 
-> **Corte local 15-11-2026:** motor geométrico y estrategia experimental TEST integrados en `7de83c9`; persisten las restricciones de verificación y G-code. La tabla de etapas anterior a esa fecha debe leerse junto a este corte.
-
-> **Actualización vigente, código `f1e436b` (14-11-2026).** El proyecto `.lagucam` v2, la biblioteca de cinco fresas, la configuración portable y el UUID compartido ya existen en código. La huella geométrica SHA-256 v1 tiene implementación preparada en el ajuste 020, pendiente de pruebas Cargo. En desarrollo no se exigen migraciones de formatos obsoletos; no borrar datos personales silenciosamente.
+> **Requisitos y criterios**, no estado vivo de implementación. Estado actualizado y SHA cubierto: [`STATUS.md`](STATUS.md).
 
 
-**Estado:** borrador vivo · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
+**Estado:** borrador vivo · **Revisión documental:** 2026-11-15. Los estados en tablas son hitos observados hasta `13a439a`; la evidencia detallada está en STATUS.
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -32,13 +30,13 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | GEO-02 | Distinguir geometría real de renderización normalizada | Observado en código; requisito permanente |
 | GEO-03 | Admitir STL primero y otros formatos, especialmente sólidos STEP, a futuro | Acordado; STEP pendiente |
 | GEO-04 | Abstracciones por **capacidad geométrica**, sin obligar a convertir todo B-Rep a una malla única | Acordado como criterio arquitectónico |
-| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | Motor STL con BVH y contacto esférico experimental; validación adicional pendiente |
+| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | Prototipo de contacto esférico/BVH implementado; rendimiento real por validar |
 | GEO-06 | Permitir representaciones auxiliares (p. ej. heightfield), con error definido | Acordado; implementación pendiente |
 | CAM-01 | Estrategias iniciales estrictamente 3 ejes, husillo fijo paralelo al Z del setup | Acordado |
 | CAM-02 | Posibilitar 4/5 ejes sin implementar hoy su cinemática | Acordado |
 | CAM-03 | Desbaste, semiacabado, acabado, contorno, conforme se desarrollen | Previsto, no implementado |
 | CAM-04 | Estrategias disponibles según capacidades del modelo, no solo extensión del fichero | Acordado |
-| CAM-05 | Primera estrategia: acabado paralelo con fresa esférica | Prototipo TEST implementado; no certificado para mecanizado |
+| CAM-05 | Primera estrategia de prueba: acabado paralelo con fresa esférica | Prototipo TEST aceptado; muestreo/previsualización, sin trayectoria CNC válida |
 | CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Acordado; implementación pendiente |
 
 ## 3. Herramientas, máquinas y control
@@ -70,7 +68,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | NFR-05 | Validación | Unitarias, integración, geometrías patrón, regresión y verificación gráfica en máquina de pruebas |
 | NFR-06 | Seguridad CNC | Revisión independiente de movimientos, clearance, límites, colisiones y post antes de usar G-code real |
 | NFR-07 | Licencias | Proyecto MIT, verificar directas y transitivas por plataforma al integrar o distribuir |
-| NFR-08 | Documentación | Actualización asociada a cada cambio significativo, sin atribuir pruebas no realizadas |
+| NFR-08 | Documentación | Sincronización **después de validación**, por hito; `STATUS.md` declara SHA cubierto; no atribuir pruebas no realizadas (D-036) |
 
 ## 5. No requisitos actuales
 
@@ -85,13 +83,20 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 - Cinco geometrías ya implementadas con convenciones de ángulo total y radio de esfera; falta validación para cálculo CAM exacto.
 - Grado de representación de mango, cuello y portaherramientas en la primera biblioteca.
 - Semántica de máquina por proyecto o por setup (una máquina por proyecto fue **recomendada, no confirmada**).
-- Estrategia de cálculo geométrico inicial y tolerancias nominales.
+- Tolerancias nominales y validación independiente del motor de contacto esférico ya implementado experimentalmente.
 - Evolución del esquema `.lagucam` v2; en desarrollo no se exige compatibilidad con versiones anteriores.
 - Unidad de longitud y conversión para formatos futuros.
 
 ## Requisitos añadidos tras D-033 y D-034
 
-- **TL-10 — Huella geométrica (ACEPTADA, código preparado; validación Cargo pendiente):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
-- **TL-11 — Vigencia de resultados (ACORDADO COMO OBJETIVO, aún sin operaciones):** futuro cálculo resuelve UUID actual y toma copia temporal inmutable; trayectoria identifica hash geométrico y demás dependencias; prohibir exportación si están obsoletas.
+- **TL-10 — Huella geométrica (ACEPTADA, función implementada; integración CAM pendiente):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
+- **TL-11 — Vigencia de resultados (ACORDADO COMO OBJETIVO; aún sin trazabilidad de trayectorias):** futuro cálculo resuelve UUID actual y toma copia temporal inmutable; trayectoria identifica hash geométrico y demás dependencias; prohibir exportación si están obsoletas.
 - **PRJ-06 — Compatibilidad experimental (ACEPTADO):** durante desarrollo no mantener versiones anteriores ni migraciones obligatorias; comunicar incompatibilidades y no destruir archivos personales.
 - **CAM-07 — Separación de validez:** cambios tecnológicos como avance y RPM pueden requerir regenerar G-code sin modificar la geometría calculada; una coincidencia de hash geométrico no valida por sí sola máquina, setup ni programa.
+
+## CAM experimental: criterios abiertos
+
+- El contacto de la punta esférica deberá contrastarse con referencias analíticas independientes, incluidos casos degenerados; una prueba de compilación no certifica geometría.
+- Para una trayectoria CNC habrá que fijar tolerancia geométrica, error **entre** muestras, movimientos de entrada/retirada y prevención de colisiones de herramienta completa, bruto y utillaje.
+- El índice espacial del STL grande requiere medición de tiempo de construcción, consultas y memoria real en modelos crecientes; la navegación fluida del visor no demuestra ese rendimiento.
+- Las operaciones deberán resolver UUID de biblioteca, capturar herramienta durante el cálculo y verificar la huella antes de considerar un resultado vigente; el hash no autoriza por sí solo a exportar G-code.

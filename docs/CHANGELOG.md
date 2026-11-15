@@ -1,26 +1,25 @@
 # Historial de LaguCAM
 
-## 15-11-2026 — Integración local del motor geométrico y operaciones TEST
+## 2026-11-15 — Motor CAM experimental y consolidación (`7de83c9`, `13a439a`)
 
-- Rama `integracion/cam-20261115`, commit base `7de83c9` (sin publicación remota): 15 archivos integrados; motor de contacto esférico, extracción de secciones, vistas de diagnóstico, operaciones parametrizables y persistencia.
-- La operación se crea vacía en el árbol, se edita con doble clic en una ventana con pestañas y puede eliminarse desde su propio editor. El resultado es previsualización geométrica, no G-code.
-- Windows: 130 pruebas (20+104+6) superadas, `cargo fmt --check`, `cargo check` y compilación Release. Validación visual comunicada: abrir STL y crear/modificar/eliminar operaciones en el LaguCAM original.
-- Consolidación local: limpieza de cuatro avisos Rust y actualización de documentación, conservando el commit funcional previo como referencia.
-- No se ha fusionado con `main` ni publicado en GitHub. Sin cambios a STL personales o proyectos existentes.
+- `7de83c9`: se añade `cam_geometry/*` (contacto esférico, BVH STL, lectura por bloques/caché, cancelación y límites), operaciones y muestreo de acabado paralelo TEST con previsualización. **No** G-code, trayectoria CNC segura ni postprocesador.
+- `13a439a`: consolida `main`, limpia avisos menores y publica notas documentales. Los documentos que describían la rama `integracion/cam-20261115` como «todavía no publicada» reflejan un momento histórico anterior.
+- Evidencia **comunicada**, no reproducida por quien documenta: 130 pruebas correctas, `cargo fmt --check`, `cargo check` y `cargo build --release` en Windows sobre la base `7de83c9`, más pruebas de operaciones. No hay medición certificada del CAM sobre el STL real ~1 GB.
+- Falta integrar herramientas UUID/hash, tolerancias de recorrido, colisiones, trayectoria neutral, FluidNC y seguridad de máquina.
 
-## Ajuste 021 — Preferencia de tema aplicada y restaurada correctamente
-- Corregido `src/options.rs`: la preferencia Claro/Oscuro selecciona `egui::Theme` con `Context::set_theme`, además de aplicar su paleta con `set_visuals_of`.
-- En egui 0.37 `set_visuals` por sí solo no selecciona el tema; el tema del sistema podía quedar activo aunque el selector mostrara el contrario.
-- Se mantiene `config/settings.json` v1 y el guardado portable. Sin cambios en operaciones, hash geométrico 020, `.lagucam`, docking, visor o CAM.
-- Añadidas pruebas para selección efectiva de tema y restauración de la preferencia. Cargo y ensayo gráfico: se ejecutan en el Windows del usuario, no previamente aquí.
-## Ajuste 020 — Huella geométrica SHA-256 v1 (base db5ee13, entrega sin commit)
-- Nuevo `tools/hash.rs`: función pura `geometry_sha256(&Tool) -> Result<[u8; 32], String>`, sin serialización JSON ni dependencia de UI/CAM. Usa SHA-256 de RustCrypto (`sha2` 0.10.9, MIT/Apache-2.0).
-- Contrato binario v1: dominio ASCII terminador NUL, versión u32 little-endian, discriminante u8 por tipo y f64 IEEE-754 little-endian de dimensiones en orden documentado; ceros normalizados. Cotas no finitas/no válidas se rechazan.
-- Incluye tipo, diámetros, radios, ángulos y dimensiones comunes; excluye UUID, revisión, nombre, notas, referencia comercial y recomendaciones de corte.
-- Se añaden pruebas de cinco vectores SHA-256 conocidos, sensibilidad de cada cota, cambios no geométricos, Ø6→Ø4→Ø6 y validación. Cargo y prueba gráfica: pendientes de ejecutar en Windows con instalador.
-- Sin cambios en operaciones, formato `.lagucam`, UI, OpenGL, motor CAM o identidades de fresas. `Cargo.lock` se actualizará en la instalación y se incluirá en la copia de seguridad.
+## 2026-11-14 — Hash geométrico y tema (`8e35c0e`)
 
-## Documentación consolidada — 14-11-2026, sin commit remoto
+- Función `src/tools/hash.rs` SHA-256 canónica v1, con pruebas de cinco geometrías y recuperación Ø6→Ø4→Ø6. Aún no conectada a cálculo/exportación CAM.
+- Corrección de preferencias de tema claro/oscuro en egui. La prueba gráfica y de regresión debe atribuirse a su ejecutor.
+
+## 2026-11-15 — Proceso documental aprobado (D-036)
+
+- Se mantiene debate → aceptación → implementación → validación → documentación. El código se entrega sin editar Markdown; este chat documenta tras validar un hito.
+- `docs/STATUS.md` es la única fuente del estado documentado, con SHA de código cubierto y evidencias. Diferencias temporales con HEAD son normales y explícitas.
+- Sin cambios funcionales en este paquete documental. Basado en `13a439a`; **no consta commit remoto de esta entrega**.
+
+
+## Documentación consolidada — 14-11-2026 (registro histórico previo a la publicación)
 
 - **Base de código inspeccionada:** [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee), «ajuste htas».
 - Documentados lector STL grande, persistencia `.lagucam` v2, cinco geometrías de fresas, UUID global, configuración portable, docking y temas.

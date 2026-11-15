@@ -1,17 +1,6 @@
 # Política de pruebas, regresión y seguridad CNC
 
-## Regresión 021 — tema claro y oscuro
-- En Herramientas > Opciones elegir Claro: la interfaz debe quedar clara y Claro marcado; elegir Oscuro: interfaz oscura y Oscuro marcado, sin reiniciar.
-- Cerrar y abrir el mismo ejecutable portable: comprobar que tema visible y selector coinciden con `config/settings.json` de esa carpeta.
-- Confirmar que los temas no alteran el fondo del visor 3D ni la posición de paneles. Ejecutar `fmt`, `clippy`, `test` y `build --release` antes del ensayo gráfico.
-## Ajuste 020 — SHA-256 de geometría
-- Comprobaciones del instalador: `cargo check` (actualiza `Cargo.lock` por dependencia nueva), `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, `cargo build --locked --release`.
-- Pruebas unitarias: cinco casos y hashes esperados independientes, todas las medidas específicas y comunes, cambios no geométricos sin impacto, Ø6→Ø4→Ø6, errores por cotas no válidas y orden/cero/endian de los `f64`.
-- Contrato v1 versionado: cambios de codificación requieren nueva versión y actualización expresa de vectores.
-- No se ejecutan cálculos CAM ni se validan trayectorias. Regresión manual en Windows: abrir STL grande y verificar que cámara, biblioteca, UI y proyectos no cambian.
-- Evidencia: código preparado y revisado estáticamente; resultados de Cargo, licencia del árbol transitivo resuelto y prueba gráfica quedan pendientes del equipo Windows.
-
-**Código de referencia:** `f1e436b` · 14-11-2026. La actualización de documentación **no ejecuta Cargo ni pruebas gráficas/CNC**. Las secciones de entregas anteriores son histórico de criterios, no evidencia de su ejecución.
+**Política vigente:** 2026-11-15. El registro de **ejecuciones concretas** está en [`STATUS.md`](STATUS.md); este documento define requisitos de prueba. Modificar documentación no implica ejecutar Cargo, GUI o máquina.
 
 ## Comprobaciones de identidad UUID y proyecto v2
 
@@ -19,13 +8,13 @@
 - El esquema `.lagucam` v1 se rechaza expresamente: **es aceptable durante desarrollo**; no migrar por compatibilidad ni borrar archivos personales.
 - Verificar que `toolpath_id` sigue siendo independiente y que guardar/abrir proyectos sin operaciones o con referencias UUID no altera datos del modelo ni del bruto.
 
-## Tests SHA-256 geométrico (código preparado en 020; ejecución Cargo pendiente)
+## Tests SHA-256 geométrico (función implementada; verificar por commit)
 
 - Idéntico tipo y geometría → mismo hash, aunque difieran UUID, revisión, nombre o metadatos.
 - Ø6 → Ø4 → Ø6: primera y tercera huella iguales si todas las cotas relevantes coinciden; la de Ø4 diferente.
 - Variar cada parámetro físico relevante en los cinco tipos: cambia hash. Cambiar RPM, avance, nombre o notas: no cambia hash geométrico.
-- Representación canónica binaria y versionada en milímetros: orden de campos, codificación f64, casos `+0.0`/`-0.0`, NaN/infinito y casos límite.
-- No añadir operaciones ni campos nuevos a `.lagucam` mientras solo se implementa la función.
+- Cinco vectores SHA-256 de referencia independientes para las cinco variantes; representación canónica binaria y versionada en milímetros: orden de campos, codificación f64, `+0.0`/`-0.0`, NaN/infinito y límites numéricos.
+- El código del hash se mantiene independiente de las operaciones y `.lagucam`. Antes de validar una futura trayectoria habrá que contrastar UUID, hash y el resto de sus dependencias.
 
 
 **Estado:** criterios para futuras etapas; no constituye certificación del software. **Fecha:** 2026-11-14.
@@ -41,7 +30,7 @@ cargo test --locked
 cargo build --locked --release
 ```
 
-Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` examinado no contiene un workflow de CI; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
+Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` revisado hasta `13a439a` no contenía workflow de CI activo; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
 
 ## 2. Pruebas del visor y proyecto
 
@@ -51,6 +40,8 @@ Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La
 - Validar bruto con dimensiones positivas y límites finitos; extras independientes y avisos si no rodea al modelo.
 - Probar anclas de origen, offsets, cambios de referencia y transformaciones inversas de rotación.
 - Al añadir persistencia: round-trip exacto de parámetros `f64` serializados, compatibilidad de versiones, rutas relativas, STL perdido/modificado, guardado interrumpido y protección frente a cambios sin guardar.
+
+Comprobar también el selector de temas: cambio real de tema Claro/Oscuro sin reiniciar, restauración desde `settings.json` y ausencia de alteraciones del visor 3D.
 
 ## 3. Benchmark de STL grande
 
@@ -70,9 +61,9 @@ Registrar como mínimo:
 
 No inventar números cuando faltan. No subir a Git el STL grande salvo permiso y una política explícita de almacenamiento.
 
-## 4. Tests geométricos CAM futuros
+## 4. Pruebas geométricas CAM: obligatorias para validar el prototipo
 
-Antes de enviar una estrategia a producción:
+El contacto esférico y el muestreo TEST ya están codificados, **pero aún no constituyen trayectorias verificadas**. Antes de considerar una estrategia apta para producir G-code:
 
 - Superficies patrón: plano horizontal/inclinado, esfera, cilindro, escalón, pared vertical y STL no cerrado.
 - Herramientas patrón con fórmulas de contacto conocidas; plano, esférica y cónica según se añadan.
@@ -108,3 +99,11 @@ La cadena de verificación debe incluir:
 - Prueba de máquina: requiere procedimiento controlado; nunca derivarla de una revisión de código.
 
 Registrar explícitamente cuál se realizó y cuál falta.
+
+## 7. Trazabilidad de pruebas por hito
+
+La fase **validación** precede a la fase **documentación**. Desarrollo entrega SHA, versión Rust, SO, comandos y resultado; documentación registra lo verificado y lo comunicado, sin repetir pruebas imaginarias.
+
+En la integración `7de83c9` se **comunicaron** 130 pruebas unitarias correctas en Windows, `cargo fmt`, `cargo check` y compilación Release; también se comunicaron pruebas de interfaz. Son informes de ejecución, **no una nueva ejecución de este chat** ni evidencia de precisión geométrica a escala real. `13a439a` es un commit posterior; las pruebas se atribuyen a su SHA real.
+
+Para el motor CAM, añadir benchmarks reproducibles con un STL patrón y uno grande: tamaño, triángulos, máquina, radio de fresa, cantidad de consultas, tiempos de índice/consultas, RAM máxima observada, error geométrico frente a referencia y regresión. Cuando falten resultados indicar **no medido**, no extrapolar del visor.

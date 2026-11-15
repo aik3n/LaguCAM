@@ -1,6 +1,6 @@
 # Registro de decisiones técnicas
 
-**Última revisión:** 2026-11-14 · **Código contrastado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
+**Última revisión documental:** 2026-11-15 · **Código cubierto:** `13a439ab15fb5baf8942bcb87af78c6da59d49fb` · **Estado y pruebas:** [`STATUS.md`](STATUS.md)
 
 Una decisión se cambia mediante una nueva entrada con justificación, no reescribiendo silenciosamente lo que se acordó. Las entradas **PROPUESTAS** no autorizan implementación.
 
@@ -26,7 +26,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-018 | **ACEPTADA** | Para cambios de setup, no asumir que G54 efectúa rotación | G54 selecciona offsets; rotaciones requieren soporte/configuración explícitos del control |
 | D-019 | **ACEPTADA** | No asumir que M6 ejecuta cambio manual en FluidNC | La secuencia exacta debe validarse con la configuración de la máquina |
 | D-020 | **PROPUESTA** | Cinco tipos iniciales: plana, esférica, V, cónica plana y cónica esférica | Referencia DeskProto; por cerrar tras definir geometrías y fórmulas |
-| D-021 | **ACEPTADA PARA PROTOTIPO TEST** | Primera estrategia: acabado paralelo con fresa esférica | Aprobada y probada como previsualización, no como mecanizado válido |
+| D-021 | **ACEPTADA PARA PROTOTIPO TEST** | Primera estrategia: acabado paralelo con fresa esférica | Muestreo y previsualización experimental, **no** aprobación de mecanizado CNC |
 | D-022 | **PROPUESTA** | Un perfil de máquina por proyecto, configurable | Simplificación inicial; el usuario no ha confirmado el modelo definitivo |
 | D-023 | **ACEPTADA; IMPLEMENTADA EN CÓDIGO** | `.lagucam` JSON versionado | Esquema actual v2; no se exige compatibilidad con v1 durante desarrollo (D-033) |
 | D-024 | **ACEPTADA** | Herramienta definida solo en biblioteca global; operación guarda UUID sin copia de geometría | La falta de referencia bloquea futuro cálculo; comprobar vigencia antes de reutilizar trayectorias |
@@ -39,8 +39,9 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-031 | **ACEPTADA** | Distribución portable y temas Claro/Oscuro | `config/` junto al ejecutable; sin AppData ni Registro |
 | D-032 | **ACEPTADA** | Docking con asa de seis puntos, silueta y guías sin texto | Sustituye menú «Posición», sin cambios en los datos de proyecto |
 | D-033 | **ACEPTADA** | Durante desarrollo no se exige compatibilidad de formatos ni migraciones | Documentar roturas y conservar datos personales; `.lagucam` v1 se rechaza en el SHA revisado |
-| D-034 | **ACEPTADA; FUNCIÓN V1 PREPARADA EN 020** | SHA-256 de parámetros geométricos de herramienta, binario canónico y versionado | Igual geometría → mismo hash aunque cambie la revisión; sin identidad ni feeds/speeds; ejecución Cargo pendiente |
-| D-035 | **ACEPTADA; UI PROTOTIPO IMPLEMENTADA** | Una operación se crea vacía, se edita con doble clic en una sola ventana por pestañas y se elimina desde esa ventana | El árbol organiza operaciones, Propiedades resume y el cálculo se genera explícitamente; sin G-code |
+| D-034 | **ACEPTADA; FUNCIÓN IMPLEMENTADA** | SHA-256 geométrico binario canónico y versionado | Igual geometría → mismo hash entre revisiones; aún no valida trayectorias |
+| D-035 | **ACEPTADA PARA PROTOTIPO** | Crear operación vacía y editarla en ventana única con pestañas, abriéndola con doble clic | UI experimental incorporada en `7de83c9` y `13a439a`; no genera G-code |
+| D-036 | **ACEPTADA; PROCESO VIGENTE** | Cinco fases: debate → aceptación → implementación → validación → documentación | La documentación la actualiza este chat al cierre del hito, no programación; STATUS registra SHA de código cubierto y evidencia |
 
 ## Cómo registrar una nueva decisión
 
@@ -72,18 +73,26 @@ Las D-025 a D-028 hacen independiente del formato la elección de pivote visual 
 
 ## D-034 — Definición de huella geométrica SHA-256
 
-- **Fecha:** 2026-11-14. **Aceptada como definición técnica; NO IMPLEMENTADA en `f1e436b`.**
+- **Fecha:** 2026-11-14. **Aceptada como definición técnica.** Pendiente en `f1e436b`; **implementada desde `8e35c0e`**, sin integración con trayectorias.
 - **Identidad frente a forma:** UUID sigue fijo al editar la fresa; revisión aumenta; SHA-256 identifica **la definición geométrica efectiva**, no el historial.
 - **Incluir:** tipo de herramienta, todos los diámetros/radios/ángulos relevantes, longitud de corte, diámetro del mango y longitud total. Al añadir cuello, portaherramientas u otras cotas que intervengan en contacto/colisión, ampliar expresamente el esquema del hash.
 - **Excluir:** UUID, revisión, nombre, notas, referencia comercial, RPM y avances recomendados. Los parámetros de mecanizado se tratarán separadamente para decidir si el G-code necesita regeneración.
-- **Cálculo previsto:** serialización binaria **canónica y versionada** con orden/codificación inequívocos, unidades fijas y rechazo de valores geométricos inválidos. Normalizaciones exactas (`+0.0`/`-0.0`, etc.) deben definirse en la implementación y probarse; no usar el JSON de visualización.
+- **Cálculo implementado:** serialización binaria **canónica y versionada** con orden/codificación inequívocos, unidades fijas y rechazo de valores geométricos inválidos. Normalizaciones exactas (`+0.0`/`-0.0`, etc.) deben definirse en la implementación y probarse; no usar el JSON de visualización.
 - **Caso Ø6 → Ø4 → Ø6:** igual UUID, revisiones distintas, posibilidad de igual hash final al original **si coinciden todos los parámetros del hash**.
 - **Validez futura de trayectorias:** capturar temporalmente la definición de la biblioteca durante el cálculo y registrar UUID, huella y demás dependencias. Una igualdad del hash de fresa **no autoriza por sí sola** reutilizar trayectoria o G-code si cambiaron modelo, bruto, setup, estrategia, algoritmo u otros factores.
-- **Alcance del siguiente encargo posible:** función de hash y sus pruebas. **No añadir aún campos a operaciones ni formato `.lagucam`**; eso corresponde a otra etapa.
+- **Alcance realizado:** función independiente de hash y pruebas en `src/tools/hash.rs`. Las operaciones y `.lagucam` **no incorporan una huella persistida**. Su integración y la comprobación de resultados quedan para una etapa posterior.
 
+## D-035 — Editor único de operaciones (prototipo)
 
-## Implementación de D-034 — ajuste 020, sin cambiar el acuerdo
-- **Base:** commit `db5ee13bf70a6cdb861a5e94b279413606bd7b19`; implementación preparada en `src/tools/hash.rs`, pendiente de ejecutar Cargo en Windows y registrar SHA del próximo commit.
-- **Contrato v1:** dominio ASCII + NUL, versión u32 LE, código de tipo u8 fijo y cotas f64 IEEE-754 LE en orden explícito. Se rechazan NaN, infinitos y geometrías físicamente no válidas; el codificador normaliza -0.0 a +0.0 (aunque las cotas incluidas exigen positividad).
-- **Dependencia:** `sha2` 0.10.9 de RustCrypto, licencia MIT o Apache-2.0. Comprobar licencias transitivas resueltas antes de distribución.
-- **Alcance:** ninguna integración con operaciones, JSON `.lagucam`, UI ni motor CAM. Las reglas de validez futura de trayectorias de D-034 siguen pendientes.
+- **Fecha de incorporación:** 2026-11-15, integración `7de83c9` / `13a439a`.
+- Crear operación vacía en el árbol; abrir editor único con doble clic y pestañas General / Estrategia / Área; borrar desde el editor.
+- La interfaz gestiona una previsualización experimental y no constituye una validación de trayectoria CNC.
+
+## D-036 — Proceso de desarrollo y documentación
+
+- **Fecha:** 2026-11-15. **Aceptación expresa del responsable en conversación de dirección.**
+- Mantener el orden **debate, aceptación, implementación, validación y documentación**. Desarrollo y el chat de motor **no editan Markdown**; entregan resultados verificables para la última fase.
+- La documentación puede retrasarse respecto a `main`; `docs/STATUS.md` debe indicar el **SHA cubierto** y la evidencia disponible. El HEAD de GitHub identifica el código existente, no su grado de validación.
+- Documentar al **cerrar hitos**, no necesariamente cada commit. Evitar duplicar estados en README, arquitectura, requisitos y changelog.
+- **Motivo:** evitar documentación prematura y contradicciones, sin bloquear el trabajo ni confundir lo implementado con lo comprobado.
+- **Efecto:** sustituye la antigua exigencia de documentar dentro del mismo cambio de código, manteniendo D-017 (documentación viva) y D-016 (roles separados).

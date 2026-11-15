@@ -1,9 +1,6 @@
 # Bibliotecas de herramientas, máquinas y postprocesadores
 
-## Ajuste 020 — Identidad y huella geométrica
-El UUID (`ToolId`) representa la identidad y la revisión `u64` representa el historial. El hash SHA-256 binario v1 de `src/tools/hash.rs` representa exclusivamente la geometría efectiva validada: tipo, sus medidas específicas y longitud de corte, diámetro de mango y longitud total. Es independiente de JSON, nombre, notas, RPM, avances y otros metadatos. Ø6→Ø4→Ø6 restaura la huella inicial si todos los parámetros geométricos coinciden. Aún no hay resolución de herramientas por operación ni invalidación automática de trayectorias. `Cargo.lock` añade la dependencia SHA-256 cuando se aplique la entrega.
-
-**Estado:** herramientas implementadas en código, máquinas y post pendientes · **Código revisado:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Fecha:** 2026-11-14
+**Estado de implementación:** consultar [`STATUS.md`](STATUS.md). Este documento describe contratos, biblioteca y datos físicos; no fija un SHA vivo.
 
 Las capturas de DeskProto compartidas por el usuario son **referencias funcionales**, no instrucciones de copiar su diseño ni prueba de que sus valores sean capacidades certificadas de una máquina.
 
@@ -92,20 +89,20 @@ El proyecto `.lagucam` **v2** existe y sus operaciones admiten ya una referencia
 La decisión de permitir varias máquinas por proyecto está abierta. La propuesta inicial fue una sola máquina por proyecto; no se ha ratificado.
 
 
-## 6. Estado de la biblioteca global en `f1e436b`
+## 6. Implementación de la biblioteca global (contratos)
 
-- **Implementado:** `tools/model.rs` contiene cinco variantes, con geometría en `f64`; `tools/storage.rs` guarda biblioteca versionada (`tools.json`, versión 1). `tools_ui.rs` ofrece editor/filtros y `tools_profile.rs` dibuja el perfil técnico. En `f1e436b`, `ToolId = String` comparte UUID entre biblioteca, operaciones y persistencia `.lagucam` v2.
+- **Implementado:** `tools/model.rs` contiene cinco variantes, con geometría en `f64`; `tools/storage.rs` guarda biblioteca versionada (`tools.json`, versión 1). `tools_ui.rs` ofrece editor/filtros y `tools_profile.rs` dibuja el perfil técnico. Desde `f1e436b`, `ToolId = String` comparte UUID entre biblioteca, operaciones y persistencia `.lagucam` v2.
 - **Portabilidad:** `config/tools.json` vive en la carpeta `config/` **junto al ejecutable**, no en AppData.
 - **Semántica:** longitud total de la fresa desde punta a extremo de mango representado **no significa** salida de pinza. No se ha modelado el portaherramientas ni la colisión real.
 - **Geometrías:** plana; esférica (radio Ø/2); V con ángulo **incluido total**; cónica de punta plana; cónica de punta esférica mediante casquete tangente a flanco cónico. No confundir el perfil 2D discretizado con una solución geométrica exacta para CAM.
-- **No implementado:** selección por operación, resolución de UUID ausente, invalidación de trayectorias ni cálculo CAM. El hash geométrico v1 se prepara en el ajuste 020.
+- **No implementado:** selección por operación, resolución de UUID ausente, invalidación de resultados ni trayectorias CNC verificadas. **Sí existe** una función SHA-256 geométrica y un muestreo de acabado paralelo TEST.
 
-## 7. Huella de herramienta: definición aceptada; implementación v1 preparada en 020
+## 7. Huella geométrica SHA-256: función implementada, integración CAM pendiente
 
-**SHA-256** sobre una codificación **binaria canónica y versionada** de la geometría efectiva, no sobre el JSON de presentación.
+`src/tools/hash.rs` calcula **SHA-256** sobre una codificación **binaria canónica y versionada** de la geometría efectiva, no sobre el JSON de presentación. El hash no se guarda por herramienta como dato editable: se recalcula a partir de su definición cuando sea necesario.
 
 | Incluir | Excluir |
 | --- | --- |
 | Tipo; diámetros, radios, ángulos; longitud de corte; diámetro de mango; longitud total; futuras cotas físicas relevantes | UUID, revisión, nombre, notas, referencia comercial, RPM y avances recomendados |
 
-Dos geometrías idénticas deben producir el mismo hash incluso con revisiones distintas. En la secuencia **Ø6 → Ø4 → Ø6**, el hash podrá volver al original si se restablecen todos los parámetros pertinentes. Modificar el nombre no debe provocar recálculo geométrico; cambiar feeds/speeds puede exigir regenerar G-code. La igualdad de huella de herramienta, por sí sola, **no demuestra vigencia de una trayectoria**: habrá que contrastar geometría fuente, bruto, origen, estrategia y versión de cálculo. Ninguna de estas verificaciones CAM existe todavía.
+Dos geometrías idénticas deben producir el mismo hash incluso con revisiones distintas. En la secuencia **Ø6 → Ø4 → Ø6**, el hash podrá volver al original si se restablecen todos los parámetros pertinentes. Modificar el nombre no debe provocar recálculo geométrico; cambiar feeds/speeds puede exigir regenerar G-code. La igualdad de huella de herramienta, por sí sola, **no demuestra vigencia de una trayectoria**: habrá que contrastar geometría fuente, bruto, origen, estrategia y versión de cálculo. La comprobación de vigencia de los resultados CAM sigue pendiente; el prototipo TEST todavía toma un diámetro manual, sin resolver herramientas por UUID.

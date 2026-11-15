@@ -1,20 +1,6 @@
 # Arquitectura de LaguCAM
 
-## Arquitectura CAM integrada localmente (15-11-2026)
-
-- `src/lib.rs` y `src/cam_geometry/*`: motor de consultas geométricas STL independiente de la GUI, con índice BVH, lectura acotada y contacto de punta esférica. Las coordenadas de cálculo proceden del STL original en `f64`, no del render normalizado.
-- `src/project/operations.rs` y `src/project/persistence.rs`: operaciones con estrategia opcional, parámetros propios y guardado en `.lagucam`.
-- `src/test_parallel.rs`: generación de muestras de «Acabado paralelo — TEST» en segundo plano y previsualización; consulta al motor, sin postprocesador, colisiones ni G-code.
-- `src/project_ui.rs`, `src/panel_layout.rs` y `src/main.rs`: árbol, propiedades, apertura del editor único con pestañas y representación 3D. Los módulos `sample_*` y `section_overlay.rs` son diagnóstico temporal, no estrategias de producción.
-
-Este apartado corresponde a `7de83c9` en la rama local de integración. Los apartados del documento con referencia explícita a `f1e436b` describen un corte de código anterior.
-
-## Huella geométrica SHA-256 v1 — ajuste 020, sin acoplamiento CAM
-`src/tools/hash.rs` recibe `&Tool` y devuelve 32 bytes SHA-256; usa `ToolGeometry::validate` y valida dimensiones comunes, sin `Tool::validate` (que depende de identidad/metadatos). `sha2` 0.10.9 implementa SHA-256 portable.
-Contrato v1 independiente de Serde/JSON/plataforma: `b"LaguCAM/tool-geometry/SHA-256\0"`, versión `u32 LE = 1`, tipo `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5), campos de variante en orden declarado y finalmente longitud de corte, diámetro de mango, longitud total. Cada valor `f64` se codifica con `to_bits().to_le_bytes()`; cero con signo se normaliza a +0.0, NaN/infinito/cotas inválidas se rechazan antes de codificar.
-**No forma parte del proyecto `.lagucam`, ni de operaciones ni de trayectorias**. Igualdad de hash geométrico no garantiza validez de G-code: faltaría comparar todas las dependencias CAM. Cambiar el contrato requiere incrementar su versión y renovar los vectores de prueba.
-
-**Estado del código:** [`f1e436b`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee) · 14-11-2026. Se distingue **[ACTUAL]** de **[ACORDADO, NO IMPLEMENTADO]** y **[FUTURO]**.
+**Arquitectura contrastada con:** `13a439a` (2026-11-15). El estado de implementación y sus pruebas se consulta **únicamente** en [`STATUS.md`](STATUS.md); aquí se documentan contratos y límites. Las etiquetas [ACTUAL] no implican validación CNC.
 
 ## 1. Stack y distribución [ACTUAL]
 
@@ -32,7 +18,7 @@ Se diseñó una distribución portable: `portable.rs` sitúa `settings.json`, `p
 | `stock_render.rs` | Render independiente del bruto translúcido y aristas |
 | `overlay.rs` | Marcadores y ejes CNC superpuestos |
 | `navigation.rs`, `scene_pick.rs` | Cámara y selección visual sobre profundidad GPU; **no consultas CAM** |
-| `project/mod.rs`, `model.rs`, `stock.rs`, `origin.rs`, `display.rs`, `selection.rs`, `operations.rs` | Estado del proyecto, modelo, bruto, cero CNC y operaciones marcadoras |
+| `project/*` | Modelo, bruto, origen, operaciones parametrizables y persistencia del proyecto |
 | `project/persistence.rs` | Serialización `.lagucam` v2, validación y comprobación de STL externo |
 | `project_ui.rs` | Árbol lateral y propiedades |
 | `tools/model.rs` | Definición y validación de cinco tipos de fresas, UUID y perfiles geométricos `f64` |
@@ -40,9 +26,13 @@ Se diseñó una distribución portable: `portable.rs` sitúa `settings.json`, `p
 | `tools_ui.rs`, `tools_profile.rs` | Editor/filtros y perfil gráfico de las fresas |
 | `panel_layout.rs` | Paneles flotantes/acoplables y distribución persistente |
 | `portable.rs`, `options.rs` | Configuración local y tema claro/oscuro |
-| `main.rs` | Coordinación de UI, flujo de archivos, importación en segundo plano y render |
+| `cam_geometry/mod.rs`, `stl.rs`, `service.rs` | Contacto esférico `f64`, BVH XY sobre triángulos STL, lectura con caché y fachada del motor; **no certifica ausencia de colisiones** |
+| `cam_geometry/section.rs` | Extracción de secciones sobre triángulos originales, independiente del render |
+| `test_parallel.rs` | Estrategia experimental de muestreo de contactos, cancelación y previsualización; no es una trayectoria CNC |
+| `sample_direct.rs`, `sample_overlay.rs`, `section_overlay.rs` | Instrumentos transitorios de diagnóstico geométrico |
+| `main.rs` | Coordinación de UI, flujo de archivos, importación en segundo plano, render y diagnósticos |
 
-`main.rs` y `panel_layout.rs` son extensos, pero no conviene refactorizarlos solo por longitud. **Las estrategias y las consultas CAM futuras no deberán residir en `main.rs`**.
+`main.rs` y `panel_layout.rs` son extensos, pero no conviene refactorizarlos solo por longitud. Las consultas CAM residen en `cam_geometry/*` y no dependen del render. Los experimentos visuales de `test_parallel.rs` no son un motor de estrategia listo para postprocesar.
 
 ## 3. Geometría y render [ACTUAL]
 
@@ -56,7 +46,7 @@ La GPU conserva las caras renderizadas, pero su geometría normalizada en `f32` 
 
 El bruto es un prisma alineado con los ejes de modelo, con límites y extras por cara `f64`. El sistema de trabajo usa anclas en modelo/bruto, offsets y `R = Rz · Ry · Rx`, con `p_modelo = origen + R · p_CNC`. Una rotación matemática del marco no significa que `G54` rote ejes ni que una CNC de tres ejes pueda orientar el husillo.
 
-`.lagucam` v2 guarda el proyecto y referencia externa del STL, no la malla ni la biblioteca global. Las operaciones contienen todavía solo marcadores y `tool_id: Option<ToolId>`; **no existe selector operativo ni resolución de herramientas**.
+`.lagucam` v2 guarda el proyecto y referencia externa del STL, no la malla ni la biblioteca global. Las operaciones pueden conservar parámetros de acabado paralelo TEST y `tool_id: Option<ToolId>`; **no existe todavía selector operativo ni resolución de herramienta de biblioteca para el cálculo**. Los resultados de muestra se mantienen fuera del proyecto persistido.
 
 ## 4. Modelo de fresas [ACTUAL]
 
@@ -66,24 +56,28 @@ El bruto es un prisma alineado con los ejes de modelo, con límites y extras por
 
 La biblioteca es la **única fuente editable**. Ninguna operación conserva una copia editable ni parámetros ocultos de fresa; no hay número T intrínseco.
 
-## 5. Huella geométrica [CÓDIGO PREPARADO EN 020] y dependencias CAM [FUTURO]
+## 5. Huella geométrica [IMPLEMENTADA] y validez de resultados [PENDIENTE]
 
-Crear una función independiente para obtener SHA-256 sobre representación **binaria canónica y versionada** de los parámetros geométricos efectivos: variante, diámetros, radios, ángulos, longitud de corte, diámetro de mango y longitud total, ampliables con otras cotas físicas que influyan en contacto o colisión. Excluir UUID, revisión, nombre, notas, RPM y avances recomendados. Normalizar valores equivalentes y rechazar no finitos.
+`src/tools/hash.rs` implementa SHA-256 sobre representación **binaria canónica y versionada** de los parámetros geométricos efectivos: variante, diámetros, radios, ángulos, longitud de corte, diámetro de mango y longitud total, ampliables con otras cotas físicas que influyan en contacto o colisión. Excluir UUID, revisión, nombre, notas, RPM y avances recomendados. Normalizar valores equivalentes y rechazar no finitos.
 
 En un futuro cálculo se tomará una **copia temporal inmutable** de la definición de biblioteca para impedir cambios durante el cálculo. La trayectoria registrará UUID, hash geométrico y dependencias (modelo, bruto, setup, estrategia, versión de algoritmo). Se bloqueará exportación de resultados incompatibles. Ø6 → Ø4 → Ø6 puede restaurar un hash de herramienta idéntico, **pero eso no demuestra por sí solo vigencia de la trayectoria ni del G-code**.
 
-El cálculo CAM, invalidación y exportación siguen sin existir. La función de hash y sus pruebas están preparadas en el ajuste 020; `.lagucam` permanece sin cambios.
+El hash funciona como **función de biblioteca**, pero no hay comprobación de vigencia asociada a resultados de CAM ni exportación. El motor de contacto y el muestreo TEST sí existen; **no** hay trayectoria CNC verificada. El contrato v1 utiliza el dominio `LaguCAM/tool-geometry/SHA-256\0`, versión `u32 LE=1`, discriminantes fijos `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5), las dimensiones específicas de cada variante en el orden de su declaración, y finalmente longitud de corte, diámetro de mango y longitud total. Los `f64` se escriben mediante IEEE-754 little-endian, normalizando el cero con signo y rechazando geometría inválida. Un cambio del contrato requiere nueva versión y vectores de prueba.
 
-## 6. Capas futuras [FUTURO]
+El contacto esférico con STL se calcula a partir de los valores `f32` originales convertidos a `f64`, nunca desde la normalización gráfica. El BVH usa límites XY y posiciones de registro para no guardar toda la malla dos veces; su presupuesto no incluye toda la RSS del proceso. La fachada del servicio de contacto tiene protección de inmutabilidad de archivo implementada en Windows; otras plataformas siguen pendientes.
+
+**Precaución:** cada punto muestreado puede ser un contacto válido sin que el **movimiento entre puntos** lo sea. El muestreo TEST no verifica el volumen barrido ni colisiones de mango y portaherramientas.
+
+## 6. Capas de arquitectura: componentes experimentales y futuros
 
 ```text
       Interfaz egui + Estado del proyecto
                      │
-      Operaciones → Resolver UUID en biblioteca
+      Operaciones → Resolver UUID en biblioteca (pendiente)
                      │
-            Estrategias CAM 3 ejes
+      Estrategias CAM 3 ejes (TEST inicial)
                      │
-       Servicios geométricos independientes
+       Servicios geométricos independientes (STL experimental)
                ┌─────┴─────┐
            STL (inicio)  STEP/B-Rep (futuro)
                      │
@@ -103,7 +97,7 @@ El fresado inicial tendrá tres ejes, herramienta paralela a Z del setup, avance
 ## 7. Riesgos e invariantes
 
 1. UUID con formato válido no equivale a herramienta existente; resolver o bloquear antes del CAM.
-2. Sin comprobación de dependencias CAM no puede declararse una trayectoria válida, aunque exista la función SHA-256.
+2. El SHA-256 ya existe, pero **sin resolver UUID ni comprobar todas las dependencias** no puede declararse válida una trayectoria.
 3. El mango actual no determina salida de pinza; faltan cuello, portaherramientas, sujeciones y comprobación de colisión.
 4. `f32` normalizado y depth buffer son visuales, no precisión CAM.
 5. `.lagucam` v1 se rechaza: **durante desarrollo no se exige compatibilidad**, pero se documentan roturas y no se borran datos personales silenciosamente.

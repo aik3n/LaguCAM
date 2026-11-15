@@ -1,81 +1,65 @@
-# LaguCAM — Instrucciones para asistentes de IA
+# LaguCAM — Instrucciones para asistentes y colaboradores
 
-**Versión del documento:** 1.0 · **Fecha:** 2026-11-14  
-**Repositorio:** https://github.com/aik3n/LaguCAM  
-**Código de referencia actual:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee`
+**Protocolo de colaboración vigente:** 2026-11-15. **Repositorio:** https://github.com/aik3n/LaguCAM.
 
-Este archivo orienta a cualquier chat o agente que participe en LaguCAM. Debe leerse junto a `docs/INDEX.md`, `docs/STATUS.md`, `docs/DECISIONS.md` y `docs/WORKFLOW.md`. Recoge el **protocolo vigente** de colaboración aprobado para la etapa experimental. No sustituye instrucciones de seguridad ni los requisitos de la tarea actual.
+> No tomar un SHA fijo de este archivo como estado actual. Antes de cada tarea, comprobar HEAD de GitHub y consultar `docs/STATUS.md`: distingue el último **código revisado** del último **código documentado**, que puede estar rezagado de forma deliberada.
 
-## 1. Dos funciones distintas
+## 1. Responsabilidades
 
-### Chat de dirección técnica (conversación de decisiones)
+**Responsable del proyecto (usuario):** decide prioridades y aprueba especificaciones, cambios, validaciones y publicación. Sus pruebas en equipo real se registran con su alcance; no sustituyen una validación geométrica ni de seguridad CNC.
 
-- Su función principal es **debatir, aclarar requisitos, comparar alternativas y decidir el siguiente paso con el usuario**.
-- **No genera prompts, código, archivos, informes largos ni modificaciones por iniciativa propia.** Solo cuando el usuario lo solicite o la tarea acordada lo exija explícitamente.
-- Responde de forma breve y precisa. No repite en cada respuesta todo el contexto ni propone una nueva pregunta cuando la decisión actual ya está cerrada.
-- Expone diferencias entre lo decidido, una propuesta y una hipótesis. Si discrepa, justifica el riesgo sin convertirlo en una disputa.
-- Ante una nueva idea, primero define implicaciones y alcance. **Debate antes de emitir la orden de desarrollo**.
-- Puede revisar un commit o un fallo concreto cuando el usuario lo proporciona; debe verificar el SHA y limitar la revisión al motivo solicitado.
+**Chat de dirección técnica y documentación:** debate alternativas, revisa commits y evidencias, mantiene las decisiones técnicas y **actualiza los Markdown del proyecto una vez terminada la validación**, cuando el usuario lo solicita o dentro de una entrega documental autorizada. Solo redacta prompts de implementación cuando se le piden.
 
-### Chat de desarrollo (preferentemente Work)
+**Chat de programación:** lee el código real, implementa únicamente el cambio aprobado, ejecuta las pruebas disponibles y entrega SHA, cambios y evidencias. **No modifica documentación (`*.md`) por iniciativa propia**; prepara un resumen de hechos verificables para su actualización posterior. No amplía silenciosamente alcance o dependencias.
 
-- Ejecuta **solo** el encargo aprobado: inspección del estado real, implementación incremental, pruebas, documentación y entrega.
-- No decide silenciosamente nuevas funcionalidades, cambios de framework, ampliaciones de alcance ni refactorizaciones extensas.
-- Consulta los documentos del proyecto, el código y el SHA antes de tocar archivos. Si difieren, informa y no inventa un estado conciliado.
-- Mantiene el código compilable en cada entrega; usa commits pequeños e identificables cuando el entorno lo permite.
-- No declara "compilado", "probado", "seguro" o "funciona" sin evidencia del entorno correspondiente.
-- No puede probar realmente un escritorio/GPU o una fresadora solo porque el código compile. Indica qué ensayos quedan al usuario.
+**Chat especializado en motor CAM:** investiga y desarrolla algoritmos geométricos dentro del alcance aprobado; no modifica documentación, interfaz, proyecto, bibliotecas ni postprocesadores sin autorización expresa.
 
-## 2. Comportamiento requerido en toda conversación
+**GitHub:** fuente de verdad para el **código versionado**. `docs/STATUS.md` es la fuente de verdad del **último estado documentado**, con un SHA base inequívoco. La validación se acredita con sus resultados, no con la mera presencia del código.
 
-1. **No rellenar la respuesta.** Ir al punto, con el detalle necesario para la decisión o entrega, sin listas decorativas, reiteraciones ni elogios.
-2. **No improvisar código ni prompts** mientras se está debatiendo un requisito. Esperar a que el usuario pida una instrucción de desarrollo.
-3. **No preguntar lo que ya está decidido o documentado.** Si falta información esencial, preguntar solo lo necesario; si no bloquea, marcar el supuesto y seguir con alcance acotado.
-4. **Separar los niveles de evidencia:**
-   - **Probado por el usuario en su equipo**.
-   - **Verificado mediante código o pruebas ejecutadas por el agente**.
-   - **Afirmado por un informe anterior, sin verificación independiente**.
-   - **Diseñado o pendiente**, no implementado.
-5. **No confundir una interfaz visual con una garantía de mecanizado.** Nada de G-code operativo sin algoritmos, límites, comprobaciones y postprocesador validados.
-6. **Mantener independencia de máquina, formato y GUI** en los componentes CAM siempre que resulte razonable. No inventar infraestructura genérica de 5 ejes cuando trabajamos en 3.
-7. **No modificar silenciosamente archivos del usuario ni la rama principal.** Acciones de escritura, commits y publicación en GitHub requieren el encargo adecuado.
-8. **No crear dependencias copyleft sin evaluación expresa de compatibilidad de licencias.** Revisar las licencias transitivas antes de integrar bibliotecas.
-9. **Priorizar estabilidad y pruebas de regresión** sobre velocidad o cantidad de funcionalidades.
-10. **Reconocer límites:** si no se dispone del STL real, GPU, controlador FluidNC o herramientas de compilación, dejarlo claro.
+## 2. Ciclo de cinco fases (obligatorio)
 
-## 3. Contexto técnico de una nueva conversación
+1. **Debate:** delimitar problema, alternativas y riesgos; no generar código por iniciativa propia.
+2. **Aceptación:** el usuario aprueba objetivo y alcance; el encargo de implementación explicita qué no debe cambiar.
+3. **Implementación:** cambios acotados, commits identificables y referencia al SHA de partida; sin actualizar los Markdown.
+4. **Validación:** ejecutar pruebas técnicas y, cuando corresponda, comprobación del usuario; entregar evidencia, fallos y limitaciones. No declarar aceptado un comportamiento no comprobado.
+5. **Documentación:** este chat sincroniza `docs/STATUS.md` y únicamente los otros documentos afectados; registra el SHA del código validado y el nivel de evidencia. No es obligatorio documentar cada commit intermedio.
 
-- Aplicación actual: Rust, `egui`/`eframe`, OpenGL mediante `glow`.
-- Uso inicial: STL topográficos de QGIS/DEMto3D, algunos cercanos a 1 GB y decenas de millones de triángulos.
-- El usuario ha logrado **abrir y mover fluidamente un STL real de casi 1 GB**. No hay benchmark cuantitativo archivado.
-- Existen árbol lateral, bruto, origen CNC, persistencia `.lagucam` **v2**, biblioteca global de cinco geometrías de fresa, configuración portable, temas y docking de paneles. **Pendientes:** selección de herramientas por operación, cálculo CAM, máquina y postprocesadores.
-- Tres ejes al principio, herramienta paralela a Z del sistema de preparación. Sin suponer que `G54` rota por sí mismo los ejes o que `M6` gestiona cambios automáticos en FluidNC.
-- FluidNC es el **primer postprocesador objetivo**, no una dependencia del motor CAM. La máquina de pruebas cambia herramientas manualmente, otras máquinas podrán tener ATC.
-- **UUID:** biblioteca, operación y `.lagucam` v2 usan `ToolId`. La biblioteca sigue siendo la única definición editable; no hay snapshots de fresa en el proyecto.
-- **Huella SHA-256:** se han acordado los parámetros geométricos y una codificación canónica/versionada, pero la función aún **no está implementada**.
-- **Compatibilidad en desarrollo:** no se exigen migraciones ni soporte de formatos antiguos. Se documentan cambios incompatibles y nunca se borran datos personales sin autorización.
-- **No usar posiciones normalizadas de GPU (`f32`) para cálculo CAM**. Geometría y transformaciones de proyecto en `f64` según corresponda.
+**La documentación puede estar temporalmente atrasada y eso no constituye por sí mismo un fallo.** Lo inadmisible es presentarla como vigente para un commit posterior al que cubre. Una nueva tarea debe verificar el código HEAD antes de asumir datos documentales.
 
-## 4. Inicio de tarea en el chat de desarrollo
+Detalles del protocolo y entrega: `docs/WORKFLOW.md`.
 
-Leer, en este orden: `docs/INDEX.md` → `docs/STATUS.md` → `docs/DECISIONS.md` → `docs/ARCHITECTURE.md` → documento de la tarea. Revisar `git status`, commit y código relevante. Si el SHA o los ficheros no coinciden con la documentación, informar antes de asumir conclusiones.
+## 3. Niveles de evidencia
 
-Responder al inicio con: **objetivo entendido, límites del cambio y posibles bloqueos reales**. No producir un plan excesivo para trabajos triviales.
+- **IMPLEMENTADO EN CÓDIGO:** inspección del SHA y componentes correspondientes; no implica prueba de funcionamiento.
+- **PRUEBAS EJECUTADAS:** comandos, resultado y SHA/entorno precisados; las referencias de terceros se atribuyen.
+- **VALIDADO POR EL USUARIO:** conducta observada en su equipo, hardware y casos ensayados, sin extrapolación.
+- **VALIDACIÓN CAM PENDIENTE:** aún faltan referencias independientes, tolerancias, comprobación del recorrido y seguridad.
+- **FUTURO / PROPUESTO:** no implementado o no aprobado para desarrollo.
 
-## 5. Entrega mínima de cada cambio
+No llamar «seguro», «verificado» o «apto para mecanizado» a una previsualización o a un build correcto.
 
-- SHA de partida y SHA final **si se creó realmente un commit**.
-- Archivos cambiados y motivo, en pocas líneas.
-- Pruebas realizadas con comandos y resultados; distinguir pruebas no ejecutadas.
-- Verificación de que el visor STL grande no se ha degradado, o indicación de que falta comprobarlo en el equipo real.
-- Riesgos y puntos de revisión pendientes.
-- Documentación actualizada en el mismo cambio, siguiendo `docs/WORKFLOW.md`.
+## 4. Contexto técnico estable
 
-**Principio rector:** el usuario dirige las prioridades; el chat de desarrollo implementa un alcance aprobado; la documentación refleja el código y las pruebas, nunca lo sustituye.
+- CAM experimental libre, Rust 2024, egui/eframe, glow/OpenGL; tres ejes inicialmente, herramienta paralela al Z del setup.
+- STL binario grande como formato inicial; cálculo `f64` sobre las coordenadas originales del archivo (decodificadas desde `f32`), nunca sobre la malla GPU normalizada.
+- Biblioteca global de cinco familias de fresas. UUID = identidad; revisión = historial; SHA-256 geométrico = equivalencia de definición física. El proyecto conserva UUID, **no snapshots persistentes** de la herramienta.
+- El primer postprocesador objetivo será FluidNC, sin acoplarlo al motor CAM. `G54` no implica rotación del marco y `M6` no garantiza cambio físico de herramienta.
+- La documentación viva es experimental: **no se exigen migraciones de formatos durante desarrollo**; nunca sobrescribir ni eliminar datos personales silenciosamente.
+- El cálculo de contacto, el muestreo experimental, una trayectoria CNC válida y un programa G-code seguro son niveles diferentes. No confundirlos.
 
-## 6. Convenciones adicionales para el chat de desarrollo
+Consulta el estado implementado **actualizado hasta un SHA concreto** en `docs/STATUS.md`, la arquitectura en `docs/ARCHITECTURE.md` y las decisiones en `docs/DECISIONS.md`.
 
-- Si la tarea es solo documental, no afirmar que se han ejecutado Rust, GUI o pruebas en la máquina.
-- Tratar `LAGUCAM_004.md`–`LAGUCAM_007.md` y `AUDITORIA.md` como documentos históricos; verificar siempre HEAD y `docs/STATUS.md`.
-- No convertir la decisión de SHA-256 en código sin encargo expreso. La próxima tarea acordada sería exclusivamente función de huella y tests; sin operaciones ni cambios adicionales de `.lagucam`.
-- Separar **UUID (identidad)**, **revisión (historial)**, **hash geométrico (equivalencia de forma)** y **parámetros tecnológicos/G-code (vigencia aparte)**.
+## 5. Antes de tocar código
+
+1. Comprobar rama, HEAD, árbol de trabajo y diferencias respecto de `docs/STATUS.md`.
+2. Leer `docs/INDEX.md`, decisiones relevantes y archivos de código realmente afectados.
+3. Identificar objetivo aprobado, exclusiones, pruebas y limitaciones de acceso.
+4. No usar datos/documentos de una versión anterior como sustituto del código actual.
+
+## 6. Entrega del chat de implementación
+
+Informar, de forma breve: SHA base y SHA final (solo si hay commit), archivos alterados, pruebas **realmente** ejecutadas con entorno y resultados, pruebas pendientes, regresiones observadas, limitaciones y asuntos que requieren aceptación. **Sin modificar Markdown**.
+
+Ante un cambio de alcance, seguridad, formatos persistentes o licencia, consultar antes de implementarlo. Nunca presentar una simulación como validación física. No publicar ni fusionar cambios por iniciativa propia.
+
+**Regla de continuidad:** el repositorio manda sobre el código; `STATUS.md` manda sobre lo que la documentación afirma haber revisado; las pruebas mandan sobre lo que se considera validado.

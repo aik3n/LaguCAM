@@ -1,89 +1,72 @@
-> **Regla de continuidad:** el último corte de código revisado es `f1e436b` (UUID compartido, proyecto `.lagucam` v2, biblioteca global). La huella de herramienta SHA-256 está **acordada, no implementada**. Nunca convertir una decisión documentada en código sin una nueva tarea explícita.
+# Flujo de trabajo y sincronización documental de LaguCAM
 
-# Protocolo de trabajo: usuario, chat de dirección y chat de desarrollo
+**Protocolo vigente desde:** 2026-11-15. Autoridad: aprobación del responsable del proyecto.
 
-**Estado:** protocolo vigente · **Código de referencia:** `f1e436b976eb6f4f88482b00ae5aeff2761e08ee` · **Fecha:** 2026-11-14
+## 1. Cinco fases, en este orden
 
-## 1. Roles
+1. **Debate.** Usuario y dirección técnica delimitan el problema, las alternativas y los riesgos. Una idea no es una decisión aprobada.
+2. **Aceptación.** El usuario autoriza alcance y criterios de salida. El chat de dirección prepara una instrucción breve **solo si se solicita**.
+3. **Implementación.** El chat de programación, o el especializado en motor, parte de HEAD verificado; modifica código y pruebas sin ampliar el alcance. **No edita documentación**.
+4. **Validación.** Pruebas Rust y geométricas, revisión del commit y comprobación del usuario si es necesaria. La entrega especifica evidencias, plataforma, resultados y limitaciones. Es legítimo detenerse por una validación insuficiente.
+5. **Documentación.** Este chat actualiza, tras la validación, `docs/STATUS.md` y los documentos afectados; separa código observado de pruebas acreditadas y documenta decisiones realmente aceptadas.
 
-**Responsable del proyecto (usuario):** fija objetivos, preferencias, acepta o descarta decisiones y prueba la interfaz/mecanizado en su equipo. Sus observaciones reales tienen prioridad frente a estimaciones de un asistente, con registro del alcance observado.
+La documentación se puede agrupar **por hitos**, no por cada commit. No bloquear la implementación por la sincronización documental pendiente; sí detener cualquier afirmación de «validado» que carezca de pruebas.
 
-**Chat de dirección técnica:** debate, elabora decisiones, evalúa impactos, revisa entregas y prepara una instrucción de desarrollo **solo si se le pide**. No debe producir trabajo accesorio ni ampliar la salida innecesariamente.
+## 2. Dos referencias, nunca una supuesta sincronización
 
-**Chat de desarrollo (Work u otro entorno con código):** analiza el repositorio real, ejecuta el cambio acordado, prueba, documenta y entrega. No reinterpreta libremente objetivos ni reclama validación que no puede realizar.
+`docs/STATUS.md` debe mostrar:
 
-**GitHub:** referencia autoritativa del estado del código versionado. Los archivos Markdown dentro del repositorio documentan decisiones y evidencia; la conversación, por sí sola, no es sustituto del historial.
+- **HEAD de código observado al hacer la revisión**, con rama y SHA.
+- **Código cubierto por la documentación:** SHA concreto hasta el que el documento ha sido reconciliado con el repositorio. Este SHA **no** se actualiza por la mera existencia de commits posteriores.
+- **Evidencia disponible:** pruebas ejecutadas en qué sistema, por quién y contra qué versión; resultados pendientes o no reproducidos.
 
-## 2. Ciclo de trabajo
+Al iniciar cualquier nueva tarea: comparar HEAD con el SHA documentado. Si son diferentes, **examinar los commits nuevos antes de usar las afirmaciones de STATUS**. Las decisiones estables siguen vigentes, salvo modificación explícita.
 
-1. **Debate.** La dirección técnica y el usuario deciden qué problema resolver. Se registra si es una decisión cerrada o propuesta.
-2. **Especificación breve.** Solo cuando el usuario la solicita: objetivo, alcance excluido, criterios de aceptación y restricciones.
-3. **Verificación inicial.** Desarrollo lee `AGENTS.md`, `docs/STATUS.md`, `docs/DECISIONS.md` y el código del SHA actual; revisa cambios locales antes de tocar nada.
-4. **Implementación acotada.** Cambios graduales; sin refactorizaciones oportunistas, nuevas dependencias injustificadas ni modificaciones no solicitadas.
-5. **Pruebas.** Las disponibles en el entorno, más tests relevantes del cambio. Registrar comandos, sistema operativo y errores.
-6. **Revisión de regresión.** No degradar visor de STL grande, bruto, origen ni proyectos. La prueba gráfica del usuario puede ser necesaria.
-7. **Documentación.** Actualizar las secciones afectadas **en el mismo conjunto de cambios**.
-8. **Entrega.** Proporcionar SHA/patch, resumen breve, resultados, limitaciones y qué debe verificar el usuario.
-9. **Validación.** El usuario prueba la funcionalidad. La dirección decide si acepta, pide correcciones o abre otra etapa.
+## 3. Un solo documento para cada función
 
-## 3. Regla de actualización por commit
+| Documento | Responsabilidad |
+| --- | --- |
+| `docs/STATUS.md` | Único estado vigente: implementado, probado y pendiente, con SHAs |
+| `docs/DECISIONS.md` | Registro de decisiones aprobadas, propuestas o sustituidas; no estado de compilación |
+| `docs/ARCHITECTURE.md` | Componentes, contratos, invariantes y límites; evitar repetir el estado actual |
+| `docs/REQUIREMENTS.md` | Requisitos y criterios de aceptación; remitir a STATUS para su grado de cumplimiento |
+| `docs/ROADMAP.md` | Objetivos, dependencias e hitos; no inventariar cada commit |
+| `docs/TESTING.md` | Cómo comprobar y qué evidencia se exige; las ejecuciones concretas se registran en STATUS |
+| `docs/LIBRARIES.md` | Definiciones de herramientas, máquinas y posts |
+| `docs/CHANGELOG.md` | Historia fechada de entregas y decisiones, sin actuar como otro STATUS |
+| `README.md` | Presentación, compilación y enlaces al estado vigente |
+| `AGENTS.md` / `docs/WORKFLOW.md` | Reglas estables de colaboración; no fijar un SHA «actual» permanente |
 
-Para todo commit con impacto funcional o arquitectónico:
+No crear un documento nuevo para cada entrega salvo que contenga información técnica que no encaje en los anteriores. Conservar archivos históricos existentes cuando tengan valor probatorio; corregir enlaces rotos.
 
-- `docs/CHANGELOG.md`: añadir entrada con SHA, qué cambió y cómo se validó.
-- `docs/STATUS.md`: actualizar capacidades/evidencia y SHA de referencia. **No marcar USUARIO-VALIDADO antes de recibir esa validación.**
-- `docs/ROADMAP.md`: mover hitos solo tras aceptación; registrar bloqueos reales.
-- `docs/REQUIREMENTS.md`: actualizar estado de requisitos afectados.
-- `docs/ARCHITECTURE.md`: actualizar cuando cambien flujos, invariantes o responsabilidades.
-- `docs/LIBRARIES.md`: actualizar cuando cambie modelo de datos de herramienta, máquina o post.
-- `docs/DECISIONS.md`: registrar decisiones nuevas o sustituidas aprobadas; no inventar aprobaciones.
-- `AGENTS.md` / `docs/WORKFLOW.md`: modificar **solo si cambia de forma deliberada el proceso de colaboración**.
-
-Un commit que **solo actualiza documentación** no debe atribuirse pruebas de código que no se hicieron. Al actualizar `STATUS.md` dentro del mismo commit, registrar claramente el SHA base del código revisado y sustituirlo por el SHA de la entrega una vez conocido; si el agente no puede confirmar el SHA final, dejarlo como «por confirmar», nunca inventarlo.
-
-## 4. Plantilla de informe de entrega
+## 4. Entrega mínima para pasar de validación a documentación
 
 ```text
-Objetivo: <una frase>
-Base: <SHA real>
-Entrega: <SHA real, o 'sin commit'>
-Cambios: <archivos/funciones principales>
-Pruebas: <comando + resultado, o 'no ejecutado'>
-Prueba en equipo del usuario: <pendiente / resultado comunicado>
-Riesgos: <máximo 3 relevantes>
-Documentación: <archivos actualizados>
-Siguiente decisión: <solo si hay una decisión pendiente>
+Objetivo aprobado:
+SHA base / SHA final:
+Archivos y comportamiento modificados:
+Pruebas: comando + sistema + resultado; evidencia o informe disponible:
+Prueba manual del responsable: resultado concreto / pendiente:
+Limitaciones técnicas o de seguridad:
+Incompatibilidades de formato o datos:
+Estado: aceptado / requiere corrección / validación pendiente:
 ```
 
-## 5. Reglas de colaboración con chat
+El chat de documentación comprueba el commit y no adopta sin atribución frases como «130 tests superados» o «fluido en STL grande». Cuando no puede verificar una ejecución, la atribuye al informe de quien la realizó.
 
-- **No generar un prompt cuando el usuario quiere debatir.** Primero resolver la duda y, si se solicita, redactar el encargo.
-- Respuestas precisas, sin felicitaciones excesivas, relleno, planes largos ni propuestas automáticas de funciones.
-- Si la pregunta es concreta, contestarla primero. No lanzar nuevas preguntas cuando no bloquean la decisión.
-- Ante un SHA, inspeccionar el commit indicado antes de evaluarlo; no dar por bueno que `main` coincide sin comprobarlo.
-- No afirmar que se puede compilar, ejecutar Work, cambiar GitHub o confirmar seguridad si no existe acceso real y resultado constatado.
-- No seguir la premisa errónea de que G54 implica rotación de ejes o de que FluidNC gestiona M6 de forma universal.
-- No perder de vista que **calcular una trayectoria y ejecutar G-code real son dos niveles de validación diferentes**.
-- Mantener separados la consulta técnica, la decisión, la especificación y la implementación.
+## 5. Política de Git y archivos personales
 
-## 6. Cómo retomar LaguCAM desde otro chat
+- Identificar siempre SHA base, rama y cambios locales antes de modificar.
+- Commits de código pequeños y trazables; consolidación documental posterior con su propio commit.
+- No publicar, fusionar ni reescribir `main` sin autorización del responsable.
+- No eliminar STL personales ni sobrescribir configuraciones por conveniencia. Los STL grandes reales quedan fuera de Git salvo decisión expresa.
+- Durante desarrollo no se requieren migraciones de formatos; informar de las incompatibilidades y no destruir archivos del usuario.
+- Si falta permiso de escritura en GitHub, entregar archivos o parche exactos, **sin afirmar que se ha publicado un commit**.
 
-Enviar la URL del repositorio y el SHA a revisar, con `AGENTS.md` y el índice como referencia. Instrucción inicial corta sugerida:
+## 6. Control de calidad y seguridad CAM
 
-> «Trabajaremos sobre LaguCAM. Lee `AGENTS.md` y `docs/INDEX.md`, revisa `docs/STATUS.md` y `docs/DECISIONS.md` y comprueba el HEAD de GitHub. No modifiques código todavía. Dime en pocas líneas el estado probado, lo pendiente y cualquier discrepancia importante entre documentación y código». 
+Compilar ≠ ejecutar correctamente ≠ calcular geometría precisa ≠ disponer de una trayectoria CNC segura. Evaluar según corresponda: pruebas de referencia independientes, tolerancias, rendimiento con mallas grandes, regresión del visor y flujo de verificación de la máquina. La interfaz puede visualizar muestras sin que estas se consideren trayectorias listas para postprocesar.
 
-Después el responsable indicará el rol (debate o desarrollo) y una tarea concreta. **El siguiente chat no debe inventar continuidad si el repositorio ha cambiado.**
+## 7. Cómo reanudar desde otro chat
 
-## 7. Política de Git
-
-- Identificar siempre SHA base y estado de cambios no confirmados.
-- Usar commits pequeños y mensajes descriptivos; dejar fácil revertir una regresión.
-- No sobrescribir archivos o modificaciones no confirmadas sin consentimiento.
-- **En desarrollo no se requiere compatibilidad retroactiva** de formatos ni migración; los cambios incompatibles se registran y no se borran datos personales sin aviso/autorización.
-- No publicar, fusionar ni modificar la rama principal por iniciativa propia.
-- Los STL reales grandes quedan fuera de Git; usar un STL pequeño de referencia y datos sintéticos para tests reproducibles.
-- Una tarea puede terminar correctamente con un patch o archivo sin commit **si no se dispone de acceso Git**, pero declararlo explícitamente.
-
-## 8. Aprobación y control de alcance
-
-Una tarea termina cuando los criterios acordados se cumplen o cuando se informa de un bloqueo reproducible. Un agente no debe autoasignarse una nueva etapa. Si propone una mejora, presentarla como **propuesta futura**, no implementarla ni preguntar automáticamente al usuario si quiere autorizarla.
+Proporcionar repositorio, SHA o rama a revisar y rol del chat. Leer `AGENTS.md`, `docs/INDEX.md` y `docs/STATUS.md`; contrastar HEAD y las decisiones. Si la documentación va por detrás, indicarlo y consultar el código real, no inferir que el desarrollo está detenido.
