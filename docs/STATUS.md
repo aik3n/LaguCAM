@@ -1,5 +1,13 @@
 # Estado actual de LaguCAM
 
+## Corte local de integración CAM — 15-11-2026
+
+**Código local:** `7de83c9` en rama `integracion/cam-20261115` (GitHub `main` todavía no actualizado). El motor de contacto esférico con BVH, las operaciones configurables y la estrategia «Acabado paralelo — TEST» ya están integrados. Parámetros y operaciones se guardan en `.lagucam`; las previsualizaciones se recalculan, no constituyen G-code.
+
+**Evidencia Windows comunicada por el usuario:** 130 pruebas automáticas superadas (20 biblioteca, 104 aplicación, 6 contrato G18), `cargo fmt --check`, `cargo check` y compilación Release; apertura STL y creación, modificación y eliminación de operaciones probadas en la carpeta original. Los avisos de compilación se corrigen en esta consolidación; su verificación depende de la ejecución de Cargo. Las afirmaciones de «sin CAM» situadas más abajo corresponden al corte documental anterior y quedan sustituidas por este apartado.
+
+**Pendiente:** validación geométrica CAM integral, herramientas vinculadas a operaciones, controles de seguridad, trayectoria neutral y postprocesador. No existe G-code utilizable.
+
 ## Corrección puntual 021 — tema activo (pendiente de prueba en Windows)
 - `src/options.rs` fija explícitamente `egui::Theme` al aplicar la preferencia y al restaurarla desde la configuración portable, además de aplicar la paleta de colores correspondiente.
 - No se cambia el formato `settings.json`; los ajustes de hash geométrico 020 que existan en el árbol local se conservan intactos.
@@ -21,7 +29,7 @@
 | Preferencias, paneles y apariencia | **Código observado** | Tema claro/oscuro, docking visual, configuración portable |
 | Selección de fresa por operación | **Pendiente** | No se resuelve todavía el UUID desde una operación |
 | Huella geométrica SHA-256 | **Código preparado en 020; pruebas Cargo pendientes** | Función binaria v1 y pruebas unitarias; no conectada a CAM |
-| Estrategias CAM y trayectorias | **No implementado** | Operaciones siguen siendo marcadores |
+| Estrategias CAM y trayectorias | **Prototipo experimental** | Acabado paralelo TEST, cálculo de contacto y previsualización 3D; sin trayectorias CNC verificadas |
 | Máquina y postprocesador FluidNC | **No implementado** | Arquitectura acordada, sin salida G-code |
 | Colisiones, simulación, STEP/B-Rep, 4/5 ejes | **Futuro** | No hay capacidad operativa |
 

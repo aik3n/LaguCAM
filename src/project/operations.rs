@@ -121,6 +121,7 @@ impl Operations {
         Ok(index)
     }
 
+    #[cfg(test)]
     pub fn add_parallel_test(&mut self) -> Result<usize, String> {
         // Cuota temporal: la previsualizacion almacena hasta 12.000 puntos/operacion.
         const MAX_TEST_OPERATIONS: usize = 32;

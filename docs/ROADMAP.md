@@ -1,5 +1,7 @@
 # Hoja de ruta de LaguCAM
 
+> **Avance local 15-11-2026:** la rama `integracion/cam-20261115` incorpora motor de contacto y acabado paralelo TEST. Sin G-code ni garantía CNC. La sección de «Priorización inmediata tras f1e436b» documenta un momento anterior.
+
 **Revisión:** 2026-11-14. Es un plan secuencial, no una promesa de fechas. La entrada de nuevas funciones debe basarse en resultados y en decisiones explícitas del responsable.
 
 ## Etapas
@@ -11,8 +13,8 @@
 | **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **IMPLEMENTADO EN CÓDIGO** (v2); prueba manual actual pendiente |
 | **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **EDITOR Y BIBLIOTECA IMPLEMENTADOS**; UUID global unificado; selector por operación pendiente |
 | **Etapa 3 — Máquina y post** | Perfiles de máquina; abstracción post independiente; primer dialecto FluidNC | **ACORDADO COMO OBJETIVO**, sin implementación |
-| **Etapa 4 — Base geométrica CAM** | Acceso geométrico fiable a STL, consultas espaciales, contacto herramienta-pieza y tests patrón | **PENDIENTE** |
-| **Etapa 5 — Primera estrategia** | Acabado 3D paralelo de 3 ejes sobre superficies de referencia | **PROPUESTA**, pendiente de aprobar estrategia exacta |
+| **Etapa 4 — Base geométrica CAM** | Acceso geométrico fiable a STL, consultas espaciales, contacto herramienta-pieza y tests patrón | **PROTOTIPO IMPLEMENTADO Y PROBADO**; ampliación/validación pendiente |
+| **Etapa 5 — Primera estrategia** | Acabado 3D paralelo de 3 ejes sobre superficies de referencia | **TEST FUNCIONAL**; no válido aún para mecanizado |
 | **Etapa 6 — Verificación y exportación controlada** | Trayectorias visibles, comprobaciones de colisión/retirada/recorrido, post FluidNC, validación segura | **PENDIENTE** |
 | **Etapas posteriores** | Desbaste, semiacabado, contorno, stock remanente, optimización, B-Rep/STEP, 4/5 ejes según demanda | **FUERA DEL ALCANCE INICIAL** |
 

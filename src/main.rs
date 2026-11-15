@@ -877,7 +877,7 @@ impl App {
                 }
                 if ui
                     .add_enabled(
-                        (self.sample_profiles.is_some() || self.sample_profile_job.is_some()),
+                        self.sample_profiles.is_some() || self.sample_profile_job.is_some(),
                         egui::Button::new("Ocultar perfiles de muestra"),
                     )
                     .clicked()

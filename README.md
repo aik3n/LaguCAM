@@ -2,9 +2,13 @@
 
 **CAM libre experimental para fresado CNC.** Estado del código documentado: [`f1e436b976eb6f4f88482b00ae5aeff2761e08ee`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee), 14 de noviembre de 2026. Licencia MIT.
 
-LaguCAM nace para mecanizar relieves topográficos a partir de STL binarios enormes, pero se diseña para piezas, formatos y máquinas diferentes. **Todavía no calcula trayectorias CAM ni exporta G-code.** No constituye un sistema de mecanizado verificado.
+LaguCAM nace para mecanizar relieves topográficos a partir de STL binarios enormes, pero se diseña para piezas, formatos y máquinas diferentes. **Incluye una estrategia CAM experimental de acabado paralelo con previsualización 3D, pero no exporta G-code.** No constituye un sistema de mecanizado verificado.
 
 ## Funcionalidad disponible
+
+- Motor geométrico STL independiente del visor, BVH y consultas de contacto para fresa esférica (dentro de la precisión de la malla).
+- Estrategia de prueba «Acabado paralelo», con pasos, dirección, diámetro y zona XY; solo previsualización, sin entradas, retiradas ni programa CNC.
+- Estado y limitaciones del prototipo: [`docs/CAM_INTEGRACION_2026-11-15.md`](docs/CAM_INTEGRACION_2026-11-15.md).
 
 - Lector STL binario en dos pasadas, importación y transferencia a OpenGL por bloques, sin modificar el STL fuente.
 - Visor con rotación, zoom, desplazamiento y pivote visual seleccionable en la superficie visible.
@@ -13,7 +17,7 @@ LaguCAM nace para mecanizar relieves topográficos a partir de STL binarios enor
 - Guardar y abrir proyectos `.lagucam` **versión 2**, JSON con referencias externas al STL y unidades en milímetros.
 - Biblioteca global de herramientas con cinco familias geométricas, filtros, editor y perfil técnico 2D; identificadores UUID y revisiones.
 - Paneles Proyecto/Propiedades acoplables o flotantes, temas claro/oscuro y preferencias portables.
-- Operaciones representadas como datos, todavía sin estrategias; referencia a herramienta por UUID, sin selector operativo.
+- Operaciones CAM experimentales con parámetros independientes, editor por pestañas y guardado en `.lagucam`; selección desde la biblioteca de herramientas todavía pendiente.
 
 ## Compilación y uso
 

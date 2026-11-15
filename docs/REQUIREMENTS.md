@@ -1,5 +1,7 @@
 # Requisitos de LaguCAM
 
+> **Corte local 15-11-2026:** motor geométrico y estrategia experimental TEST integrados en `7de83c9`; persisten las restricciones de verificación y G-code. La tabla de etapas anterior a esa fecha debe leerse junto a este corte.
+
 > **Actualización vigente, código `f1e436b` (14-11-2026).** El proyecto `.lagucam` v2, la biblioteca de cinco fresas, la configuración portable y el UUID compartido ya existen en código. La huella geométrica SHA-256 v1 tiene implementación preparada en el ajuste 020, pendiente de pruebas Cargo. En desarrollo no se exigen migraciones de formatos obsoletos; no borrar datos personales silenciosamente.
 
 
@@ -30,13 +32,13 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | GEO-02 | Distinguir geometría real de renderización normalizada | Observado en código; requisito permanente |
 | GEO-03 | Admitir STL primero y otros formatos, especialmente sólidos STEP, a futuro | Acordado; STEP pendiente |
 | GEO-04 | Abstracciones por **capacidad geométrica**, sin obligar a convertir todo B-Rep a una malla única | Acordado como criterio arquitectónico |
-| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | Pendiente |
+| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | Motor STL con BVH y contacto esférico experimental; validación adicional pendiente |
 | GEO-06 | Permitir representaciones auxiliares (p. ej. heightfield), con error definido | Acordado; implementación pendiente |
 | CAM-01 | Estrategias iniciales estrictamente 3 ejes, husillo fijo paralelo al Z del setup | Acordado |
 | CAM-02 | Posibilitar 4/5 ejes sin implementar hoy su cinemática | Acordado |
 | CAM-03 | Desbaste, semiacabado, acabado, contorno, conforme se desarrollen | Previsto, no implementado |
 | CAM-04 | Estrategias disponibles según capacidades del modelo, no solo extensión del fichero | Acordado |
-| CAM-05 | Primera estrategia sugerida: acabado paralelo con fresa esférica | **Propuesta**, no aprobada todavía como desarrollo |
+| CAM-05 | Primera estrategia: acabado paralelo con fresa esférica | Prototipo TEST implementado; no certificado para mecanizado |
 | CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Acordado; implementación pendiente |
 
 ## 3. Herramientas, máquinas y control

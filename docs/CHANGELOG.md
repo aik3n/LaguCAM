@@ -1,5 +1,13 @@
 # Historial de LaguCAM
 
+## 15-11-2026 — Integración local del motor geométrico y operaciones TEST
+
+- Rama `integracion/cam-20261115`, commit base `7de83c9` (sin publicación remota): 15 archivos integrados; motor de contacto esférico, extracción de secciones, vistas de diagnóstico, operaciones parametrizables y persistencia.
+- La operación se crea vacía en el árbol, se edita con doble clic en una ventana con pestañas y puede eliminarse desde su propio editor. El resultado es previsualización geométrica, no G-code.
+- Windows: 130 pruebas (20+104+6) superadas, `cargo fmt --check`, `cargo check` y compilación Release. Validación visual comunicada: abrir STL y crear/modificar/eliminar operaciones en el LaguCAM original.
+- Consolidación local: limpieza de cuatro avisos Rust y actualización de documentación, conservando el commit funcional previo como referencia.
+- No se ha fusionado con `main` ni publicado en GitHub. Sin cambios a STL personales o proyectos existentes.
+
 ## Ajuste 021 — Preferencia de tema aplicada y restaurada correctamente
 - Corregido `src/options.rs`: la preferencia Claro/Oscuro selecciona `egui::Theme` con `Context::set_theme`, además de aplicar su paleta con `set_visuals_of`.
 - En egui 0.37 `set_visuals` por sí solo no selecciona el tema; el tema del sistema podía quedar activo aunque el selector mostrara el contrario.

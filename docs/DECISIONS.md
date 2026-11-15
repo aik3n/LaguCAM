@@ -26,7 +26,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-018 | **ACEPTADA** | Para cambios de setup, no asumir que G54 efectúa rotación | G54 selecciona offsets; rotaciones requieren soporte/configuración explícitos del control |
 | D-019 | **ACEPTADA** | No asumir que M6 ejecuta cambio manual en FluidNC | La secuencia exacta debe validarse con la configuración de la máquina |
 | D-020 | **PROPUESTA** | Cinco tipos iniciales: plana, esférica, V, cónica plana y cónica esférica | Referencia DeskProto; por cerrar tras definir geometrías y fórmulas |
-| D-021 | **PROPUESTA** | Primera estrategia: acabado paralelo con fresa esférica | Caso geométrico controlable antes de acometer desbaste y stock remanente |
+| D-021 | **ACEPTADA PARA PROTOTIPO TEST** | Primera estrategia: acabado paralelo con fresa esférica | Aprobada y probada como previsualización, no como mecanizado válido |
 | D-022 | **PROPUESTA** | Un perfil de máquina por proyecto, configurable | Simplificación inicial; el usuario no ha confirmado el modelo definitivo |
 | D-023 | **ACEPTADA; IMPLEMENTADA EN CÓDIGO** | `.lagucam` JSON versionado | Esquema actual v2; no se exige compatibilidad con v1 durante desarrollo (D-033) |
 | D-024 | **ACEPTADA** | Herramienta definida solo en biblioteca global; operación guarda UUID sin copia de geometría | La falta de referencia bloquea futuro cálculo; comprobar vigencia antes de reutilizar trayectorias |
@@ -40,6 +40,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-032 | **ACEPTADA** | Docking con asa de seis puntos, silueta y guías sin texto | Sustituye menú «Posición», sin cambios en los datos de proyecto |
 | D-033 | **ACEPTADA** | Durante desarrollo no se exige compatibilidad de formatos ni migraciones | Documentar roturas y conservar datos personales; `.lagucam` v1 se rechaza en el SHA revisado |
 | D-034 | **ACEPTADA; FUNCIÓN V1 PREPARADA EN 020** | SHA-256 de parámetros geométricos de herramienta, binario canónico y versionado | Igual geometría → mismo hash aunque cambie la revisión; sin identidad ni feeds/speeds; ejecución Cargo pendiente |
+| D-035 | **ACEPTADA; UI PROTOTIPO IMPLEMENTADA** | Una operación se crea vacía, se edita con doble clic en una sola ventana por pestañas y se elimina desde esa ventana | El árbol organiza operaciones, Propiedades resume y el cálculo se genera explícitamente; sin G-code |
 
 ## Cómo registrar una nueva decisión
 

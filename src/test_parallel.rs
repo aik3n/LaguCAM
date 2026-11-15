@@ -5,7 +5,7 @@ use crate::{
     project::{
         Project,
         model::ModelReference,
-        operations::{OperationKind, OperationStatus, ParallelTestParameters, TestAreaXY},
+        operations::{OperationKind, OperationStatus, ParallelTestParameters},
     },
     stl::Bounds,
 };
@@ -137,7 +137,6 @@ struct Outcome {
     contacts: usize,
     lines_count: usize,
     samples_per_line: usize,
-    params: Parameters,
 }
 
 struct Job {
@@ -275,7 +274,6 @@ fn compute(
         contacts,
         lines_count: plan.lines,
         samples_per_line: plan.samples,
-        params: plan.params,
     })
 }
 
@@ -1046,3 +1044,6 @@ mod deletion_index_tests {
         assert!(panel.hidden.contains(&2));
     }
 }
+
+#[cfg(test)]
+use crate::project::operations::TestAreaXY;

@@ -1,5 +1,7 @@
 # Documentación de LaguCAM
 
+> **Corte de desarrollo local más reciente:** `7de83c9` en `integracion/cam-20261115`. El resumen histórico de `f1e436b` situado más abajo no describe ya la estrategia TEST integrada. Ver [integración CAM](CAM_INTEGRACION_2026-11-15.md).
+
 **Corte documental:** 2026-11-14 · **Repositorio:** https://github.com/aik3n/LaguCAM  
 **Último commit de código revisado:** [`f1e436b976eb6f4f88482b00ae5aeff2761e08ee`](https://github.com/aik3n/LaguCAM/commit/f1e436b976eb6f4f88482b00ae5aeff2761e08ee)
 
@@ -17,6 +19,7 @@ Este conjunto resume las decisiones de las conversaciones de dirección técnica
 | [`LIBRARIES.md`](LIBRARIES.md) | Diseño de herramientas, máquinas y postprocesadores |
 | [`ROADMAP.md`](ROADMAP.md) | Etapas, dependencias y criterios de salida |
 | [`STATUS.md`](STATUS.md) | Estado verificable del software y riesgos activos |
+| [`CAM_INTEGRACION_2026-11-15.md`](CAM_INTEGRACION_2026-11-15.md) | Corte local experimental 3 ejes y evidencia de pruebas |
 | [`TESTING.md`](TESTING.md) | Política de pruebas y seguridad CNC |
 | [`WORKFLOW.md`](WORKFLOW.md) | Procedimiento de colaboración y actualización por commit |
 | [`CHANGELOG.md`](CHANGELOG.md) | Resumen histórico de cambios y trazabilidad |

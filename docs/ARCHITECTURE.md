@@ -1,5 +1,14 @@
 # Arquitectura de LaguCAM
 
+## Arquitectura CAM integrada localmente (15-11-2026)
+
+- `src/lib.rs` y `src/cam_geometry/*`: motor de consultas geométricas STL independiente de la GUI, con índice BVH, lectura acotada y contacto de punta esférica. Las coordenadas de cálculo proceden del STL original en `f64`, no del render normalizado.
+- `src/project/operations.rs` y `src/project/persistence.rs`: operaciones con estrategia opcional, parámetros propios y guardado en `.lagucam`.
+- `src/test_parallel.rs`: generación de muestras de «Acabado paralelo — TEST» en segundo plano y previsualización; consulta al motor, sin postprocesador, colisiones ni G-code.
+- `src/project_ui.rs`, `src/panel_layout.rs` y `src/main.rs`: árbol, propiedades, apertura del editor único con pestañas y representación 3D. Los módulos `sample_*` y `section_overlay.rs` son diagnóstico temporal, no estrategias de producción.
+
+Este apartado corresponde a `7de83c9` en la rama local de integración. Los apartados del documento con referencia explícita a `f1e436b` describen un corte de código anterior.
+
 ## Huella geométrica SHA-256 v1 — ajuste 020, sin acoplamiento CAM
 `src/tools/hash.rs` recibe `&Tool` y devuelve 32 bytes SHA-256; usa `ToolGeometry::validate` y valida dimensiones comunes, sin `Tool::validate` (que depende de identidad/metadatos). `sha2` 0.10.9 implementa SHA-256 portable.
 Contrato v1 independiente de Serde/JSON/plataforma: `b"LaguCAM/tool-geometry/SHA-256\0"`, versión `u32 LE = 1`, tipo `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5), campos de variante en orden declarado y finalmente longitud de corte, diámetro de mango, longitud total. Cada valor `f64` se codifica con `to_bits().to_le_bytes()`; cero con signo se normaliza a +0.0, NaN/infinito/cotas inválidas se rechazan antes de codificar.
