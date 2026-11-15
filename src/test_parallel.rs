@@ -9,8 +9,9 @@ use crate::{
     },
     stl::Bounds,
 };
-use cam_libre_visor::cam_geometry::service::{
-    BallContactEngine, BallContactQuery, ContactEngineLimits,
+use cam_libre_visor::cam_geometry::{
+    contact_solver::{ContactQuery, ContactSolver, CutterGeometry},
+    service::ContactEngineLimits,
 };
 use eframe::egui;
 use glam::Vec3;
@@ -220,7 +221,7 @@ fn compute(
     if size != expected_size {
         return Err("El STL ha cambiado de tamano desde que se abrio".into());
     }
-    let (mut engine, report) = BallContactEngine::open_stl(
+    let (mut engine, report) = ContactSolver::open_stl(
         path,
         ContactEngineLimits {
             max_triangles: MAX_TRIANGLES,
@@ -243,11 +244,14 @@ fn compute(
             }
             let [x, y] = plan.xy(line, sample);
             let hit = engine
-                .query(
-                    BallContactQuery {
+                .solve(
+                    ContactQuery {
                         x_model: x,
                         y_model: y,
-                        radius_model: plan.params.diameter / 2.0,
+                        cutter: CutterGeometry::BallNose {
+                            diameter_model: plan.params.diameter,
+                        },
+                        allowance_model: 0.0,
                     },
                     cancelled,
                 )

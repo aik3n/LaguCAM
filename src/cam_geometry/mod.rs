@@ -186,6 +186,7 @@ pub fn ball_tip_height_mesh(
 /// Adaptador experimental del formato STL binario con BVH en XY.
 pub mod stl;
 
+pub mod contact_solver;
 /// Fachada del motor de contacto para futuras operaciones CAM.
 pub mod service;
 
