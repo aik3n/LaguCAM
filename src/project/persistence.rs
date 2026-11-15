@@ -4,7 +4,9 @@ use crate::{
     project::{
         Project,
         display::{StockColor, StockDisplay, StockMode},
-        operations::{Operation, OperationKind, OperationStatus, Operations},
+        operations::{
+            Operation, OperationKind, OperationStatus, Operations, ParallelTestParameters,
+        },
         origin::{OriginPoint, OriginReference, WorkOrigin},
         selection::Selection,
         stock::Stock,
@@ -100,6 +102,8 @@ pub struct SavedOperation {
     pub status: String,
     pub tool_id: Option<ToolId>,
     pub toolpath_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel_test: Option<ParallelTestParameters>,
 }
 
 fn valid_bounds(min: [f64; 3], max: [f64; 3]) -> bool {
@@ -166,16 +170,24 @@ impl ProjectState {
                     name: op.name.clone(),
                     kind: match &op.kind {
                         OperationKind::Placeholder => "placeholder",
+                        OperationKind::ParallelTest(_) => "parallel_test",
                     }
                     .into(),
-                    status: match &op.status {
-                        OperationStatus::NotCalculated => "not_calculated",
-                        OperationStatus::Ready => "ready",
-                        OperationStatus::Error => "error",
+                    status: match &op.kind {
+                        OperationKind::ParallelTest(_) => "not_calculated",
+                        OperationKind::Placeholder => match &op.status {
+                            OperationStatus::NotCalculated => "not_calculated",
+                            OperationStatus::Ready => "ready",
+                            OperationStatus::Error => "error",
+                        },
                     }
                     .into(),
                     tool_id: op.tool_id.clone(),
                     toolpath_id: op.toolpath_id,
+                    parallel_test: match &op.kind {
+                        OperationKind::ParallelTest(params) => Some(*params),
+                        OperationKind::Placeholder => None,
+                    },
                 })
                 .collect(),
         }
@@ -218,10 +230,24 @@ impl ProjectState {
             if op.name.is_empty() || op.name.len() > 4096 {
                 return Err("Nombre de operación inválido".into());
             }
-            if op.kind != "placeholder"
+            if !["placeholder", "parallel_test"].contains(&op.kind.as_str())
                 || !["not_calculated", "ready", "error"].contains(&op.status.as_str())
             {
                 return Err("Tipo o estado de operación incompatible".into());
+            }
+            match op.kind.as_str() {
+                "placeholder" if op.parallel_test.is_some() => {
+                    return Err("Una operación antigua no puede incluir parámetros CAM".into());
+                }
+                "parallel_test" => {
+                    op.parallel_test
+                        .ok_or("Faltan parámetros de acabado paralelo")?
+                        .validate()?;
+                    if op.toolpath_id.is_some() {
+                        return Err("La operación TEST no guarda trayectorias persistentes".into());
+                    }
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -281,11 +307,18 @@ impl ProjectState {
                 .iter()
                 .map(|op| Operation {
                     name: op.name.clone(),
-                    kind: OperationKind::Placeholder,
-                    status: match op.status.as_str() {
-                        "ready" => OperationStatus::Ready,
-                        "error" => OperationStatus::Error,
-                        _ => OperationStatus::NotCalculated,
+                    kind: match op.parallel_test {
+                        Some(params) => OperationKind::ParallelTest(params),
+                        None => OperationKind::Placeholder,
+                    },
+                    status: if op.kind == "parallel_test" {
+                        OperationStatus::NotCalculated
+                    } else {
+                        match op.status.as_str() {
+                            "ready" => OperationStatus::Ready,
+                            "error" => OperationStatus::Error,
+                            _ => OperationStatus::NotCalculated,
+                        }
                     },
                     tool_id: op.tool_id.clone(),
                     toolpath_id: op.toolpath_id,
@@ -384,7 +417,10 @@ impl ProjectDocument {
             || expected.triangles != count
             || expected.sample_fnv64 != hash
         {
-            return Err("El STL no coincide con el guardado (tamaño, triángulos o muestras); se mantiene el proyecto anterior".into());
+            return Ok(Some(
+                "El STL asociado ha cambiado; se abrirá el archivo actual y se conservará la configuración del proyecto."
+                    .into(),
+            ));
         }
         if expected.modified_unix_ms != modified {
             Ok(Some("La fecha del STL cambió, pero las muestras coinciden; se verificarán sus límites al cargar".into()))
@@ -393,18 +429,19 @@ impl ProjectDocument {
         }
     }
 
-    pub fn check_loaded(&self, info: StlInfo) -> Result<(), String> {
+    pub fn check_loaded(&self, info: StlInfo) -> Result<Option<String>, String> {
         let expected = self.stl.as_ref().ok_or("Proyecto sin STL")?;
         if expected.size_bytes != info.size_bytes
             || expected.triangles != info.triangles
             || !same_f64(expected.bounds_min, info.bounds.min)
             || !same_f64(expected.bounds_max, info.bounds.max)
         {
-            return Err(
-                "Los límites o metadatos reales del STL difieren: configuración no aplicada".into(),
-            );
+            return Ok(Some(
+                "Los límites o metadatos del STL han cambiado; se usa la geometría actual y se conserva la configuración."
+                    .into(),
+            ));
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -782,7 +819,7 @@ mod tests {
         let mut changed = bytes.clone();
         changed[4] ^= 0x20;
         fs::write(&stl, changed).unwrap();
-        assert!(doc.check_stl(&stl).is_err());
+        assert!(doc.check_stl(&stl).unwrap().is_some());
         fs::remove_file(&stl).unwrap();
         assert!(doc.check_stl(&stl).is_err());
         fs::remove_dir_all(dir).unwrap();
@@ -837,7 +874,7 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
-    fn mismatched_metadata_never_changes_previous_project_state() {
+    fn mismatched_metadata_warns_without_changing_saved_state() {
         let dir = workspace();
         let path = dir.join("m.stl");
         let info = test_stl(&path);
@@ -849,8 +886,91 @@ mod tests {
             triangles: 2,
             ..info
         };
-        assert!(doc.check_loaded(mismatched).is_err());
+        assert!(doc.check_loaded(mismatched).unwrap().is_some());
         assert_eq!(ProjectState::capture(&configured(info)), previous);
         fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn updated_stl_bounds_keep_saved_project_settings() {
+        let dir = workspace();
+        let path = dir.join("modelo.stl");
+        let original = test_stl(&path);
+        let doc = ProjectDocument::from_project(
+            &configured(original),
+            Some(&path),
+            &dir.join("p.lagucam"),
+        )
+        .unwrap();
+        let altered = [[[0.0f32, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 3.0]]];
+        fs::write(&path, crate::stl::tests::binary(&altered)).unwrap();
+        assert!(doc.check_stl(&path).unwrap().is_some());
+        let current = StlInfo {
+            bounds: Bounds {
+                min: [0.0; 3],
+                max: [2.0, 1.0, 3.0],
+            },
+            ..original
+        };
+        assert!(doc.check_loaded(current).unwrap().is_some());
+        let restored = doc
+            .state
+            .restore("modelo.stl".into(), Some(current))
+            .unwrap();
+        assert_eq!(ProjectState::capture(&restored), doc.state);
+        assert_eq!(restored.model.unwrap().bounds.max, [2.0, 1.0, 3.0]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod parallel_test_persistence_tests {
+    use super::*;
+    use crate::project::operations::{OperationKind, OperationStatus};
+
+    #[test]
+    fn saves_independent_parameters_and_restores_without_cached_toolpath() {
+        let mut project = Project::default();
+        project.operations.add_parallel_test().unwrap();
+        project.operations.add_parallel_test().unwrap();
+        if let OperationKind::ParallelTest(ref mut p) = project.operations.items[1].kind {
+            p.stepover = 3.75;
+            p.along_x = false;
+        }
+        project.operations.items[0].status = OperationStatus::Ready;
+        let saved = ProjectState::capture(&project);
+        saved.validate(None).unwrap();
+        assert_eq!(saved.operations[0].status, "not_calculated");
+        let bytes = serde_json::to_vec(&saved).unwrap();
+        let decoded: ProjectState = serde_json::from_slice(&bytes).unwrap();
+        let restored = decoded.restore(String::new(), None).unwrap();
+        assert_eq!(
+            restored.operations.items[0].status,
+            OperationStatus::NotCalculated
+        );
+        assert_eq!(
+            restored.operations.items[1].status,
+            OperationStatus::NotCalculated
+        );
+        match &restored.operations.items[1].kind {
+            OperationKind::ParallelTest(p) => {
+                assert_eq!(p.stepover, 3.75);
+                assert!(!p.along_x);
+            }
+            _ => panic!("No se restauro la estrategia TEST"),
+        }
+    }
+
+    #[test]
+    fn rejects_missing_or_bad_parallel_parameters() {
+        let mut project = Project::default();
+        project.operations.add_parallel_test().unwrap();
+        let mut saved = ProjectState::capture(&project);
+        saved.operations[0].parallel_test = None;
+        assert!(saved.validate(None).is_err());
+        saved.operations[0].parallel_test = Some(ParallelTestParameters {
+            diameter: f64::INFINITY,
+            ..ParallelTestParameters::default()
+        });
+        assert!(saved.validate(None).is_err());
     }
 }

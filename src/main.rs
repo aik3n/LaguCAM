@@ -9,9 +9,13 @@ mod preview;
 mod project;
 mod project_ui;
 mod render;
+mod sample_direct;
+mod sample_overlay;
 mod scene_pick;
+mod section_overlay;
 mod stl;
 mod stock_render;
+mod test_parallel;
 mod tools;
 mod tools_profile;
 mod tools_ui;
@@ -138,9 +142,13 @@ struct App {
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
     project: project::Project,
     property_error: String,
+    sample_profiles: Option<sample_overlay::Profiles>,
+    section_profiles: Option<section_overlay::Sections>,
+    sample_profile_job: Option<sample_direct::ProfileJob>,
     tool_library: tools::model::ToolLibrary,
     tool_library_path: Option<PathBuf>,
     tool_ui: tools_ui::ToolUi,
+    test_parallel: test_parallel::TestParallelPanel,
     project_path: Option<PathBuf>,
     current_stl_path: Option<PathBuf>,
     pending_stl_path: Option<PathBuf>,
@@ -193,9 +201,13 @@ impl App {
             stock_renderer: Arc::new(Mutex::new(stock_renderer)),
             project: project::Project::default(),
             property_error: String::new(),
+            sample_profiles: None,
+            section_profiles: None,
+            sample_profile_job: None,
             tool_library,
             tool_library_path,
             tool_ui: tools_ui::ToolUi::new(tool_error),
+            test_parallel: test_parallel::TestParallelPanel::default(),
             project_path: None,
             current_stl_path: None,
             pending_stl_path: None,
@@ -248,10 +260,13 @@ impl App {
         if self.busy() {
             return;
         }
+        self.sample_profile_job = None;
+        self.sample_profiles = None;
         self.pending_pick = None;
         *self.pick_result.lock() = None;
         self.pivot_press = PivotPress::default();
         self.opening_project = opening;
+        self.test_parallel.clear_source();
         self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
         self.pending_filename = Some(
@@ -304,6 +319,8 @@ impl App {
         }
         if completed {
             if let Some(success) = self.pending_success.take() {
+                self.section_profiles = None;
+                self.sample_profiles = None; // CSV previo deja de corresponder al modelo cargado.
                 self.filename = self.pending_filename.take().unwrap_or_default();
                 self.current_stl_path = self.pending_stl_path.take();
                 if let Some(opening) = self.opening_project.take() {
@@ -350,9 +367,13 @@ impl App {
                     }
                     Ok(LoadEvent::Finished { info, time_seconds }) => {
                         self.receiving = None;
-                        // Se valida antes de finish_upload(); la malla anterior sigue activa.
-                        let validation_error = self.opening_project.as_ref().and_then(|opening| {
-                            opening.document.check_loaded(info).err().or_else(|| {
+                        // Restaurar el proyecto con el STL actual. Sus diferencias solo generan aviso.
+                        let validation_error = self.opening_project.as_mut().and_then(|opening| {
+                            let check = opening.document.check_loaded(info);
+                            if let Ok(Some(warning)) = &check {
+                                opening.warning = Some(warning.clone());
+                            }
+                            check.err().or_else(|| {
                                 opening
                                     .document
                                     .state
@@ -408,6 +429,27 @@ impl App {
                     Err(mpsc::TryRecvError::Empty) => {}
                 }
             }
+        }
+        // Resultado de la muestra geométrica calculada en segundo plano.
+        let profile_result = self.sample_profile_job.as_ref().and_then(|job| job.poll());
+        if let Some(result) = profile_result {
+            self.sample_profile_job = None;
+            match result {
+                Ok(outcome) => {
+                    self.section_profiles = None;
+                    self.sample_profiles = Some(outcome.profiles);
+                    self.message = format!(
+                        "5 perfiles calculados: 405 puntos, {} contactos. Solo visualización.",
+                        outcome.contact_count
+                    );
+                }
+                Err(error) => {
+                    self.sample_profiles = None;
+                    self.message = format!("ERROR: {error}");
+                }
+            }
+        } else if self.sample_profile_job.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(150));
         }
         // El callback de OpenGL deja el resultado para el siguiente frame egui.
         let hit = { self.pick_result.lock().take() };
@@ -487,7 +529,11 @@ impl App {
     fn execute_action(&mut self, action: FileAction, ctx: egui::Context) {
         match action {
             FileAction::New => {
+                self.test_parallel.clear_source();
+                self.section_profiles = None;
+                self.sample_profile_job = None;
                 self.renderer.lock().clear_scene();
+                self.sample_profiles = None;
                 self.project = project::Project::default();
                 self.saved_state = Some(persistence::ProjectState::capture(&self.project));
                 self.current_stl_path = None;
@@ -574,7 +620,11 @@ impl App {
             let doc = persistence::read_project(&path)?;
             let Some(mut stl_path) = doc.resolve_stl(&path) else {
                 let restored = doc.state.restore(String::new(), None)?;
+                self.test_parallel.clear_source();
+                self.section_profiles = None;
                 self.renderer.lock().clear_scene();
+                self.sample_profile_job = None;
+                self.sample_profiles = None;
                 self.project = restored;
                 self.project_path = Some(path.clone());
                 self.current_stl_path = None;
@@ -732,6 +782,113 @@ impl App {
                 }
             });
             ui.menu_button("Vista", |ui| {
+                ui.menu_button("Diagnóstico geométrico (experimental)", |ui| {
+                if ui
+                    .add_enabled(
+                        !self.busy() && self.project.model.is_some() && self.sample_profile_job.is_none(),
+                        egui::Button::new("Mostrar secciones reales CSV..."),
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Secciones reales LaguCAM", &["csv"])
+                        .pick_file()
+                    {
+                        if let Some(model) = self.project.model.as_ref() {
+                            match section_overlay::Sections::load(&path, model) {
+                                Ok(sections) => {
+                                    let count = sections.piece_count();
+                                    self.sample_profile_job = None;
+                                    self.sample_profiles = None;
+                                    self.section_profiles = Some(sections);
+                                    self.message = format!(
+                                        "Secciones reales cargadas: {count} elementos. Solo visualizacion."
+                                    );
+                                }
+                                Err(error) => self.message = format!("ERROR: {error}"),
+                            }
+                        }
+                    }
+                }
+                if ui.add_enabled(self.section_profiles.is_some(),
+                    egui::Button::new("Ocultar secciones reales")).clicked()
+                {
+                    self.section_profiles = None;
+                    ui.close();
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(
+                        !self.busy()
+                            && self.project.model.is_some()
+                            && self.current_stl_path.is_some()
+                            && self.sample_profile_job.is_none(),
+                        egui::Button::new("Calcular 5 perfiles del STL abierto"),
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    if let (Some(path), Some(model)) =
+                        (self.current_stl_path.clone(), self.project.model.as_ref())
+                    {
+                        match sample_direct::ProfileJob::start(
+                            path,
+                            model.bounds,
+                            model.size_bytes,
+                            model.triangles,
+                            ui.ctx().clone(),
+                        ) {
+                            Ok(job) => {
+                                self.sample_profiles = None;
+                                self.sample_profile_job = Some(job);
+                                self.message =
+                                    "Calculando 5 perfiles sobre el STL abierto en segundo plano..."
+                                        .into();
+                            }
+                            Err(error) => self.message = format!("ERROR: {error}"),
+                        }
+                    }
+                }
+                if ui
+                    .add_enabled(
+                        !self.busy() && self.project.model.is_some(),
+                        egui::Button::new("Mostrar perfiles de muestra CSV…"),
+                    )
+                    .clicked()
+                {
+                    ui.close();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Muestra de perfiles LaguCAM", &["csv"])
+                        .pick_file()
+                    {
+                        match sample_overlay::Profiles::load(&path) {
+                            Ok(profiles) => {
+                                self.sample_profile_job = None;
+                                self.section_profiles = None;
+                                self.sample_profiles = Some(profiles);
+                                self.message =
+                                    "Perfiles cargados: vista de muestra, no trayectoria CNC"
+                                        .into();
+                            }
+                            Err(err) => self.message = format!("ERROR: {err}"),
+                        }
+                    }
+                }
+                if ui
+                    .add_enabled(
+                        (self.sample_profiles.is_some() || self.sample_profile_job.is_some()),
+                        egui::Button::new("Ocultar perfiles de muestra"),
+                    )
+                    .clicked()
+                {
+                    self.sample_profile_job = None;
+                    self.sample_profiles = None;
+                    ui.close();
+                }
+                ui.separator();
+                });
+                ui.separator();
                 if ui.button("Centrar vista").clicked() {
                     self.center_view();
                     ui.ctx().request_repaint();
@@ -926,6 +1083,16 @@ impl App {
             response.clicked(),
             response.hover_pos(),
         );
+        if let (Some(profiles), Some(model)) = (&self.sample_profiles, &self.project.model) {
+            profiles.paint(ui, rect, model, yaw, pitch, distance, pan);
+        }
+        if let (Some(sections), Some(model)) = (&self.section_profiles, &self.project.model) {
+            sections.paint(ui, rect, model, yaw, pitch, distance, pan);
+        }
+        if let Some(model) = &self.project.model {
+            self.test_parallel
+                .paint(ui, rect, model, yaw, pitch, distance, pan);
+        }
         if self.pivot_press.marker_visible()
             && let Some(pivot) = self.orbit_pivot
         {
@@ -977,8 +1144,10 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll(ui.ctx());
+        self.test_parallel.poll(ui.ctx(), &mut self.project);
         egui::Panel::top("main_menu").show(ui, |ui| self.menu(ui));
         if self.busy()
+            || self.sample_profile_job.is_some()
             || self.is_dirty()
             || self.project_path.is_some()
             || self.message.starts_with("ERROR")
@@ -994,6 +1163,15 @@ impl eframe::App for App {
             ui.ctx(),
             &mut self.project,
             &mut self.property_error,
+            enabled,
+        );
+        if let Some(index) = self.panels.take_edit_operation() {
+            self.test_parallel.open_editor(index, &self.project);
+        }
+        self.test_parallel.show_editor(
+            ui.ctx(),
+            &mut self.project,
+            self.current_stl_path.as_deref(),
             enabled,
         );
         if open_docked || open_floating {

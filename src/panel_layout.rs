@@ -181,6 +181,7 @@ pub struct PanelLayout {
     dirty: bool,
     window_generation: u32,
     dragging: Option<DockDrag>,
+    edit_operation: Option<usize>,
 }
 
 impl PanelLayout {
@@ -198,7 +199,12 @@ impl PanelLayout {
             dirty: false,
             window_generation: 0,
             dragging: None,
+            edit_operation: None,
         }
+    }
+
+    pub fn take_edit_operation(&mut self) -> Option<usize> {
+        self.edit_operation.take()
     }
 
     pub fn reset(&mut self) {
@@ -206,6 +212,7 @@ impl PanelLayout {
         self.dirty = true;
         self.window_generation = self.window_generation.wrapping_add(1);
         self.dragging = None;
+        self.edit_operation = None;
     }
 
     fn state(&self, pane: Pane) -> PaneState {
@@ -283,7 +290,12 @@ impl PanelLayout {
                 .id_salt((pane.title(), "scroll"))
                 .auto_shrink([false, false])
                 .show(ui, |ui| match pane {
-                    Pane::Project => project_ui::tree(ui, project),
+                    Pane::Project => {
+                        let actions = project_ui::tree(ui, project);
+                        if let Some(index) = actions.edit {
+                            self.edit_operation = Some(index);
+                        }
+                    }
                     Pane::Properties => {
                         open_model = project_ui::properties(ui, project, error);
                     }
@@ -732,6 +744,7 @@ mod tests {
             dirty: false,
             window_generation: 0,
             dragging: None,
+            edit_operation: None,
         };
         assert_eq!(
             fresh.panes_for(Place::Left),
@@ -785,6 +798,7 @@ mod tests {
             dirty: false,
             window_generation: 0,
             dragging: None,
+            edit_operation: None,
         };
         let ctx = egui::Context::default();
         layout.dock_drop(
@@ -821,6 +835,7 @@ mod tests {
             dirty: false,
             window_generation: 0,
             dragging: None,
+            edit_operation: None,
         };
         let size_before = layout.state(Pane::Properties).size;
         let ctx = egui::Context::default();
@@ -839,6 +854,7 @@ mod tests {
             dirty: false,
             window_generation: 0,
             dragging: None,
+            edit_operation: None,
         };
         let ctx = egui::Context::default();
         layout.move_to(Pane::Properties, Place::Floating, &ctx);

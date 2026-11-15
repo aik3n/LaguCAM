@@ -2,12 +2,19 @@
 use crate::project::{
     Project,
     display::{StockColor, StockMode},
+    operations::{OperationKind, OperationStatus},
     origin::{OriginPoint, OriginReference},
     selection::Selection,
 };
 use eframe::egui;
 
-pub fn tree(ui: &mut egui::Ui, project: &mut Project) {
+#[derive(Default)]
+pub struct OperationTreeActions {
+    pub edit: Option<usize>,
+}
+
+pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
+    let mut actions = OperationTreeActions::default();
     ui.separator();
     egui::CollapsingHeader::new("LaguCAM")
         .default_open(true)
@@ -38,28 +45,35 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) {
                 project.selection = Selection::Origin;
             }
             ui.collapsing("Operaciones", |ui| {
-                if ui
-                    .selectable_label(
-                        project.selection == Selection::Operations,
-                        "Lista de operaciones",
-                    )
-                    .clicked()
-                {
-                    project.selection = Selection::Operations;
-                }
                 if project.operations.items.is_empty() {
                     ui.label("(vacía)");
                 }
                 for (i, op) in project.operations.items.iter().enumerate() {
-                    if ui
-                        .selectable_label(project.selection == Selection::Operation(i), &op.name)
-                        .clicked()
-                    {
+                    let response =
+                        ui.selectable_label(project.selection == Selection::Operation(i), &op.name);
+                    if response.clicked() {
                         project.selection = Selection::Operation(i);
+                    }
+                    if response.double_clicked() {
+                        actions.edit = Some(i);
+                    }
+                }
+                // La accion de crear siempre queda debajo de las operaciones existentes.
+                let count = project.operations.items.len();
+                if ui
+                    .add_enabled(
+                        project.model.is_some() && count < 32,
+                        egui::Button::new("+ Nueva operación"),
+                    )
+                    .double_clicked()
+                {
+                    if let Ok(index) = project.operations.add_new() {
+                        project.selection = Selection::Operation(index);
                     }
                 }
             });
         });
+    actions
 }
 
 pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) -> bool {
@@ -271,7 +285,29 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
         }
         Selection::Operation(i) => {
             if let Some(op) = project.operations.items.get(i) {
-                ui.label(&op.name);
+                ui.heading(&op.name);
+                match &op.kind {
+                    OperationKind::Placeholder => {
+                        ui.label("Sin estrategia. Doble clic para seleccionar una.");
+                    }
+                    OperationKind::ParallelTest(p) => {
+                        ui.label("Estrategia: Acabado paralelo — TEST");
+                        ui.label(format!("Fresa esférica: Ø {:.3}", p.diameter));
+                        ui.label(format!("Paso lateral: {:.3}", p.stepover));
+                        ui.label(format!("Resolución: {:.3}", p.longitudinal));
+                        ui.label(format!("Dirección: {}", if p.along_x { "X" } else { "Y" }));
+                        match &op.status {
+                            OperationStatus::NotCalculated => {
+                                ui.label("Estado: pendiente de calcular")
+                            }
+                            OperationStatus::Ready => ui.label("Estado: calculada (vista previa)"),
+                            OperationStatus::Error => ui.label("Estado: error de cálculo"),
+                        };
+                        ui.separator();
+                        ui.small("Doble clic en la operación para editar y generar.");
+                        ui.small("Parámetros guardados; trayectoria 3D no persistente.");
+                    }
+                };
             }
         }
     }
