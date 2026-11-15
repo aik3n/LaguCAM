@@ -156,8 +156,9 @@ fn rejects_invalid_and_unsupported_geometries_without_approximations() {
         Err(ContactSolverError::ArithmeticRange)
     ));
     for cutter in [
-        CutterGeometry::Flat {
+        CutterGeometry::VBit {
             diameter_model: 6.0,
+            included_angle_deg: 60.0,
         },
         CutterGeometry::BullNose {
             diameter_model: 8.0,

@@ -159,6 +159,73 @@ impl BallContactEngine {
         }
     }
 
+    /// Acceso interno para G21. No modifica el contrato publico esferico G18.
+    pub(super) fn query_flat(
+        &mut self,
+        request: BallContactQuery,
+        cancelled: &AtomicBool,
+    ) -> Result<BallContactResult, ContactEngineError> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(ContactEngineError::Cancelled);
+        }
+        if !request.x_model.is_finite()
+            || !request.y_model.is_finite()
+            || !request.radius_model.is_finite()
+            || request.radius_model <= 0.0
+        {
+            return Err(ContactEngineError::InvalidQuery);
+        }
+        let (tip_z_model, stats, io, decision) = self.index.query_g21_flat_cancelable(
+            request.x_model,
+            request.y_model,
+            request.radius_model,
+            cancelled,
+        )?;
+        Ok(BallContactResult {
+            tip_z_model,
+            triangles_considered: stats.candidates,
+            nodes_visited: stats.nodes_visited,
+            physical_block_reads: io.block_reads,
+            mode: decision.mode,
+        })
+    }
+
+    /// G22: fresa plana con dilatacion euclidea positiva del STL.
+    /// Nunca se llama con a=0, conservando la ruta G21 exactamente.
+    pub(super) fn query_flat_allowance(
+        &mut self,
+        request: BallContactQuery,
+        allowance_model: f64,
+        cancelled: &AtomicBool,
+    ) -> Result<BallContactResult, ContactEngineError> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(ContactEngineError::Cancelled);
+        }
+        if !request.x_model.is_finite()
+            || !request.y_model.is_finite()
+            || !request.radius_model.is_finite()
+            || request.radius_model <= 0.0
+            || !allowance_model.is_finite()
+            || allowance_model <= 0.0
+        {
+            return Err(ContactEngineError::InvalidQuery);
+        }
+        let (tip_z_model, stats, io, decision) = self.index.query_g22_flat_allowance_cancelable(
+            request.x_model,
+            request.y_model,
+            request.radius_model,
+            allowance_model,
+            cancelled,
+        )?;
+        Ok(BallContactResult {
+            tip_z_model,
+            triangles_considered: stats.candidates,
+            nodes_visited: stats.nodes_visited,
+            physical_block_reads: io.block_reads,
+            mode: decision.mode,
+        })
+    }
+
     /// Consulta de solo lectura del STL protegido. Un error o cancelación
     /// nunca devuelve una altura parcial. El resultado no verifica colisiones.
     pub fn query(

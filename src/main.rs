@@ -1144,6 +1144,8 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll(ui.ctx());
+        self.test_parallel
+            .sync_tools(&mut self.project, &self.tool_library);
         self.test_parallel.poll(ui.ctx(), &mut self.project);
         egui::Panel::top("main_menu").show(ui, |ui| self.menu(ui));
         if self.busy()
@@ -1172,6 +1174,7 @@ impl eframe::App for App {
             ui.ctx(),
             &mut self.project,
             self.current_stl_path.as_deref(),
+            &self.tool_library,
             enabled,
         );
         if open_docked || open_floating {
@@ -1195,6 +1198,8 @@ impl eframe::App for App {
             &mut self.tool_library,
             self.tool_library_path.as_deref(),
         );
+        self.test_parallel
+            .sync_tools(&mut self.project, &self.tool_library);
         self.options.show(ui.ctx());
     }
 

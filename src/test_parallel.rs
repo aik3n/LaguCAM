@@ -8,6 +8,10 @@ use crate::{
         operations::{OperationKind, OperationStatus, ParallelTestParameters},
     },
     stl::Bounds,
+    tools::{
+        cam_adapter::{ResolvedCutter, ToolSignature, resolve_cutter, signature_current},
+        model::ToolLibrary,
+    },
 };
 use cam_libre_visor::cam_geometry::{
     contact_solver::{ContactQuery, ContactSolver, CutterGeometry},
@@ -145,6 +149,7 @@ struct Job {
     progress: Arc<AtomicUsize>,
     total: usize,
     receiver: Receiver<Result<Outcome, String>>,
+    signature: ToolSignature,
 }
 
 impl Drop for Job {
@@ -159,8 +164,11 @@ impl Job {
         expected_size: u64,
         expected_triangles: u32,
         plan: SamplingPlan,
+        tool: ResolvedCutter,
         ctx: egui::Context,
     ) -> Result<Self, String> {
+        let signature = tool.signature;
+        let cutter = tool.cutter;
         let cancel = Arc::new(AtomicBool::new(false));
         let token = Arc::clone(&cancel);
         let progress = Arc::new(AtomicUsize::new(0));
@@ -175,6 +183,7 @@ impl Job {
                     expected_size,
                     expected_triangles,
                     &plan,
+                    cutter,
                     &token,
                     &worker_progress,
                 );
@@ -187,6 +196,7 @@ impl Job {
             progress,
             total,
             receiver,
+            signature,
         })
     }
 
@@ -206,6 +216,7 @@ fn compute(
     expected_size: u64,
     expected_triangles: u32,
     plan: &SamplingPlan,
+    cutter: CutterGeometry,
     cancelled: &AtomicBool,
     progress: &AtomicUsize,
 ) -> Result<Outcome, String> {
@@ -248,9 +259,7 @@ fn compute(
                     ContactQuery {
                         x_model: x,
                         y_model: y,
-                        cutter: CutterGeometry::BallNose {
-                            diameter_model: plan.params.diameter,
-                        },
+                        cutter,
                         allowance_model: 0.0,
                     },
                     cancelled,
@@ -296,6 +305,7 @@ enum OperationEditorTab {
 struct OperationEditorDraft {
     name: String,
     kind: OperationKind,
+    tool_id: Option<String>,
     visible: bool,
 }
 
@@ -304,6 +314,7 @@ impl OperationEditorDraft {
         Self {
             name: op.name.clone(),
             kind: op.kind.clone(),
+            tool_id: op.tool_id.clone(),
             visible,
         }
     }
@@ -329,6 +340,7 @@ pub struct TestParallelPanel {
     active_job: Option<(usize, Job)>,
     cancelling: bool,
     results: HashMap<usize, Outcome>,
+    result_signatures: HashMap<usize, ToolSignature>,
     hidden: HashSet<usize>,
     message: String,
 }
@@ -359,6 +371,12 @@ impl TestParallelPanel {
             .into_iter()
             .filter_map(|(index, result)| index_after_delete(index, deleted).map(|i| (i, result)))
             .collect();
+        self.result_signatures = std::mem::take(&mut self.result_signatures)
+            .into_iter()
+            .filter_map(|(index, signature)| {
+                index_after_delete(index, deleted).map(|i| (i, signature))
+            })
+            .collect();
         self.hidden = std::mem::take(&mut self.hidden)
             .into_iter()
             .filter_map(|index| index_after_delete(index, deleted))
@@ -383,6 +401,7 @@ impl TestParallelPanel {
         self.active_job = None;
         self.cancelling = false;
         self.results.clear();
+        self.result_signatures.clear();
         self.hidden.clear();
         self.editing = None;
         self.editor_draft = None;
@@ -392,10 +411,48 @@ impl TestParallelPanel {
         self.message.clear();
     }
 
+    /// Cada resultado procede de una identidad y huella fisica concretas.
+    /// El cambio de herramienta o su eliminacion invalida la muestra.
+    pub fn sync_tools(&mut self, project: &mut Project, library: &ToolLibrary) {
+        let current = |index: usize, signature: &ToolSignature| {
+            project
+                .operations
+                .items
+                .get(index)
+                .is_some_and(|op| signature_current(library, op.tool_id.as_deref(), signature))
+        };
+        let stale: Vec<usize> = self
+            .result_signatures
+            .iter()
+            .filter_map(|(&i, signature)| (!current(i, signature)).then_some(i))
+            .collect();
+        let cancel_running = self
+            .active_job
+            .as_ref()
+            .is_some_and(|(i, job)| !current(*i, &job.signature));
+        for index in stale {
+            self.results.remove(&index);
+            self.result_signatures.remove(&index);
+            if let Some(op) = project.operations.items.get_mut(index) {
+                op.status = OperationStatus::NotCalculated;
+            }
+        }
+        if cancel_running {
+            let (index, _) = self.active_job.take().expect("Trabajo activo invalidado");
+            self.cancelling = false;
+            self.results.remove(&index);
+            self.result_signatures.remove(&index);
+            if let Some(op) = project.operations.items.get_mut(index) {
+                op.status = OperationStatus::NotCalculated;
+            }
+            self.message = "Herramienta modificada o eliminada: calculo invalidado".into();
+        }
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context, project: &mut Project) {
         let completed = self.active_job.as_ref().and_then(|(_, job)| job.poll());
         if let Some(result) = completed {
-            let (index, _) = self.active_job.take().expect("Existe trabajo terminado");
+            let (index, job) = self.active_job.take().expect("Existe trabajo terminado");
             let was_cancelling = std::mem::take(&mut self.cancelling);
             if was_cancelling {
                 self.results.remove(&index);
@@ -412,6 +469,7 @@ impl TestParallelPanel {
                         outcome.lines_count, outcome.samples_per_line, outcome.contacts
                     );
                     self.results.insert(index, outcome);
+                    self.result_signatures.insert(index, job.signature.clone());
                     self.hidden.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
                         op.status = OperationStatus::Ready;
@@ -419,6 +477,7 @@ impl TestParallelPanel {
                 }
                 Err(error) => {
                     self.results.remove(&index);
+                    self.result_signatures.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
                         op.status = OperationStatus::Error;
                     }
@@ -435,6 +494,7 @@ impl TestParallelPanel {
         ctx: &egui::Context,
         project: &mut Project,
         stl_path: Option<&Path>,
+        tool_library: &ToolLibrary,
         available: bool,
     ) {
         let Some(index) = self.editing else {
@@ -499,8 +559,40 @@ impl TestParallelPanel {
                                     });
                                 });
                                 ui.separator();
-                                ui.label("Herramienta: definicion experimental mediante diametro esferico.");
-                                ui.small("La asociacion con la biblioteca de herramientas se incorporara mas adelante.");
+                                ui.add_enabled_ui(!running, |ui| {
+                                    let selected = match draft.tool_id.as_deref() {
+                                        None => "Sin seleccionar".to_owned(),
+                                        Some(id) => tool_library.get(id)
+                                            .map(|tool| tool.name.clone())
+                                            .unwrap_or_else(|| "Herramienta no disponible".to_owned()),
+                                    };
+                                    egui::ComboBox::from_label("Herramienta de biblioteca")
+                                        .selected_text(selected)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut draft.tool_id, None, "Sin seleccionar");
+                                            for tool in &tool_library.tools {
+                                                ui.selectable_value(
+                                                    &mut draft.tool_id,
+                                                    Some(tool.id.clone()),
+                                                    format!("{} - {} Ø{:.3} mm", tool.name,
+                                                        tool.geometry.kind().label(),
+                                                        tool.geometry.diameter_mm()),
+                                                );
+                                            }
+                                        });
+                                });
+                                if let Some(id) = draft.tool_id.as_deref() {
+                                    if let Some(tool) = tool_library.get(id) {
+                                        ui.small(format!("{} · Diametro Ø{:.3} mm (biblioteca)",
+                                            tool.geometry.kind().label(), tool.geometry.diameter_mm()));
+                                        if !matches!(&tool.geometry, crate::tools::model::ToolGeometry::BallNose { .. }) {
+                                            ui.small("Este tipo aun no dispone de solucion de contacto G19.");
+                                        }
+                                    } else {
+                                        ui.colored_label(egui::Color32::YELLOW, "La fresa asignada no existe en la biblioteca.");
+                                    }
+                                }
+                                ui.small("TEST G20: se supone que las unidades del STL son milimetros.");
                                 ui.small("La operacion puede guardarse sin una estrategia seleccionada.");
                             }
                             OperationEditorTab::Estrategia => {
@@ -529,11 +621,7 @@ impl TestParallelPanel {
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.separator();
                                     ui.add_enabled_ui(!running, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label("Diametro esferico:");
-                                            ui.add(egui::DragValue::new(&mut p.diameter)
-                                                .speed(0.1).range(0.01..=1000.0));
-                                        });
+                                        ui.small("Diametro de contacto: definido por la herramienta seleccionada en General.");
                                         ui.horizontal(|ui| {
                                             ui.label("Paso entre pasadas:");
                                             ui.add(egui::DragValue::new(&mut p.stepover)
@@ -604,7 +692,14 @@ impl TestParallelPanel {
                     ui.colored_label(egui::Color32::YELLOW, error.as_str());
                 }
                 let plan = if let (Some(bounds), OperationKind::ParallelTest(p)) = (model_bounds, &draft.kind) {
-                    Some(SamplingPlan::new(bounds, *p))
+                    Some(resolve_cutter(tool_library, draft.tool_id.as_deref(), 1.0)
+                        .and_then(|resolved| {
+                            resolved.ensure_supported()?;
+                            let mut effective = *p;
+                            // El diametro serializado es legado: no es fuente CAM.
+                            effective.diameter = resolved.diameter_model();
+                            SamplingPlan::new(bounds, effective)
+                        }))
                 } else {
                     None
                 };
@@ -712,12 +807,15 @@ impl TestParallelPanel {
             }
             // Aplicar una unica vez: el proyecto solo cambia al aceptar o generar.
             if let Some(op) = project.operations.items.get_mut(index) {
-                let modified = op.name != draft.name || op.kind != draft.kind;
+                let modified =
+                    op.name != draft.name || op.kind != draft.kind || op.tool_id != draft.tool_id;
                 if modified {
                     op.name = draft.name.clone();
                     op.kind = draft.kind.clone();
+                    op.tool_id = draft.tool_id.clone();
                     op.status = OperationStatus::NotCalculated;
                     self.results.remove(&index);
+                    self.result_signatures.remove(&index);
                     self.message = "Configuracion cambiada. Pendiente de recalcular.".into();
                 }
             }
@@ -735,18 +833,31 @@ impl TestParallelPanel {
             if let (Some(model), Some(path), Some(params)) =
                 (project.model.as_ref(), stl_path, params)
             {
-                match SamplingPlan::new(model.bounds, params) {
-                    Ok(plan) => match Job::start(
+                let prepared = resolve_cutter(
+                    tool_library,
+                    project.operations.items[index].tool_id.as_deref(),
+                    1.0,
+                )
+                .and_then(|tool| {
+                    tool.ensure_supported()?;
+                    let mut effective = params;
+                    effective.diameter = tool.diameter_model();
+                    SamplingPlan::new(model.bounds, effective).map(|plan| (plan, tool))
+                });
+                match prepared {
+                    Ok((plan, tool)) => match Job::start(
                         path.to_path_buf(),
                         model.size_bytes,
                         model.triangles,
                         plan,
+                        tool,
                         ctx.clone(),
                     ) {
                         Ok(job) => {
                             self.active_job = Some((index, job));
                             self.cancelling = false;
                             self.results.remove(&index);
+                            self.result_signatures.remove(&index);
                             self.hidden.remove(&index);
                             self.message = "Preparando motor y calculando...".into();
                             if let Some(op) = project.operations.items.get_mut(index) {
@@ -920,6 +1031,9 @@ mod tests {
                 134,
                 1,
                 &plan,
+                CutterGeometry::BallNose {
+                    diameter_model: 4.0
+                },
                 &cancel,
                 &AtomicUsize::new(0)
             )
@@ -1006,6 +1120,7 @@ mod operation_editor_tabs_tests {
         let mut draft = OperationEditorDraft {
             name: " ".into(),
             kind: OperationKind::Placeholder,
+            tool_id: None,
             visible: true,
         };
         assert!(draft.validate().is_err());
@@ -1039,6 +1154,13 @@ mod deletion_index_tests {
         assert_eq!(index_after_delete(3, 1), Some(2));
         let mut panel = TestParallelPanel::default();
         panel.hidden.extend([0, 2, 3]);
+        panel.result_signatures.insert(
+            2,
+            ToolSignature {
+                tool_id: "fresa".to_owned(),
+                geometry_hash: [0; 32],
+            },
+        );
         panel.editing = Some(3);
         panel.operation_deleted(1);
         assert_eq!(panel.editing, Some(2));
@@ -1046,8 +1168,66 @@ mod deletion_index_tests {
         assert!(panel.hidden.contains(&0));
         assert!(panel.hidden.contains(&1));
         assert!(panel.hidden.contains(&2));
+        assert!(panel.result_signatures.contains_key(&1));
+        assert!(!panel.result_signatures.contains_key(&2));
     }
 }
 
 #[cfg(test)]
 use crate::project::operations::TestAreaXY;
+
+#[cfg(test)]
+mod g20_library_sync_tests {
+    use super::*;
+    use crate::tools::model::{Tool, ToolGeometry, ToolKind};
+
+    #[test]
+    fn changing_geometry_or_deleting_tool_invalidates_cached_preview() {
+        let mut lib = ToolLibrary::default();
+        let mut tool = Tool::blank(ToolKind::BallNose);
+        tool.name = "Esferica".into();
+        tool.geometry = ToolGeometry::BallNose {
+            cutting_diameter_mm: 4.0,
+        };
+        tool.cutting_length_mm = 15.0;
+        tool.shank_diameter_mm = 4.0;
+        tool.total_length_mm = 30.0;
+        let id = lib.add(tool).unwrap();
+        let signature = resolve_cutter(&lib, Some(&id), 1.0).unwrap().signature;
+        let mut project = Project::default();
+        let index = project.operations.add_new().unwrap();
+        project.operations.items[index].tool_id = Some(id.clone());
+        project.operations.items[index].status = OperationStatus::Ready;
+        let mut panel = TestParallelPanel::default();
+        panel.results.insert(
+            index,
+            Outcome {
+                lines: vec![],
+                contacts: 0,
+                lines_count: 0,
+                samples_per_line: 0,
+            },
+        );
+        panel.result_signatures.insert(index, signature);
+        panel.sync_tools(&mut project, &lib);
+        assert!(panel.results.contains_key(&index));
+
+        let mut updated = lib.get(&id).unwrap().clone();
+        updated.name = "Nuevo nombre".into();
+        lib.replace(updated).unwrap();
+        panel.sync_tools(&mut project, &lib);
+        assert!(panel.results.contains_key(&index));
+
+        let mut updated = lib.get(&id).unwrap().clone();
+        updated.geometry = ToolGeometry::BallNose {
+            cutting_diameter_mm: 6.0,
+        };
+        lib.replace(updated).unwrap();
+        panel.sync_tools(&mut project, &lib);
+        assert!(!panel.results.contains_key(&index));
+        assert!(matches!(
+            project.operations.items[index].status,
+            OperationStatus::NotCalculated
+        ));
+    }
+}

@@ -1,8 +1,8 @@
 //! Contrato G19 del Contact Solver, independiente de la UI y de las estrategias.
 //!
 //! Todas las magnitudes se expresan en las unidades y coordenadas originales del
-//! STL. Esta primera implementacion solo resuelve el apoyo de una fresa esferica
-//! cuyo eje esta alineado con +Z del modelo. No transforma el setup CNC.
+//! G22 resuelve fresas esfericas y planas con sobrematerial euclideo uniforme;
+//! el eje de la herramienta esta alineado con +Z del modelo. No transforma el setup CNC.
 //!
 //! `allowance_model` >= 0 representa separacion euclidea uniforme respecto a
 //! la superficie triangulada para la envolvente accesible desde +Z. NO equivale
@@ -20,8 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Perfil geometrico matematico. No incluye UUID, nombre, avances ni RPM.
 ///
-/// Las variantes distintas de `BallNose` estan reservadas para ampliar el
-/// contrato. Por ahora producen `UnsupportedGeometry`, nunca contacto ficticio.
+/// Solo `BallNose` y `Flat` disponen de solucion matematica. Las restantes
+/// variantes producen `UnsupportedGeometry`, nunca contacto ficticio.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CutterGeometry {
     BallNose {
@@ -63,6 +63,40 @@ pub struct ContactQuery {
 }
 
 impl ContactQuery {
+    /// Disco plano. G22 valida el radio de influencia R+a y utiliza
+    /// la envolvente euclidea de la superficie para sobrematerial positivo.
+    fn checked_flat_radius(self) -> Result<f64, ContactSolverError> {
+        let CutterGeometry::Flat { diameter_model } = self.cutter else {
+            return Err(ContactSolverError::UnsupportedGeometry);
+        };
+        if !self.x_model.is_finite()
+            || !self.y_model.is_finite()
+            || !self.allowance_model.is_finite()
+            || self.allowance_model < 0.0
+        {
+            return Err(ContactSolverError::InvalidQuery(
+                "XY y sobrematerial deben ser finitos; sobrematerial >= 0",
+            ));
+        }
+        if !diameter_model.is_finite() || diameter_model <= 0.0 {
+            return Err(ContactSolverError::InvalidQuery(
+                "Diametro de fresa invalido",
+            ));
+        }
+
+        let radius = diameter_model * 0.5;
+        if radius <= 0.0 {
+            return Err(ContactSolverError::InvalidQuery(
+                "Diametro de fresa invalido",
+            ));
+        }
+        let outer = radius + self.allowance_model;
+        if !(outer * outer).is_finite() {
+            return Err(ContactSolverError::ArithmeticRange);
+        }
+        Ok(radius)
+    }
+
     fn checked_radius(self) -> Result<f64, ContactSolverError> {
         if !self.x_model.is_finite()
             || !self.y_model.is_finite()
@@ -153,6 +187,7 @@ impl ContactQuery {
 pub enum ContactSolverError {
     InvalidQuery(&'static str),
     UnsupportedGeometry,
+    UnsupportedAllowance,
     ArithmeticRange,
     Engine(ContactEngineError),
 }
@@ -163,6 +198,9 @@ impl fmt::Display for ContactSolverError {
             Self::InvalidQuery(message) => write!(f, "Consulta de contacto invalida: {message}"),
             Self::UnsupportedGeometry => {
                 f.write_str("Geometria de fresa aun no soportada por el Contact Solver")
+            }
+            Self::UnsupportedAllowance => {
+                f.write_str("Sobrematerial en fresa plana aun no soportado")
             }
             Self::ArithmeticRange => f.write_str("Sobrematerial o coordenadas fuera de rango"),
             Self::Engine(error) => write!(f, "Motor geometrico: {error}"),
@@ -217,6 +255,28 @@ impl ContactSolver {
     ) -> Result<ContactSolution, ContactSolverError> {
         if cancelled.load(Ordering::Relaxed) {
             return Err(ContactSolverError::Engine(ContactEngineError::Cancelled));
+        }
+        if matches!(query.cutter, CutterGeometry::Flat { .. }) {
+            let radius = query.checked_flat_radius()?;
+            // Para a=0 se conserva la ejecucion G21 bit a bit.
+            let request = BallContactQuery {
+                x_model: query.x_model,
+                y_model: query.y_model,
+                radius_model: radius,
+            };
+            let raw = if query.allowance_model > 0.0 {
+                self.engine
+                    .query_flat_allowance(request, query.allowance_model, cancelled)?
+            } else {
+                self.engine.query_flat(request, cancelled)?
+            };
+            return Ok(ContactSolution {
+                tip_z_model: raw.tip_z_model,
+                triangles_considered: raw.triangles_considered,
+                nodes_visited: raw.nodes_visited,
+                physical_block_reads: raw.physical_block_reads,
+                mode: raw.mode,
+            });
         }
         let effective_radius = query.checked_radius()?;
         // Envolvente de una esfera real (radio r) a distancia a de una
@@ -303,9 +363,6 @@ mod tests {
     #[test]
     fn future_geometries_are_never_accepted_as_ball_nose() {
         for cutter in [
-            CutterGeometry::Flat {
-                diameter_model: 6.0,
-            },
             CutterGeometry::BullNose {
                 diameter_model: 8.0,
                 corner_radius_model: 1.0,
