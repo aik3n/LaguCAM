@@ -974,3 +974,77 @@ mod parallel_test_persistence_tests {
         assert!(saved.validate(None).is_err());
     }
 }
+
+#[cfg(test)]
+mod g23_project_persistence_tests {
+    use super::*;
+    use crate::project::operations::OperationKind;
+
+    #[test]
+    fn project_keeps_independent_allowances_and_legacy_defaults() {
+        let mut project = Project::default();
+        let first = project.operations.add_parallel_test().unwrap();
+        let second = project.operations.add_parallel_test().unwrap();
+        if let OperationKind::ParallelTest(ref mut p) = project.operations.items[first].kind {
+            p.allowance_mm = 3.0;
+        }
+        if let OperationKind::ParallelTest(ref mut p) = project.operations.items[second].kind {
+            p.allowance_mm = 1.0;
+        }
+        let saved = ProjectState::capture(&project);
+        saved.validate(None).unwrap();
+        let json = serde_json::to_value(&saved).unwrap();
+        assert_eq!(
+            json["operations"][0]["parallel_test"]["allowance_mm"].as_f64(),
+            Some(3.0)
+        );
+        assert_eq!(
+            json["operations"][1]["parallel_test"]["allowance_mm"].as_f64(),
+            Some(1.0)
+        );
+        let loaded: ProjectState = serde_json::from_value(json.clone()).unwrap();
+        let restored = loaded.restore(String::new(), None).unwrap();
+        let get = |i: usize| match &restored.operations.items[i].kind {
+            OperationKind::ParallelTest(p) => p.allowance_mm,
+            _ => panic!("Missing TEST operation"),
+        };
+        assert_eq!((get(0), get(1)), (3.0, 1.0));
+
+        // Proyecto anterior: se omite la clave en ambas operaciones.
+        let mut legacy = json;
+        for op in legacy["operations"].as_array_mut().unwrap() {
+            op["parallel_test"]
+                .as_object_mut()
+                .unwrap()
+                .remove("allowance_mm");
+        }
+        let decoded: ProjectState = serde_json::from_value(legacy).unwrap();
+        decoded.validate(None).unwrap();
+        let restored = decoded.restore(String::new(), None).unwrap();
+        for op in &restored.operations.items {
+            match &op.kind {
+                OperationKind::ParallelTest(p) => assert_eq!(p.allowance_mm, 0.0),
+                _ => panic!("Expected TEST"),
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_allowance_does_not_validate_project() {
+        let mut project = Project::default();
+        project.operations.add_parallel_test().unwrap();
+        let mut saved = ProjectState::capture(&project);
+        saved.operations[0]
+            .parallel_test
+            .as_mut()
+            .unwrap()
+            .allowance_mm = -1.0;
+        assert!(saved.validate(None).is_err());
+        saved.operations[0]
+            .parallel_test
+            .as_mut()
+            .unwrap()
+            .allowance_mm = f64::NAN;
+        assert!(saved.validate(None).is_err());
+    }
+}

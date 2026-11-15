@@ -116,6 +116,18 @@ impl SamplingPlan {
         self.lines * self.samples
     }
 
+    /// El sobreespesor procede de la operacion, no de la biblioteca de herramientas.
+    /// En TEST la escala es 1 unidad STL = 1 mm (misma hipotesis que G20).
+    fn contact_query(&self, line: usize, sample: usize, cutter: CutterGeometry) -> ContactQuery {
+        let [x, y] = self.xy(line, sample);
+        ContactQuery {
+            x_model: x,
+            y_model: y,
+            cutter,
+            allowance_model: self.params.allowance_mm,
+        }
+    }
+
     fn xy(&self, line: usize, sample: usize) -> [f64; 2] {
         // Los extremos se incluyen expresamente; el ultimo tramo puede ser
         // mas corto, nunca mayor que el paso que introdujo el usuario.
@@ -253,17 +265,10 @@ fn compute(
             if cancelled.load(Ordering::Relaxed) {
                 return Err("Calculo cancelado".into());
             }
-            let [x, y] = plan.xy(line, sample);
+            let request = plan.contact_query(line, sample, cutter);
+            let [x, y] = [request.x_model, request.y_model];
             let hit = engine
-                .solve(
-                    ContactQuery {
-                        x_model: x,
-                        y_model: y,
-                        cutter,
-                        allowance_model: 0.0,
-                    },
-                    cancelled,
-                )
+                .solve(request, cancelled)
                 .map_err(|e| format!("Error consultando contacto: {e}"))?;
             let point = hit.tip_z_model.map(|z| [x, y, z]);
             contacts += usize::from(point.is_some());
@@ -633,6 +638,12 @@ impl TestParallelPanel {
                                                 .speed(0.1).range(0.01..=1000.0));
                                         });
                                         ui.horizontal(|ui| {
+                                            ui.label("Sobreespesor:");
+                                            ui.add(egui::DragValue::new(&mut p.allowance_mm)
+                                                .speed(0.1).range(0.0..=1_000_000.0).suffix(" mm"));
+                                        });
+                                        ui.small("Separacion uniforme respecto al modelo nominal; no se acumula entre operaciones.");
+                                        ui.horizontal(|ui| {
                                             ui.label("Direccion:");
                                             ui.radio_value(&mut p.along_x, true, "Eje X");
                                             ui.radio_value(&mut p.along_x, false, "Eje Y");
@@ -978,6 +989,7 @@ mod tests {
                 stepover: 4.0,
                 longitudinal: 3.0,
                 along_x: true,
+                allowance_mm: 0.0,
                 area_xy: None,
             },
         )
@@ -997,6 +1009,7 @@ mod tests {
                 stepover: 4.0,
                 longitudinal: 3.0,
                 along_x: false,
+                allowance_mm: 0.0,
                 area_xy: None,
             },
         )
@@ -1229,5 +1242,102 @@ mod g20_library_sync_tests {
             project.operations.items[index].status,
             OperationStatus::NotCalculated
         ));
+    }
+}
+
+#[cfg(test)]
+mod g23_operation_to_solver_tests {
+    use super::*;
+
+    #[test]
+    fn contact_request_preserves_allowance_and_real_cutter_geometry() {
+        let bounds = Bounds {
+            min: [5.0, 5.0, 0.0],
+            max: [10.0, 10.0, 10.0],
+        };
+        let mut params = Parameters::default();
+        params.allowance_mm = 2.5;
+        let plan = SamplingPlan::new(bounds, params).unwrap();
+        let cutter = CutterGeometry::Flat {
+            diameter_model: 12.0,
+        };
+        let query = plan.contact_query(0, 0, cutter);
+        assert_eq!((query.x_model, query.y_model), (5.0, 5.0));
+        assert_eq!(query.cutter, cutter);
+        assert_eq!(query.allowance_model, 2.5);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn parallel_test_passes_positive_allowance_to_real_solver_for_both_cutters() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        // Plano horizontal de una triangulacion STL sintética: z=5.
+        let mut bytes = vec![0u8; 80];
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 12]);
+        for p in [[0.0f32, 0.0, 5.0], [100.0, 0.0, 5.0], [0.0, 100.0, 5.0]] {
+            for coordinate in p {
+                bytes.extend_from_slice(&coordinate.to_le_bytes());
+            }
+        }
+        bytes.extend_from_slice(&[0u8; 2]);
+        let file = std::env::temp_dir().join(format!("lagucam-g23-{}.stl", uuid::Uuid::new_v4()));
+        std::fs::write(&file, &bytes).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(file.clone());
+        let bounds = Bounds {
+            min: [5.0, 5.0, 5.0],
+            max: [10.0, 10.0, 5.0],
+        };
+        let cancel = AtomicBool::new(false);
+        for cutter in [
+            CutterGeometry::Flat {
+                diameter_model: 4.0,
+            },
+            CutterGeometry::BallNose {
+                diameter_model: 4.0,
+            },
+        ] {
+            let mut params = Parameters::default();
+            params.diameter = 4.0;
+            params.stepover = 5.0;
+            params.longitudinal = 5.0;
+            params.allowance_mm = 0.0;
+            let nominal_plan = SamplingPlan::new(bounds, params).unwrap();
+            let original = compute(
+                &file,
+                bytes.len() as u64,
+                1,
+                &nominal_plan,
+                cutter,
+                &cancel,
+                &AtomicUsize::new(0),
+            )
+            .unwrap();
+            params.allowance_mm = 2.0;
+            let roughing_plan = SamplingPlan::new(bounds, params).unwrap();
+            let roughing = compute(
+                &file,
+                bytes.len() as u64,
+                1,
+                &roughing_plan,
+                cutter,
+                &cancel,
+                &AtomicUsize::new(0),
+            )
+            .unwrap();
+            let nominal_z = original.lines[0][0].unwrap()[2];
+            let roughing_z = roughing.lines[0][0].unwrap()[2];
+            assert!((nominal_z - 5.0).abs() < 1.0e-10, "{cutter:?}: {nominal_z}");
+            assert!(
+                (roughing_z - 7.0).abs() < 1.0e-10,
+                "{cutter:?}: {roughing_z}"
+            );
+        }
     }
 }

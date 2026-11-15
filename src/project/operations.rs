@@ -32,8 +32,16 @@ pub struct ParallelTestParameters {
     pub stepover: f64,
     pub longitudinal: f64,
     pub along_x: bool,
+    /// Sobreespesor euclideo respecto al STL nominal. No es acumulativo.
+    /// La estrategia TEST presupone que las coordenadas del STL son milimetros.
+    #[serde(default, skip_serializing_if = "allowance_is_zero")]
+    pub allowance_mm: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub area_xy: Option<TestAreaXY>,
+}
+
+fn allowance_is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 impl Default for ParallelTestParameters {
@@ -43,6 +51,7 @@ impl Default for ParallelTestParameters {
             stepover: 10.0,
             longitudinal: 2.0,
             along_x: true,
+            allowance_mm: 0.0,
             area_xy: None,
         }
     }
@@ -61,6 +70,12 @@ impl ParallelTestParameters {
         }
         if !self.diameter.powi(2).is_finite() {
             return Err("Diametro fuera del rango del motor".into());
+        }
+        if !self.allowance_mm.is_finite()
+            || self.allowance_mm < 0.0
+            || self.allowance_mm > 1_000_000.0
+        {
+            return Err("Sobreespesor de la estrategia paralelo TEST invalido".into());
         }
         if let Some(area) = self.area_xy {
             area.validate()?;
@@ -237,5 +252,52 @@ mod new_operation_workflow_tests {
             operations.items[b].kind,
             OperationKind::Placeholder
         ));
+    }
+}
+
+#[cfg(test)]
+mod g23_allowance_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_json_defaults_to_zero_and_zero_keeps_old_shape() {
+        let json = r#"{"diameter":4.0,"stepover":10.0,"longitudinal":2.0,"along_x":true}"#;
+        let restored: ParallelTestParameters = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.allowance_mm, 0.0);
+        assert_eq!(restored.validate(), Ok(()));
+        let saved = serde_json::to_value(restored).unwrap();
+        assert!(saved.get("allowance_mm").is_none());
+    }
+
+    #[test]
+    fn allowance_is_independent_and_survives_serialization() {
+        let mut roughing = ParallelTestParameters::default();
+        let finishing = ParallelTestParameters::default();
+        roughing.allowance_mm = 3.25;
+        let json = serde_json::to_string(&roughing).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ParallelTestParameters>(&json).unwrap(),
+            roughing
+        );
+        assert_eq!(finishing.allowance_mm, 0.0);
+        assert_eq!(roughing.validate(), Ok(()));
+    }
+
+    #[test]
+    fn invalid_allowances_are_rejected() {
+        for bad in [
+            -1.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            1_000_001.0,
+        ] {
+            let mut p = ParallelTestParameters::default();
+            p.allowance_mm = bad;
+            assert!(p.validate().is_err(), "Invalid allowance accepted: {bad:?}");
+        }
+        let mut p = ParallelTestParameters::default();
+        p.allowance_mm = 1_000_000.0;
+        assert!(p.validate().is_ok());
     }
 }
