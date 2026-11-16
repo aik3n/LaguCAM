@@ -19,6 +19,7 @@ use cam_libre_visor::cam_geometry::{
 };
 use cam_libre_visor::toolpath::{RasterPattern, Toolpath};
 use cam_libre_visor::toolpath_links::{PlannedMoveKind, PlannedToolpath};
+use cam_libre_visor::toolpath_validation::{Severity, ValidationReport, validate_planned_toolpath};
 use eframe::egui;
 use glam::Vec3;
 use std::{
@@ -173,9 +174,35 @@ impl SamplingPlan {
 struct Outcome {
     toolpath: Toolpath,
     linked: PlannedToolpath,
+    // G25.4b: informe de la MISMA secuencia calculada; no se persiste en .lagucam.
+    validation: ValidationReport,
     contacts: usize,
     lines_count: usize,
     samples_per_line: usize,
+}
+
+/// Ready indica un calculo estructuralmente valido con corte, NO seguridad CNC.
+/// Una operacion sin corte conserva el diagnostico, pero no se anuncia lista.
+fn validation_operation_status(report: &ValidationReport) -> OperationStatus {
+    if !report.is_structurally_valid() {
+        OperationStatus::Error
+    } else if report.cutting_moves == 0 {
+        OperationStatus::NotCalculated
+    } else {
+        OperationStatus::Ready
+    }
+}
+
+fn validation_label(report: &ValidationReport) -> &'static str {
+    if !report.is_structurally_valid() {
+        "ERROR estructural"
+    } else if report.cutting_moves == 0 {
+        "SIN MECANIZADO (aviso)"
+    } else if report.issues.is_empty() {
+        "CORRECTA estructuralmente"
+    } else {
+        "CORRECTA con avisos"
+    }
 }
 
 struct Job {
@@ -322,9 +349,12 @@ fn compute(
         plan.params.clearance_mm,
     )
     .map_err(|e| format!("Error planificando movimientos propuestos: {e}"))?;
+    // La validacion es inmutable y trabaja con la secuencia final de movimientos.
+    let validation = validate_planned_toolpath(&linked);
     Ok(Outcome {
         toolpath,
         linked,
+        validation,
         contacts,
         lines_count: plan.lines,
         samples_per_line: plan.samples,
@@ -505,20 +535,29 @@ impl TestParallelPanel {
             }
             match result {
                 Ok(outcome) => {
+                    let status = validation_operation_status(&outcome.validation);
+                    let first_issue = outcome
+                        .validation
+                        .issues
+                        .first()
+                        .map(|issue| format!(" Detalle: {}", issue.detail))
+                        .unwrap_or_default();
                     self.message = format!(
-                        "{} pasadas, {} puntos por pasada, {} contactos. {}. Aproximacion Z={:.3}, despeje Z={:.3} (propuesta).",
+                        "{} pasadas, {} puntos por pasada, {} contactos. {}. Aproximacion Z={:.3}, despeje Z={:.3}. Validacion: {}.{}",
                         outcome.lines_count,
                         outcome.samples_per_line,
                         outcome.contacts,
                         outcome.toolpath.pattern.label(),
                         outcome.linked.approach_z,
-                        outcome.linked.clearance_z
+                        outcome.linked.clearance_z,
+                        validation_label(&outcome.validation),
+                        first_issue,
                     );
                     self.results.insert(index, outcome);
                     self.result_signatures.insert(index, job.signature.clone());
                     self.hidden.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
-                        op.status = OperationStatus::Ready;
+                        op.status = status;
                     }
                 }
                 Err(error) => {
@@ -810,6 +849,53 @@ impl TestParallelPanel {
                 }
                 if !self.message.is_empty() {
                     ui.small(&self.message);
+                }
+                // No dependemos del mensaje global de la ultima operacion:
+                // cada resultado lleva su propio informe, invalidado con el resultado.
+                if let Some(result) = self.results.get(&index) {
+                    let report = &result.validation;
+                    ui.separator();
+                    let color = if !report.is_structurally_valid() {
+                        egui::Color32::LIGHT_RED
+                    } else if report.cutting_moves == 0 {
+                        egui::Color32::YELLOW
+                    } else {
+                        egui::Color32::LIGHT_GREEN
+                    };
+                    ui.colored_label(
+                        color,
+                        format!("G25.4b - Validacion: {}", validation_label(report)),
+                    );
+                    ui.small(format!(
+                        "{} movimientos revisados, {} de corte, {} incidencias.",
+                        report.checked_moves, report.cutting_moves, report.issues.len()
+                    ));
+                    for issue in report.issues.iter().take(8) {
+                        let location = match (issue.pass_index, issue.move_index) {
+                            (Some(pass), Some(movement)) => {
+                                format!("Pasada {}, movimiento {}", pass + 1, movement + 1)
+                            }
+                            (_, Some(movement)) => format!("Movimiento {}", movement + 1),
+                            _ => "Operacion".to_owned(),
+                        };
+                        let issue_color = match issue.severity {
+                            Severity::Error => egui::Color32::LIGHT_RED,
+                            Severity::Warning => egui::Color32::YELLOW,
+                        };
+                        ui.colored_label(
+                            issue_color,
+                            format!("{location} - {:?}: {}", issue.code, issue.detail),
+                        );
+                    }
+                    if report.issues.len() > 8 {
+                        ui.small(format!(
+                            "{} incidencias adicionales (limite visual de 8).",
+                            report.issues.len() - 8
+                        ));
+                    }
+                    ui.small(
+                        "Solo integridad estructural: NO verifica colisiones, material restante, fijaciones ni seguridad CNC. Sin G-code.",
+                    );
                 }
                 if has_result {
                     ui.checkbox(&mut draft.visible, "Mostrar resultado 3D");
@@ -1428,6 +1514,7 @@ mod g20_library_sync_tests {
             Outcome {
                 toolpath: Toolpath::default(),
                 linked: PlannedToolpath::default(),
+                validation: ValidationReport::default(),
                 contacts: 0,
                 lines_count: 0,
                 samples_per_line: 0,
@@ -1724,5 +1811,97 @@ mod g25_3_global_marker_tests {
     #[test]
     fn empty_operation_has_no_start_or_finish_marker() {
         assert!(operation_marker_positions(&PlannedToolpath::default()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod g25_4b_integration_tests {
+    use super::*;
+
+    fn make_raster(with_cuts: bool) -> Toolpath {
+        let points = if with_cuts {
+            vec![vec![Some([0.0, 0.0, 1.0]), Some([1.0, 0.0, 1.5])]]
+        } else {
+            vec![vec![None, None]]
+        };
+        Toolpath::from_contact_grid_with_pattern(points, 2, RasterPattern::Unidirectional).unwrap()
+    }
+
+    fn test_outcome(with_cuts: bool) -> Outcome {
+        let toolpath = make_raster(with_cuts);
+        let linked = PlannedToolpath::from_toolpath(&toolpath, 4.0, 2.0, 10.0).unwrap();
+        let validation = validate_planned_toolpath(&linked);
+        Outcome {
+            toolpath,
+            linked,
+            validation,
+            contacts: if with_cuts { 2 } else { 0 },
+            lines_count: 1,
+            samples_per_line: 2,
+        }
+    }
+
+    #[test]
+    fn generated_cutting_path_has_a_report_and_ready_status() {
+        let result = test_outcome(true);
+        assert!(result.validation.is_structurally_valid());
+        assert_eq!(result.validation.checked_moves, result.linked.moves.len());
+        assert!(result.validation.cutting_moves > 0);
+        assert_eq!(
+            validation_operation_status(&result.validation),
+            OperationStatus::Ready
+        );
+        assert_eq!(
+            validation_label(&result.validation),
+            "CORRECTA estructuralmente"
+        );
+    }
+
+    #[test]
+    fn invalid_toolpath_is_reported_without_changing_geometry() {
+        let mut result = test_outcome(true);
+        let untouched = result.linked.clone();
+        result.linked.moves[0].to[0] += 1.0; // aproximacion oblicua, invalida
+        result.validation = validate_planned_toolpath(&result.linked);
+        assert_eq!(
+            validation_operation_status(&result.validation),
+            OperationStatus::Error
+        );
+        assert!(
+            result
+                .validation
+                .issues
+                .iter()
+                .any(|x| x.move_index == Some(0))
+        );
+        assert_eq!(result.toolpath.contact_points, 2);
+        assert_ne!(result.linked, untouched); // la alteracion proviene solo del test
+    }
+
+    #[test]
+    fn no_cut_is_a_warning_and_never_marked_ready() {
+        let result = test_outcome(false);
+        assert!(result.validation.is_structurally_valid());
+        assert_eq!(result.validation.cutting_moves, 0);
+        assert_eq!(
+            validation_operation_status(&result.validation),
+            OperationStatus::NotCalculated
+        );
+        assert_eq!(
+            validation_label(&result.validation),
+            "SIN MECANIZADO (aviso)"
+        );
+    }
+
+    #[test]
+    fn report_is_kept_per_operation_and_reindexed_on_deletion() {
+        let mut panel = TestParallelPanel::default();
+        panel.results.insert(0, test_outcome(false));
+        panel.results.insert(1, test_outcome(true));
+        assert_eq!(panel.results[&0].validation.cutting_moves, 0);
+        assert_eq!(panel.results[&1].validation.cutting_moves, 1);
+        panel.operation_deleted(0);
+        assert_eq!(panel.results.len(), 1);
+        assert_eq!(panel.results[&0].validation.cutting_moves, 1);
     }
 }
