@@ -8,6 +8,98 @@ use crate::project::{
 };
 use eframe::egui;
 
+#[derive(Clone, Copy)]
+enum TreeIcon {
+    Project,
+    Model,
+    Stock,
+    Origin,
+    Operations,
+    Operation,
+}
+
+fn paint_tree_icon(ui: &egui::Ui, rect: egui::Rect, icon: TreeIcon, header: bool, selected: bool) {
+    let x = if header { 27.0 } else { 9.0 };
+    let center = egui::pos2(rect.left() + x, rect.center().y);
+    let color = if selected {
+        ui.visuals().selection.stroke.color
+    } else {
+        ui.visuals().widgets.inactive.fg_stroke.color
+    };
+    let stroke = egui::Stroke::new(1.4, color);
+    let at = |x: f32, y: f32| center + egui::vec2(x, y);
+    let line = |a: (f32, f32), b: (f32, f32)| {
+        ui.painter()
+            .line_segment([at(a.0, a.1), at(b.0, b.1)], stroke);
+    };
+    match icon {
+        TreeIcon::Project => {
+            // Carpeta: identificador del proyecto.
+            line((-6.0, -3.0), (-2.0, -3.0));
+            line((-2.0, -3.0), (0.0, -1.0));
+            line((0.0, -1.0), (6.0, -1.0));
+            line((6.0, -1.0), (5.0, 5.0));
+            line((5.0, 5.0), (-5.0, 5.0));
+            line((-5.0, 5.0), (-6.0, -3.0));
+        }
+        TreeIcon::Model => {
+            // Cubo isometrico: modelo 3D.
+            line((-6.0, -3.0), (0.0, -6.0));
+            line((0.0, -6.0), (6.0, -3.0));
+            line((6.0, -3.0), (0.0, 0.0));
+            line((0.0, 0.0), (-6.0, -3.0));
+            line((-6.0, -3.0), (-6.0, 3.0));
+            line((-6.0, 3.0), (0.0, 6.0));
+            line((0.0, 6.0), (6.0, 3.0));
+            line((6.0, 3.0), (6.0, -3.0));
+            line((0.0, 0.0), (0.0, 6.0));
+        }
+        TreeIcon::Stock => {
+            // Bloque rectangular: material en bruto.
+            line((-6.0, -5.0), (6.0, -5.0));
+            line((6.0, -5.0), (6.0, 5.0));
+            line((6.0, 5.0), (-6.0, 5.0));
+            line((-6.0, 5.0), (-6.0, -5.0));
+            line((-6.0, -1.0), (6.0, -1.0));
+            line((-2.0, -5.0), (-2.0, -1.0));
+        }
+        TreeIcon::Origin => {
+            // Diana de origen CNC.
+            ui.painter().circle_stroke(center, 3.2, stroke);
+            line((-6.0, 0.0), (-3.5, 0.0));
+            line((3.5, 0.0), (6.0, 0.0));
+            line((0.0, -6.0), (0.0, -3.5));
+            line((0.0, 3.5), (0.0, 6.0));
+        }
+        TreeIcon::Operations => {
+            // Lista de operaciones.
+            for y in [-4.0, 0.0, 4.0] {
+                ui.painter().circle_filled(at(-5.0, y), 1.0, color);
+                line((-2.0, y), (6.0, y));
+            }
+        }
+        TreeIcon::Operation => {
+            // Recorrido estilizado; no representa trayectoria CNC validada.
+            line((-5.0, 4.0), (-1.0, 4.0));
+            line((-1.0, 4.0), (-1.0, -3.0));
+            line((-1.0, -3.0), (5.0, -3.0));
+            ui.painter().circle_filled(at(-5.0, 4.0), 1.2, color);
+            ui.painter().circle_stroke(at(5.0, -3.0), 1.8, stroke);
+        }
+    }
+}
+
+fn icon_selectable_label(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: &str,
+    icon: TreeIcon,
+) -> egui::Response {
+    // El icono va dentro del mismo widget seleccionable: conserva hitbox y doble clic.
+    let response = ui.selectable_label(selected, format!("     {label}"));
+    paint_tree_icon(ui, response.rect, icon, false, selected);
+    response
+}
 #[derive(Default)]
 pub struct OperationTreeActions {
     pub edit: Option<usize>,
@@ -16,41 +108,54 @@ pub struct OperationTreeActions {
 pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
     let mut actions = OperationTreeActions::default();
     ui.separator();
-    egui::CollapsingHeader::new("LaguCAM")
+    let root_header = egui::CollapsingHeader::new("      LaguCAM")
         .default_open(true)
         .show(ui, |ui| {
             let name = project
                 .model
                 .as_ref()
                 .map_or("(sin STL)", |m| m.name.as_str());
-            if ui
-                .selectable_label(
-                    project.selection == Selection::Model,
-                    format!("Modelo STL · {name}"),
-                )
-                .clicked()
+            if icon_selectable_label(
+                ui,
+                project.selection == Selection::Model,
+                &format!("Modelo STL · {name}"),
+                TreeIcon::Model,
+            )
+            .clicked()
             {
                 project.selection = Selection::Model;
             }
-            if ui
-                .selectable_label(project.selection == Selection::Stock, "Bruto")
-                .clicked()
+            if icon_selectable_label(
+                ui,
+                project.selection == Selection::Stock,
+                "Bruto",
+                TreeIcon::Stock,
+            )
+            .clicked()
             {
                 project.selection = Selection::Stock;
             }
-            if ui
-                .selectable_label(project.selection == Selection::Origin, "Origen CNC")
-                .clicked()
+            if icon_selectable_label(
+                ui,
+                project.selection == Selection::Origin,
+                "Origen CNC",
+                TreeIcon::Origin,
+            )
+            .clicked()
             {
                 project.selection = Selection::Origin;
             }
-            ui.collapsing("Operaciones", |ui| {
+            let group_header = ui.collapsing("      Operaciones", |ui| {
                 if project.operations.items.is_empty() {
                     ui.label("(vacía)");
                 }
                 for (i, op) in project.operations.items.iter().enumerate() {
-                    let response =
-                        ui.selectable_label(project.selection == Selection::Operation(i), &op.name);
+                    let response = icon_selectable_label(
+                        ui,
+                        project.selection == Selection::Operation(i),
+                        &op.name,
+                        TreeIcon::Operation,
+                    );
                     if response.clicked() {
                         project.selection = Selection::Operation(i);
                     }
@@ -72,7 +177,21 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
                     }
                 }
             });
+            paint_tree_icon(
+                ui,
+                group_header.header_response.rect,
+                TreeIcon::Operations,
+                true,
+                false,
+            );
         });
+    paint_tree_icon(
+        ui,
+        root_header.header_response.rect,
+        TreeIcon::Project,
+        true,
+        false,
+    );
     actions
 }
 
