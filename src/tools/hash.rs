@@ -44,6 +44,14 @@ pub fn geometry_sha256(tool: &Tool) -> Result<[u8; 32], String> {
             bytes.push(2);
             append_f64(&mut bytes, *cutting_diameter_mm);
         }
+        ToolGeometry::BullNose {
+            cutting_diameter_mm,
+            corner_radius_mm,
+        } => {
+            bytes.push(6); // Nuevo discriminante, sin alterar los cinco originales.
+            append_f64(&mut bytes, *cutting_diameter_mm);
+            append_f64(&mut bytes, *corner_radius_mm);
+        }
         ToolGeometry::VBit {
             cutting_diameter_mm,
             included_angle_deg,
@@ -179,6 +187,10 @@ mod tests {
                 | ToolGeometry::BallNose {
                     cutting_diameter_mm,
                 }
+                | ToolGeometry::BullNose {
+                    cutting_diameter_mm,
+                    ..
+                }
                 | ToolGeometry::VBit {
                     cutting_diameter_mm,
                     ..
@@ -267,6 +279,10 @@ mod tests {
                 | ToolGeometry::BallNose {
                     cutting_diameter_mm,
                 }
+                | ToolGeometry::BullNose {
+                    cutting_diameter_mm,
+                    ..
+                }
                 | ToolGeometry::VBit {
                     cutting_diameter_mm,
                     ..
@@ -289,6 +305,10 @@ mod tests {
                 | ToolGeometry::BallNose {
                     cutting_diameter_mm,
                 }
+                | ToolGeometry::BullNose {
+                    cutting_diameter_mm,
+                    ..
+                }
                 | ToolGeometry::VBit {
                     cutting_diameter_mm,
                     ..
@@ -305,6 +325,22 @@ mod tests {
             tool.revision = 3;
             assert_eq!(geometry_sha256(&tool).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn bull_hash_changes_with_corner_but_not_name() {
+        let mut tool = sample(ToolGeometry::BullNose {
+            cutting_diameter_mm: 12.0,
+            corner_radius_mm: 1.0,
+        });
+        let baseline = geometry_sha256(&tool).unwrap();
+        tool.name = "Otra etiqueta".into();
+        assert_eq!(geometry_sha256(&tool).unwrap(), baseline);
+        tool.geometry = ToolGeometry::BullNose {
+            cutting_diameter_mm: 12.0,
+            corner_radius_mm: 2.0,
+        };
+        assert_ne!(geometry_sha256(&tool).unwrap(), baseline);
     }
 
     #[test]

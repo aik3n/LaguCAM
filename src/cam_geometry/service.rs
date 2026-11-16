@@ -190,6 +190,51 @@ impl BallContactEngine {
         })
     }
 
+    /// G24: consulta toroidal nominal o con sobrematerial, reutilizando G16.
+    pub(super) fn query_bull(
+        &mut self,
+        request: BallContactQuery,
+        corner_radius_model: f64,
+        allowance_model: f64,
+        cancelled: &AtomicBool,
+    ) -> Result<BallContactResult, ContactEngineError> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(ContactEngineError::Cancelled);
+        }
+        let outer = request.radius_model + allowance_model;
+        let corner = corner_radius_model + allowance_model;
+        if !request.x_model.is_finite()
+            || !request.y_model.is_finite()
+            || !request.radius_model.is_finite()
+            || request.radius_model <= 0.0
+            || !corner_radius_model.is_finite()
+            || corner_radius_model <= 0.0
+            || corner_radius_model > request.radius_model
+            || !allowance_model.is_finite()
+            || allowance_model < 0.0
+        {
+            return Err(ContactEngineError::InvalidQuery);
+        }
+        if !(outer * outer).is_finite() || !(corner * corner).is_finite() {
+            return Err(ContactEngineError::ArithmeticRange);
+        }
+        let (tip_z_model, stats, io, decision) = self.index.query_g24_bull_cancelable(
+            request.x_model,
+            request.y_model,
+            request.radius_model,
+            corner_radius_model,
+            allowance_model,
+            cancelled,
+        )?;
+        Ok(BallContactResult {
+            tip_z_model,
+            triangles_considered: stats.candidates,
+            nodes_visited: stats.nodes_visited,
+            physical_block_reads: io.block_reads,
+            mode: decision.mode,
+        })
+    }
+
     /// G22: fresa plana con dilatacion euclidea positiva del STL.
     /// Nunca se llama con a=0, conservando la ruta G21 exactamente.
     pub(super) fn query_flat_allowance(

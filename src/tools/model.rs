@@ -21,15 +21,17 @@ pub fn validate_tool_id(id: &str) -> Result<(), String> {
 pub enum ToolKind {
     Flat,
     BallNose,
+    BullNose,
     VBit,
     ConicalFlat,
     ConicalBall,
 }
 
 impl ToolKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Flat,
         Self::BallNose,
+        Self::BullNose,
         Self::VBit,
         Self::ConicalFlat,
         Self::ConicalBall,
@@ -38,6 +40,7 @@ impl ToolKind {
         match self {
             Self::Flat => "Fresa plana",
             Self::BallNose => "Fresa esférica",
+            Self::BullNose => "Fresa toroidal",
             Self::VBit => "Cónica en V",
             Self::ConicalFlat => "Cónica, punta plana",
             Self::ConicalBall => "Cónica, punta esférica",
@@ -56,6 +59,10 @@ pub enum ToolGeometry {
     },
     BallNose {
         cutting_diameter_mm: f64,
+    },
+    BullNose {
+        cutting_diameter_mm: f64,
+        corner_radius_mm: f64,
     },
     VBit {
         cutting_diameter_mm: f64,
@@ -99,6 +106,7 @@ impl ToolGeometry {
         match self {
             Self::Flat { .. } => ToolKind::Flat,
             Self::BallNose { .. } => ToolKind::BallNose,
+            Self::BullNose { .. } => ToolKind::BullNose,
             Self::VBit { .. } => ToolKind::VBit,
             Self::ConicalFlat { .. } => ToolKind::ConicalFlat,
             Self::ConicalBall { .. } => ToolKind::ConicalBall,
@@ -113,6 +121,10 @@ impl ToolGeometry {
             },
             ToolKind::BallNose => Self::BallNose {
                 cutting_diameter_mm: 0.0,
+            },
+            ToolKind::BullNose => Self::BullNose {
+                cutting_diameter_mm: 0.0,
+                corner_radius_mm: 0.0,
             },
             ToolKind::VBit => Self::VBit {
                 cutting_diameter_mm: 0.0,
@@ -139,6 +151,10 @@ impl ToolGeometry {
             | Self::BallNose {
                 cutting_diameter_mm,
             }
+            | Self::BullNose {
+                cutting_diameter_mm,
+                ..
+            }
             | Self::VBit {
                 cutting_diameter_mm,
                 ..
@@ -162,6 +178,15 @@ impl ToolGeometry {
         let height = match self {
             Self::Flat { .. } => 0.0,
             Self::BallNose { .. } => d * 0.5,
+            Self::BullNose {
+                corner_radius_mm, ..
+            } => {
+                positive(*corner_radius_mm, "Radio de esquina")?;
+                if *corner_radius_mm > d * 0.5 {
+                    return Err("Radio de esquina mayor que el radio de corte".into());
+                }
+                *corner_radius_mm
+            }
             Self::VBit {
                 included_angle_deg, ..
             } => d * 0.5 / angle_radians(*included_angle_deg)?.tan(),
@@ -230,6 +255,22 @@ impl ToolGeometry {
                     points.push(ProfilePoint {
                         radius_mm: max_radius * t.sin(),
                         z_mm: max_radius * (1.0 - t.cos()),
+                    });
+                }
+            }
+            Self::BullNose {
+                corner_radius_mm, ..
+            } => {
+                let core = max_radius - *corner_radius_mm;
+                points.push(ProfilePoint {
+                    radius_mm: core,
+                    z_mm: 0.0,
+                });
+                for i in 1..=24 {
+                    let t = std::f64::consts::FRAC_PI_2 * f64::from(i) / 24.0;
+                    points.push(ProfilePoint {
+                        radius_mm: core + corner_radius_mm * t.sin(),
+                        z_mm: corner_radius_mm * (1.0 - t.cos()),
                     });
                 }
             }
@@ -549,6 +590,29 @@ mod tests {
             recommended_material: String::new(),
             notes: String::new(),
         }
+    }
+
+    #[test]
+    fn bull_radius_validation_and_profile() {
+        let geometry = ToolGeometry::BullNose {
+            cutting_diameter_mm: 12.0,
+            corner_radius_mm: 2.0,
+        };
+        assert_eq!(geometry.tip_height_mm().unwrap(), 2.0);
+        let profile = geometry.profile(15.0).unwrap();
+        assert_eq!(profile[0].radius_mm, 4.0);
+        assert_eq!(profile[0].z_mm, 0.0);
+        assert_eq!(profile[24].radius_mm, 6.0);
+        assert!((profile[24].z_mm - 2.0).abs() < 1e-12);
+        assert!(
+            ToolGeometry::BullNose {
+                cutting_diameter_mm: 12.0,
+                corner_radius_mm: 7.0,
+            }
+            .validate(15.0)
+            .is_err()
+        );
+        assert!(geometry.validate(1.0).is_err());
     }
 
     #[test]

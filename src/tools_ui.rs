@@ -399,6 +399,13 @@ fn geometry_fields(ui: &mut egui::Ui, geometry: &mut ToolGeometry) {
         } => {
             number(ui, "Diámetro corte Ø [mm]", cutting_diameter_mm);
         }
+        ToolGeometry::BullNose {
+            cutting_diameter_mm,
+            corner_radius_mm,
+        } => {
+            number(ui, "Diámetro corte Ø [mm]", cutting_diameter_mm);
+            number(ui, "Radio de esquina R [mm]", corner_radius_mm);
+        }
         ToolGeometry::VBit {
             cutting_diameter_mm,
             included_angle_deg,

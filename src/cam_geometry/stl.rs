@@ -2,6 +2,7 @@
 //! El STL no se escribe ni se guarda una copia completa de sus triángulos.
 //! En Windows, el archivo permanece abierto sin compartir escritura/borrado.
 
+use super::bull::bull_tip_height_triangle;
 use super::flat_allowance::flat_tip_height_triangle_allowance;
 use super::{ContactError, Vec3, ball_tip_height_triangle, flat_tip_height_triangle};
 use std::collections::HashMap;
@@ -771,6 +772,144 @@ fn g15_process_batch(
         *best = Some(best.map_or(z, |previous| previous.max(z)));
     }
     Ok(())
+}
+
+impl FileBvh {
+    /// G24: fresa toroidal y sobrematerial euclideo sobre el indice protegido.
+    pub fn query_g24_bull_cancelable(
+        &mut self,
+        x: f64,
+        y: f64,
+        outer_radius: f64,
+        corner_radius: f64,
+        allowance: f64,
+        cancel: &AtomicBool,
+    ) -> Result<(Option<f64>, FileQueryStats, G15IoStats, G16Decision), StlBvhError> {
+        g17_check_cancel(Some(cancel))?;
+        if !x.is_finite()
+            || !y.is_finite()
+            || !outer_radius.is_finite()
+            || outer_radius <= 0.0
+            || !corner_radius.is_finite()
+            || corner_radius <= 0.0
+            || corner_radius > outer_radius
+            || !allowance.is_finite()
+            || allowance < 0.0
+        {
+            return Err(ContactError::InvalidInput.into());
+        }
+        let reach = outer_radius + allowance;
+        let arc = corner_radius + allowance;
+        if !(reach * reach).is_finite() || !(arc * arc).is_finite() {
+            return Err(StlBvhError::ArithmeticRange);
+        }
+        self.check_source()?;
+        let cache = self
+            .block_cache
+            .as_ref()
+            .filter(|_| self.g16_budget.is_some())
+            .ok_or(StlBvhError::InvalidStl("Configure antes G16"))?;
+        let (count, warm) = self.g16_sample_candidates(x, y, reach, cache);
+        g17_check_cancel(Some(cancel))?;
+        let decision = G16Decision {
+            mode: g16_choose_mode(count, warm),
+            sampled_candidates: count,
+            sampled_cached_records: warm,
+        };
+        let (z, stats, io) = match decision.mode {
+            G16AccessMode::Blocks => {
+                let mut temporary = G15BlockCache::new(G15_BLOCK_BYTES)?;
+                self.query_g24_bull_with_cache(
+                    x,
+                    y,
+                    outer_radius,
+                    corner_radius,
+                    allowance,
+                    &mut temporary,
+                    cancel,
+                )?
+            }
+            G16AccessMode::Cached => {
+                let mut cache = self
+                    .block_cache
+                    .take()
+                    .ok_or(StlBvhError::InvalidStl("Configure antes G16"))?;
+                let result = self.query_g24_bull_with_cache(
+                    x,
+                    y,
+                    outer_radius,
+                    corner_radius,
+                    allowance,
+                    &mut cache,
+                    cancel,
+                );
+                self.block_cache = Some(cache);
+                result?
+            }
+        };
+        g17_check_cancel(Some(cancel))?;
+        Ok((z, stats, io, decision))
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "G24: geometria y presupuesto de lectura explicitos"
+    )]
+    fn query_g24_bull_with_cache(
+        &mut self,
+        x: f64,
+        y: f64,
+        outer_radius: f64,
+        corner_radius: f64,
+        allowance: f64,
+        cache: &mut G15BlockCache,
+        cancel: &AtomicBool,
+    ) -> Result<(Option<f64>, FileQueryStats, G15IoStats), StlBvhError> {
+        g17_check_cancel(Some(cancel))?;
+        self.check_source()?;
+        let reach = outer_radius + allowance;
+        let mut stats = FileQueryStats::default();
+        let mut io = G15IoStats::default();
+        let mut best = None::<f64>;
+        let mut stack = vec![0_u32];
+        while let Some(id) = stack.pop() {
+            let node = self.nodes[id as usize];
+            stats.nodes_visited += 1;
+            if !disk_could_intersect(node.bounds, x, y, reach) {
+                continue;
+            }
+            if node.left != NO_CHILD {
+                stack.push(node.right);
+                stack.push(node.left);
+            } else {
+                for p in &self.records[node.start as usize..node.end as usize] {
+                    if !disk_could_intersect(p.bounds(), x, y, reach) {
+                        continue;
+                    }
+                    stats.candidates += 1;
+                    if stats.candidates % 256 == 0 {
+                        g17_check_cancel(Some(cancel))?;
+                    }
+                    let record =
+                        cache.record(&mut self.source, self.records.len(), p.id, &mut io)?;
+                    stats.stl_records_read += 1;
+                    if let Some(z) = bull_tip_height_triangle(
+                        stl_triangle_f64(record)?,
+                        x,
+                        y,
+                        outer_radius,
+                        corner_radius,
+                        allowance,
+                    )? {
+                        best = Some(best.map_or(z, |previous| previous.max(z)));
+                    }
+                }
+            }
+        }
+        g17_check_cancel(Some(cancel))?;
+        self.check_source()?;
+        Ok((best, stats, io))
+    }
 }
 
 impl FileBvh {

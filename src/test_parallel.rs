@@ -590,8 +590,8 @@ impl TestParallelPanel {
                                     if let Some(tool) = tool_library.get(id) {
                                         ui.small(format!("{} · Diametro Ø{:.3} mm (biblioteca)",
                                             tool.geometry.kind().label(), tool.geometry.diameter_mm()));
-                                        if !matches!(&tool.geometry, crate::tools::model::ToolGeometry::BallNose { .. }) {
-                                            ui.small("Este tipo aun no dispone de solucion de contacto G19.");
+                                        if !matches!(&tool.geometry, crate::tools::model::ToolGeometry::BallNose { .. } | crate::tools::model::ToolGeometry::Flat { .. } | crate::tools::model::ToolGeometry::BullNose { .. }) {
+                                            ui.small("Este tipo aun no dispone de solucion de contacto CAM.");
                                         }
                                     } else {
                                         ui.colored_label(egui::Color32::YELLOW, "La fresa asignada no existe en la biblioteca.");

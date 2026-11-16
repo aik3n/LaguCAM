@@ -44,6 +44,17 @@ fn draw_placeholder(ui: &mut egui::Ui, kind: Option<ToolKind>, message: &str) {
             let mut outline = vec![p(23.0, top), p(23.0, shoulder), p(43.0, shoulder)];
             match kind {
                 ToolKind::Flat => outline.push(p(43.0, bottom)),
+                ToolKind::BullNose => {
+                    const CORNER: f32 = 14.0;
+                    outline.push(p(43.0, bottom - CORNER));
+                    for i in (0..=16).rev() {
+                        let t = std::f32::consts::FRAC_PI_2 * i as f32 / 16.0;
+                        outline.push(p(
+                            43.0 - CORNER + CORNER * t.sin(),
+                            bottom - CORNER * (1.0 - t.cos()),
+                        ));
+                    }
+                }
                 ToolKind::VBit => outline.push(p(0.0, bottom)),
                 ToolKind::ConicalFlat => outline.push(p(12.0, bottom)),
                 ToolKind::BallNose => {
@@ -251,6 +262,11 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
         ToolGeometry::BallNose {
             cutting_diameter_mm,
         } => format!("R esférico {:.4} mm", cutting_diameter_mm * 0.5),
+        ToolGeometry::BullNose {
+            corner_radius_mm, ..
+        } => {
+            format!("Radio de esquina R {:.4} mm", corner_radius_mm)
+        }
         ToolGeometry::VBit {
             included_angle_deg, ..
         } => format!("V · ángulo TOTAL {:.3}°", included_angle_deg),

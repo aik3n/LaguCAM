@@ -97,6 +97,44 @@ impl ContactQuery {
         Ok(radius)
     }
 
+    fn checked_bull_radii(self) -> Result<(f64, f64), ContactSolverError> {
+        let CutterGeometry::BullNose {
+            diameter_model,
+            corner_radius_model,
+        } = self.cutter
+        else {
+            return Err(ContactSolverError::UnsupportedGeometry);
+        };
+        if !self.x_model.is_finite()
+            || !self.y_model.is_finite()
+            || !self.allowance_model.is_finite()
+            || self.allowance_model < 0.0
+        {
+            return Err(ContactSolverError::InvalidQuery(
+                "XY y sobrematerial deben ser finitos; sobrematerial >= 0",
+            ));
+        }
+        if !diameter_model.is_finite()
+            || diameter_model <= 0.0
+            || !corner_radius_model.is_finite()
+            || corner_radius_model <= 0.0
+            || corner_radius_model > diameter_model * 0.5
+        {
+            return Err(ContactSolverError::InvalidQuery(
+                "Diametro o radio de esquina toroidal invalido",
+            ));
+        }
+        let radius = diameter_model * 0.5;
+        if !(radius + self.allowance_model).powi(2).is_finite()
+            || !(corner_radius_model + self.allowance_model)
+                .powi(2)
+                .is_finite()
+        {
+            return Err(ContactSolverError::ArithmeticRange);
+        }
+        Ok((radius, corner_radius_model))
+    }
+
     fn checked_radius(self) -> Result<f64, ContactSolverError> {
         if !self.x_model.is_finite()
             || !self.y_model.is_finite()
@@ -255,6 +293,26 @@ impl ContactSolver {
     ) -> Result<ContactSolution, ContactSolverError> {
         if cancelled.load(Ordering::Relaxed) {
             return Err(ContactSolverError::Engine(ContactEngineError::Cancelled));
+        }
+        if let CutterGeometry::BullNose { .. } = query.cutter {
+            let (radius, corner) = query.checked_bull_radii()?;
+            let raw = self.engine.query_bull(
+                BallContactQuery {
+                    x_model: query.x_model,
+                    y_model: query.y_model,
+                    radius_model: radius,
+                },
+                corner,
+                query.allowance_model,
+                cancelled,
+            )?;
+            return Ok(ContactSolution {
+                tip_z_model: raw.tip_z_model,
+                triangles_considered: raw.triangles_considered,
+                nodes_visited: raw.nodes_visited,
+                physical_block_reads: raw.physical_block_reads,
+                mode: raw.mode,
+            });
         }
         if matches!(query.cutter, CutterGeometry::Flat { .. }) {
             let radius = query.checked_flat_radius()?;

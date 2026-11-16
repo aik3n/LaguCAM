@@ -160,9 +160,10 @@ fn rejects_invalid_and_unsupported_geometries_without_approximations() {
             diameter_model: 6.0,
             included_angle_deg: 60.0,
         },
-        CutterGeometry::BullNose {
+        CutterGeometry::ConicalFlat {
             diameter_model: 8.0,
-            corner_radius_model: 1.0,
+            tip_diameter_model: 1.0,
+            included_angle_deg: 60.0,
         },
     ] {
         assert!(matches!(

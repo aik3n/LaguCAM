@@ -39,7 +39,9 @@ impl ResolvedCutter {
     pub fn ensure_supported(&self) -> Result<(), String> {
         if matches!(
             self.cutter,
-            CutterGeometry::BallNose { .. } | CutterGeometry::Flat { .. }
+            CutterGeometry::BallNose { .. }
+                | CutterGeometry::Flat { .. }
+                | CutterGeometry::BullNose { .. }
         ) {
             Ok(())
         } else {
@@ -82,6 +84,13 @@ pub fn resolve_cutter(
             cutting_diameter_mm,
         } => CutterGeometry::BallNose {
             diameter_model: mm(*cutting_diameter_mm)?,
+        },
+        ToolGeometry::BullNose {
+            cutting_diameter_mm,
+            corner_radius_mm,
+        } => CutterGeometry::BullNose {
+            diameter_model: mm(*cutting_diameter_mm)?,
+            corner_radius_model: mm(*corner_radius_mm)?,
         },
         ToolGeometry::VBit {
             cutting_diameter_mm,
@@ -150,6 +159,30 @@ mod tests {
         tool.total_length_mm = 40.0;
         let id = library.add(tool).unwrap();
         (library, id)
+    }
+
+    #[test]
+    fn bull_library_adapter_preserves_corner_and_invalidates_hash() {
+        let (mut lib, id) = library_with(ToolGeometry::BullNose {
+            cutting_diameter_mm: 12.0,
+            corner_radius_mm: 1.0,
+        });
+        let resolved = resolve_cutter(&lib, Some(&id), 2.0).unwrap();
+        assert_eq!(
+            resolved.cutter,
+            CutterGeometry::BullNose {
+                diameter_model: 24.0,
+                corner_radius_model: 2.0,
+            }
+        );
+        resolved.ensure_supported().unwrap();
+        let mut updated = lib.get(&id).unwrap().clone();
+        updated.geometry = ToolGeometry::BullNose {
+            cutting_diameter_mm: 12.0,
+            corner_radius_mm: 2.0,
+        };
+        lib.replace(updated).unwrap();
+        assert!(!signature_current(&lib, Some(&id), &resolved.signature));
     }
 
     #[test]
