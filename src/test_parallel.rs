@@ -18,6 +18,7 @@ use cam_libre_visor::cam_geometry::{
     service::ContactEngineLimits,
 };
 use cam_libre_visor::toolpath::{RasterPattern, Toolpath};
+use cam_libre_visor::toolpath_links::{PlannedMoveKind, PlannedToolpath};
 use eframe::egui;
 use glam::Vec3;
 use std::{
@@ -46,6 +47,7 @@ struct SamplingPlan {
     bounds: Bounds,
     lines: usize,
     samples: usize,
+    reference_z: f64,
 }
 
 fn count_positions(span: f64, step: f64) -> Result<usize, String> {
@@ -107,10 +109,28 @@ impl SamplingPlan {
         }
         Ok(Self {
             params,
+            reference_z: bounds.max[2],
             bounds,
             lines,
             samples,
         })
+    }
+
+    /// Cota maxima del STL y del bruto. Fallar ante bruto invalido, no ignorarlo.
+    fn with_stock(mut self, stock: Option<&crate::project::stock::Stock>) -> Result<Self, String> {
+        if let Some(stock) = stock {
+            // max() puede ser finito aunque min + size redondee a min en f64.
+            // No aceptar un bruto que pierde una dimension en esta escala.
+            stock
+                .validate()
+                .map_err(|reason| format!("Bruto invalido: {reason}"))?;
+            let maximum = stock.max().ok_or("Limites del bruto fuera de rango")?;
+            if maximum.iter().zip(stock.min).any(|(&hi, lo)| hi <= lo) {
+                return Err("Dimensiones del bruto no representables en f64".into());
+            }
+            self.reference_z = self.reference_z.max(maximum[2]);
+        }
+        Ok(self)
     }
 
     fn total(&self) -> usize {
@@ -152,6 +172,7 @@ impl SamplingPlan {
 #[derive(Debug)]
 struct Outcome {
     toolpath: Toolpath,
+    linked: PlannedToolpath,
     contacts: usize,
     lines_count: usize,
     samples_per_line: usize,
@@ -293,8 +314,17 @@ fn compute(
         Toolpath::from_contact_grid_with_pattern(lines, MAX_POINTS, plan.params.pass_pattern)
             .map_err(|error| format!("Error construyendo trayectoria CAM: {error}"))?;
     debug_assert_eq!(contacts, toolpath.contact_points);
+    // G25.3: solo previsualizacion; ningun G0 real ni certificacion de colision.
+    let linked = PlannedToolpath::from_toolpath(
+        &toolpath,
+        plan.reference_z,
+        plan.params.approach_mm,
+        plan.params.clearance_mm,
+    )
+    .map_err(|e| format!("Error planificando movimientos propuestos: {e}"))?;
     Ok(Outcome {
         toolpath,
+        linked,
         contacts,
         lines_count: plan.lines,
         samples_per_line: plan.samples,
@@ -476,11 +506,13 @@ impl TestParallelPanel {
             match result {
                 Ok(outcome) => {
                     self.message = format!(
-                        "{} pasadas, {} puntos por pasada, {} contactos. Recorrido: {}.",
+                        "{} pasadas, {} puntos por pasada, {} contactos. {}. Aproximacion Z={:.3}, despeje Z={:.3} (propuesta).",
                         outcome.lines_count,
                         outcome.samples_per_line,
                         outcome.contacts,
-                        outcome.toolpath.pattern.label()
+                        outcome.toolpath.pattern.label(),
+                        outcome.linked.approach_z,
+                        outcome.linked.clearance_z
                     );
                     self.results.insert(index, outcome);
                     self.result_signatures.insert(index, job.signature.clone());
@@ -671,7 +703,19 @@ impl TestParallelPanel {
                                                     RasterPattern::Zigzag.label(),
                                                 );
                                             });
-                                        ui.small("Solo sentido de corte: sin entradas, enlaces, rapidos ni G-code.");
+                                        ui.separator();
+                                        ui.horizontal(|ui| {
+                                            ui.label("Despeje sobre bruto (+mm):");
+                                            ui.add(egui::DragValue::new(&mut p.clearance_mm)
+                                                .speed(0.5).range(0.1..=1_000_000.0));
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Aproximacion sobre bruto (+mm):");
+                                            ui.add(egui::DragValue::new(&mut p.approach_mm)
+                                                .speed(0.1).range(0.01..=1_000_000.0));
+                                        });
+                                        ui.small("Referencia Z: max(cima STL, cima bruto y punta calculada). Despeje > aproximacion > 0.");
+                                        ui.small("G25.3: trazados propuestos, NO verificados para ejecutar en una CNC.");
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para acceder a sus parametros.");
@@ -734,6 +778,7 @@ impl TestParallelPanel {
                             // El diametro serializado es legado: no es fuente CAM.
                             effective.diameter = resolved.diameter_model();
                             SamplingPlan::new(bounds, effective)
+                                .and_then(|plan| plan.with_stock(project.stock.as_ref()))
                         }))
                 } else {
                     None
@@ -875,7 +920,9 @@ impl TestParallelPanel {
                     tool.ensure_supported()?;
                     let mut effective = params;
                     effective.diameter = tool.diameter_model();
-                    SamplingPlan::new(model.bounds, effective).map(|plan| (plan, tool))
+                    SamplingPlan::new(model.bounds, effective)
+                        .and_then(|plan| plan.with_stock(project.stock.as_ref()))
+                        .map(|plan| (plan, tool))
                 });
                 match prepared {
                     Ok((plan, tool)) => match Job::start(
@@ -913,6 +960,42 @@ impl TestParallelPanel {
             self.editor_tab = tab;
             self.confirm_delete_operation = confirm_delete;
         }
+    }
+
+    /// Una pareja de SOLIDOS 3D por operacion visible, usando los extremos reales
+    /// de la secuencia. El visor normaliza las coordenadas solo para el render.
+    pub fn marker_instances_3d(
+        &self,
+        model: &ModelReference,
+    ) -> Vec<crate::cam_markers_3d::Marker3d> {
+        use crate::cam_markers_3d::{Marker3d, MarkerKind};
+        let mut markers = Vec::with_capacity(self.results.len().saturating_mul(2));
+        let mut indices: Vec<usize> = self.results.keys().copied().collect();
+        indices.sort_unstable();
+        for index in indices {
+            if self.hidden.contains(&index) {
+                continue;
+            }
+            let path = &self.results[&index].linked;
+            let Some((first, last)) = operation_marker_positions(path) else {
+                continue;
+            };
+            if let (Some(start), Some(finish)) =
+                (model.visual_point(first), model.visual_point(last))
+            {
+                markers.push(Marker3d {
+                    position: start,
+                    kind: MarkerKind::StartCone,
+                    direction: first_marker_motion_direction(path, model),
+                });
+                markers.push(Marker3d {
+                    position: finish,
+                    kind: MarkerKind::FinishSphere,
+                    direction: Vec3::Z,
+                });
+            }
+        }
+        markers
     }
 
     #[expect(
@@ -968,31 +1051,20 @@ impl TestParallelPanel {
                 continue;
             }
             let result = &self.results[&index];
-            // Únicamente tramos continuos de corte; sin unir pasadas ni huecos.
-            for segment in &result.toolpath.segments {
-                let color = if (index + segment.pass_index) % 2 == 0 {
-                    egui::Color32::from_rgb(35, 230, 235)
-                } else {
-                    egui::Color32::from_rgb(255, 195, 65)
-                };
-                let mut previous = None;
-                let mut direction_mark = None;
-                for &position in &segment.points {
-                    let next = project(position);
-                    if let (Some(a), Some(b)) = (previous, next) {
-                        painter.line_segment([a, b], egui::Stroke::new(1.8, color));
-                        let vector = b - a;
-                        if direction_mark.is_none() && vector.length_sq() > 144.0 {
-                            direction_mark = Some((a, vector));
-                        }
+            let blue = egui::Color32::from_rgb(45, 150, 250);
+            let red = egui::Color32::from_rgb(244, 66, 76);
+            // Pintar primero enlaces propuestos azules y despues movimientos
+            // controlados rojos. No implican que un G0 sea seguro en maquina.
+            for rapid_pass in [true, false] {
+                for movement in &result.linked.moves {
+                    let rapid = movement.kind == PlannedMoveKind::RapidTraverse;
+                    if rapid != rapid_pass {
+                        continue;
                     }
-                    previous = next;
-                }
-                // Marcador de sentido sobre un tramo de corte visible; no es un enlace.
-                if let Some((a, vector)) = direction_mark {
-                    let direction = vector.normalized() * 10.0;
-                    let middle = a + vector * 0.5;
-                    painter.arrow(middle - direction, direction, egui::Stroke::new(1.6, color));
+                    if let (Some(a), Some(b)) = (project(movement.from), project(movement.to)) {
+                        let color = if rapid { blue } else { red };
+                        painter.line_segment([a, b], egui::Stroke::new(1.8, color));
+                    }
                 }
             }
         }
@@ -1000,11 +1072,96 @@ impl TestParallelPanel {
             rect.left_top() + egui::vec2(12.0, 64.0),
             egui::Align2::LEFT_TOP,
             format!(
-                "PARALELO TEST · {} operaciones calculadas · sin G-code",
+                "PARALELO TEST · {} operaciones · G0 propuesto AZUL · aproximacion/corte/retirada ROJO · NO ejecutar",
                 self.results.len()
             ),
             egui::FontId::monospace(12.0),
             egui::Color32::WHITE,
+        );
+    }
+}
+
+/// Los extremos pertenecen a la secuencia TOTAL de movimientos de la operacion,
+/// no al inicio/final de cada pasada ni al primer/ultimo punto de corte.
+/// Direccion 3D del primer movimiento efectivo, no la orientacion de camara.
+/// La malla del cono tiene base en el inicio y punta en el sentido de avance.
+fn first_marker_motion_direction(path: &PlannedToolpath, model: &ModelReference) -> Vec3 {
+    for movement in &path.moves {
+        let (Some(from), Some(to)) = (
+            model.visual_point(movement.from),
+            model.visual_point(movement.to),
+        ) else {
+            continue;
+        };
+        let delta = to - from;
+        if delta.is_finite() && delta.length_squared() > 1.0e-12 {
+            return delta.normalize();
+        }
+    }
+    // Si no hay ningun desplazamiento representable, usar la vertical de entrada.
+    Vec3::NEG_Z
+}
+
+fn operation_marker_positions(path: &PlannedToolpath) -> Option<([f64; 3], [f64; 3])> {
+    Some((path.moves.first()?.from, path.moves.last()?.to))
+}
+
+#[cfg(test)]
+mod g25_3_cone_direction_tests {
+    use super::*;
+    use cam_libre_visor::toolpath_links::PlannedMove;
+
+    fn reference() -> ModelReference {
+        ModelReference {
+            name: "marker_test".into(),
+            bounds: Bounds {
+                min: [0.0, 0.0, 0.0],
+                max: [10.0, 10.0, 10.0],
+            },
+            triangles: 1,
+            size_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn cone_points_along_first_nonzero_motion_not_upwards() {
+        let path = PlannedToolpath {
+            moves: vec![
+                PlannedMove {
+                    kind: PlannedMoveKind::Approach,
+                    from: [2.0, 3.0, 8.0],
+                    to: [2.0, 3.0, 8.0],
+                    pass_index: 0,
+                },
+                PlannedMove {
+                    kind: PlannedMoveKind::Approach,
+                    from: [2.0, 3.0, 8.0],
+                    to: [2.0, 3.0, 6.0],
+                    pass_index: 0,
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            first_marker_motion_direction(&path, &reference()),
+            Vec3::NEG_Z
+        );
+        let horizontal = PlannedToolpath {
+            moves: vec![PlannedMove {
+                kind: PlannedMoveKind::Cutting,
+                from: [2.0, 3.0, 6.0],
+                to: [4.0, 3.0, 6.0],
+                pass_index: 0,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            first_marker_motion_direction(&horizontal, &reference()),
+            Vec3::X
+        );
+        assert_eq!(
+            first_marker_motion_direction(&PlannedToolpath::default(), &reference()),
+            Vec3::NEG_Z
         );
     }
 }
@@ -1031,6 +1188,8 @@ mod tests {
                 along_x: true,
                 allowance_mm: 0.0,
                 pass_pattern: RasterPattern::Unidirectional,
+                clearance_mm: 10.0,
+                approach_mm: 2.0,
                 area_xy: None,
             },
         )
@@ -1052,6 +1211,8 @@ mod tests {
                 along_x: false,
                 allowance_mm: 0.0,
                 pass_pattern: RasterPattern::Unidirectional,
+                clearance_mm: 10.0,
+                approach_mm: 2.0,
                 area_xy: None,
             },
         )
@@ -1266,6 +1427,7 @@ mod g20_library_sync_tests {
             index,
             Outcome {
                 toolpath: Toolpath::default(),
+                linked: PlannedToolpath::default(),
                 contacts: 0,
                 lines_count: 0,
                 samples_per_line: 0,
@@ -1515,5 +1677,52 @@ mod g25_2_pipeline_tests {
                 .iter()
                 .all(|p| p[2].to_bits() == 5.0_f64.to_bits())
         );
+    }
+}
+
+#[cfg(test)]
+mod g25_3_stock_and_plan_tests {
+    use super::*;
+
+    #[test]
+    fn stock_top_is_not_ignored_and_invalid_stock_is_an_error() {
+        let bounds = Bounds {
+            min: [0.0, 0.0, 0.0],
+            max: [10.0, 10.0, 4.0],
+        };
+        let plan = SamplingPlan::new(bounds, Parameters::default()).unwrap();
+        assert_eq!(plan.reference_z, 4.0);
+        let mut stock = crate::project::stock::Stock::from_bounds(&bounds);
+        stock.size[2] = 12.0;
+        let raised = plan.clone().with_stock(Some(&stock)).unwrap();
+        assert_eq!(raised.reference_z, 12.0);
+        stock.min[2] = f64::MAX;
+        assert!(plan.with_stock(Some(&stock)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod g25_3_global_marker_tests {
+    use super::*;
+
+    #[test]
+    fn markers_follow_first_and_last_move_even_with_two_zigzag_passes() {
+        let rows = vec![
+            vec![Some([0.0, 0.0, 1.0]), Some([1.0, 0.0, 1.0])],
+            vec![Some([0.0, 1.0, 2.0]), Some([1.0, 1.0, 2.0])],
+        ];
+        let path =
+            Toolpath::from_contact_grid_with_pattern(rows, 4, RasterPattern::Zigzag).unwrap();
+        let movements = PlannedToolpath::from_toolpath(&path, 3.0, 2.0, 10.0).unwrap();
+        assert_eq!(
+            operation_marker_positions(&movements),
+            Some(([0.0, 0.0, 13.0], [0.0, 1.0, 13.0]))
+        );
+        assert!(movements.moves.len() > 2);
+    }
+
+    #[test]
+    fn empty_operation_has_no_start_or_finish_marker() {
+        assert!(operation_marker_positions(&PlannedToolpath::default()).is_none());
     }
 }

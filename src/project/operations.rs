@@ -40,12 +40,37 @@ pub struct ParallelTestParameters {
     /// Orden de corte de las pasadas: el patrón predeterminado conserva G25.1.
     #[serde(default, skip_serializing_if = "RasterPattern::is_unidirectional")]
     pub pass_pattern: RasterPattern,
+    /// Distancia positiva sobre la referencia Z superior del STL y bruto.
+    #[serde(
+        default = "default_clearance_mm",
+        skip_serializing_if = "clearance_is_default"
+    )]
+    pub clearance_mm: f64,
+    /// Distancia positiva sobre la misma referencia para la aproximacion.
+    #[serde(
+        default = "default_approach_mm",
+        skip_serializing_if = "approach_is_default"
+    )]
+    pub approach_mm: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub area_xy: Option<TestAreaXY>,
 }
 
 fn allowance_is_zero(value: &f64) -> bool {
     *value == 0.0
+}
+
+fn default_clearance_mm() -> f64 {
+    10.0
+}
+fn default_approach_mm() -> f64 {
+    2.0
+}
+fn clearance_is_default(value: &f64) -> bool {
+    *value == default_clearance_mm()
+}
+fn approach_is_default(value: &f64) -> bool {
+    *value == default_approach_mm()
 }
 
 impl Default for ParallelTestParameters {
@@ -57,6 +82,8 @@ impl Default for ParallelTestParameters {
             along_x: true,
             allowance_mm: 0.0,
             pass_pattern: RasterPattern::Unidirectional,
+            clearance_mm: default_clearance_mm(),
+            approach_mm: default_approach_mm(),
             area_xy: None,
         }
     }
@@ -81,6 +108,14 @@ impl ParallelTestParameters {
             || self.allowance_mm > 1_000_000.0
         {
             return Err("Sobreespesor de la estrategia paralelo TEST invalido".into());
+        }
+        if !self.approach_mm.is_finite()
+            || !self.clearance_mm.is_finite()
+            || self.approach_mm <= 0.0
+            || self.clearance_mm <= self.approach_mm
+            || self.clearance_mm > 1_000_000.0
+        {
+            return Err("Alturas de movimiento invalidas: despeje > aproximacion > 0".into());
         }
         if let Some(area) = self.area_xy {
             area.validate()?;
@@ -350,5 +385,49 @@ mod g25_2_pass_pattern_tests {
         let mut json = serde_json::to_value(ParallelTestParameters::default()).unwrap();
         json["pass_pattern"] = serde_json::json!("unknown");
         assert!(serde_json::from_value::<ParallelTestParameters>(json).is_err());
+    }
+}
+
+#[cfg(test)]
+mod g25_3_heights_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_json_uses_defaults_without_changing_old_json_shape() {
+        let defaults = ParallelTestParameters::default();
+        assert_eq!((defaults.clearance_mm, defaults.approach_mm), (10.0, 2.0));
+        let json = serde_json::to_value(defaults).unwrap();
+        assert!(json.get("clearance_mm").is_none());
+        assert!(json.get("approach_mm").is_none());
+        let restored: ParallelTestParameters = serde_json::from_value(json).unwrap();
+        assert_eq!(restored, defaults);
+    }
+
+    #[test]
+    fn serializes_independent_heights_and_rejects_invalid_levels() {
+        let mut params = ParallelTestParameters::default();
+        params.clearance_mm = 17.0;
+        params.approach_mm = 3.5;
+        let json = serde_json::to_value(params).unwrap();
+        assert_eq!(json["clearance_mm"].as_f64(), Some(17.0));
+        assert_eq!(json["approach_mm"].as_f64(), Some(3.5));
+        let restored: ParallelTestParameters = serde_json::from_value(json).unwrap();
+        assert_eq!(restored, params);
+        for (approach, clearance) in [
+            (0.0, 10.0),
+            (-1.0, 10.0),
+            (5.0, 5.0),
+            (10.0, 3.0),
+            (f64::NAN, 10.0),
+            (2.0, f64::INFINITY),
+            (2.0, 1_000_001.0),
+        ] {
+            let candidate = ParallelTestParameters {
+                approach_mm: approach,
+                clearance_mm: clearance,
+                ..Default::default()
+            };
+            assert!(candidate.validate().is_err());
+        }
     }
 }

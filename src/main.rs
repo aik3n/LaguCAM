@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cam_markers_3d;
 mod nav_cube;
 mod navigation;
 mod options;
@@ -143,6 +144,7 @@ impl NavigationBindings {
 struct App {
     renderer: Arc<Mutex<render::Render3d>>,
     stock_renderer: Arc<Mutex<stock_render::StockRenderer>>,
+    cam_marker_renderer: Arc<Mutex<cam_markers_3d::MarkerRenderer3d>>,
     project: project::Project,
     property_error: String,
     sample_profiles: Option<sample_overlay::Profiles>,
@@ -193,6 +195,14 @@ impl App {
                 return Err(error);
             }
         };
+        let marker_renderer = match cam_markers_3d::MarkerRenderer3d::new(gl) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                stock_renderer.destroy(gl);
+                mesh_renderer.destroy(gl);
+                return Err(error);
+            }
+        };
         // Biblioteca independiente de proyectos STL y ficheros .lagucam.
         let (tool_library, tool_library_path, tool_error) = match tools::storage::config_path() {
             Ok(path) => match tools::storage::load(&path) {
@@ -204,6 +214,7 @@ impl App {
         let mut app = Self {
             renderer: Arc::new(Mutex::new(mesh_renderer)),
             stock_renderer: Arc::new(Mutex::new(stock_renderer)),
+            cam_marker_renderer: Arc::new(Mutex::new(marker_renderer)),
             project: project::Project::default(),
             property_error: String::new(),
             sample_profiles: None,
@@ -1163,7 +1174,11 @@ impl App {
         let model_color = self.project.model_color;
         let renderer = Arc::clone(&self.renderer);
         let stock_renderer = Arc::clone(&self.stock_renderer);
+        let cam_marker_renderer = Arc::clone(&self.cam_marker_renderer);
         let stock_geometry = stock_render::StockGeometry::from_project(&self.project);
+        let marker_instances = self.project.model.as_ref().map_or_else(Vec::new, |model| {
+            self.test_parallel.marker_instances_3d(model)
+        });
         let picking = self.pending_pick.take();
         let pick_result = Arc::clone(&self.pick_result);
         let pick_ctx = ui.ctx().clone();
@@ -1253,6 +1268,43 @@ impl App {
         if let Some(model) = &self.project.model {
             self.test_parallel
                 .paint(ui, rect, model, yaw, pitch, distance, pan, projection);
+        }
+        // Marcadores renderizados tras las lineas egui: sus fragmentos opacos
+        // sustituyen visualmente las lineas que quedan por debajo del solido.
+        // No se limpia profundidad: se conserva la del STL en este mismo viewport.
+        if !marker_instances.is_empty() {
+            ui.painter().add(egui::PaintCallback {
+                rect,
+                callback: Arc::new(egui_glow::CallbackFn::new(move |info, painter| {
+                    use glow::HasContext as _;
+                    let clip = egui::PaintCallbackInfo {
+                        clip_rect: info.clip_rect.intersect(info.viewport),
+                        ..info
+                    }
+                    .clip_rect_in_pixels();
+                    unsafe {
+                        painter.gl().enable(glow::SCISSOR_TEST);
+                        painter.gl().scissor(
+                            clip.left_px,
+                            clip.from_bottom_px,
+                            clip.width_px,
+                            clip.height_px,
+                        );
+                    }
+                    cam_marker_renderer.lock().paint(
+                        painter.gl(),
+                        &marker_instances,
+                        stock_render::Camera {
+                            yaw,
+                            pitch,
+                            zoom: distance,
+                            aspect,
+                            pan,
+                            projection,
+                        },
+                    );
+                })),
+            });
         }
         if self.pivot_press.marker_visible()
             && let Some(pivot) = self.orbit_pivot
@@ -1435,6 +1487,7 @@ impl eframe::App for App {
         self.cancel.store(true, Ordering::Relaxed);
         self.receiving = None;
         if let Some(gl) = gl {
+            self.cam_marker_renderer.lock().destroy(gl);
             self.stock_renderer.lock().destroy(gl);
             self.renderer.lock().destroy(gl);
         }
