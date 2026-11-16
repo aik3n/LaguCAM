@@ -902,16 +902,18 @@ impl TestParallelPanel {
         pitch: f32,
         zoom: f32,
         pan: Vec3,
+        projection: crate::navigation::Projection,
     ) {
         if self.results.is_empty() {
             return;
         }
-        let mvp = crate::navigation::view_projection(
+        let mvp = crate::navigation::view_projection_mode(
             yaw,
             pitch,
             zoom,
             rect.width() / rect.height().max(1.0),
             pan,
+            projection,
         );
         let painter = ui.painter().with_clip_rect(rect);
         let project = |xyz: [f64; 3]| -> Option<egui::Pos2> {

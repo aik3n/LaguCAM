@@ -6,7 +6,7 @@ use crate::project::{
     selection::Selection,
 };
 use eframe::egui;
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Vec3, Vec4};
 
 #[derive(Clone, Copy)]
 pub struct Camera {
@@ -14,6 +14,7 @@ pub struct Camera {
     pub pitch: f32,
     pub zoom: f32,
     pub pan: Vec3,
+    pub projection: crate::navigation::Projection,
 }
 
 #[derive(Clone, Copy)]
@@ -36,21 +37,14 @@ pub fn paint(
         return;
     };
     let aspect = rect.width() / rect.height().max(1.0);
-    let distance = crate::render::fit_distance(aspect) * camera.zoom;
-    let eye = camera.pan
-        + Vec3::new(
-            distance * camera.pitch.cos() * camera.yaw.cos(),
-            distance * camera.pitch.cos() * camera.yaw.sin(),
-            distance * camera.pitch.sin(),
-        );
-    let view = Mat4::look_at_rh(eye, camera.pan, Vec3::Z);
-    let proj = Mat4::perspective_rh_gl(
-        45f32.to_radians(),
-        aspect.max(0.001),
-        0.001,
-        (distance + camera.pan.length() + 10.0).max(100.0),
+    let mvp = crate::navigation::view_projection_mode(
+        camera.yaw,
+        camera.pitch,
+        camera.zoom,
+        aspect,
+        camera.pan,
+        camera.projection,
     );
-    let mvp = proj * view;
     let screen = |p: [f64; 3]| -> Option<(egui::Pos2, f32)> {
         let pos = model.visual_point(p)?;
         let h = mvp * Vec4::new(pos.x, pos.y, pos.z, 1.0);

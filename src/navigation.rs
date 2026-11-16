@@ -1,5 +1,22 @@
 //! Cámara orbital genérica. No conoce STL, STEP, IGES ni el origen CNC.
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
+
+/// Proyeccion del visor, independiente del modelo, de la operacion y del pivote.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Projection {
+    #[default]
+    Perspective,
+    Orthographic,
+}
+
+impl Projection {
+    pub const fn toggle(self) -> Self {
+        match self {
+            Self::Perspective => Self::Orthographic,
+            Self::Orthographic => Self::Perspective,
+        }
+    }
+}
 
 /// Distancia que encuadra el cubo visual normalizado [-1, 1]^3.
 pub fn fit_distance(aspect: f32) -> f32 {
@@ -8,10 +25,29 @@ pub fn fit_distance(aspect: f32) -> f32 {
     3.0_f32.sqrt() / vertical.min(horizontal).sin() * 1.05
 }
 
-/// Matriz idéntica para render, proyección y elección del pivote.
-/// `target` es el centro de órbita en coordenadas visuales de la escena.
+/// Proyeccion en perspectiva conservada para las pruebas existentes.
+#[cfg(test)]
 pub fn view_projection(yaw: f32, pitch: f32, zoom: f32, aspect: f32, target: Vec3) -> Mat4 {
-    let distance = fit_distance(aspect) * zoom;
+    view_projection_mode(yaw, pitch, zoom, aspect, target, Projection::Perspective)
+}
+
+/// La misma matriz se usa en STL, bruto, indicadores, picking y previsualizaciones.
+/// La vista ortografica mantiene la camara a la distancia de encuadre y cambia
+/// exclusivamente la escala de la proyeccion; la perspectiva hace dolly.
+/// Ambas tienen identica escala en el plano perpendicular por `target`.
+pub fn view_projection_mode(
+    yaw: f32,
+    pitch: f32,
+    zoom: f32,
+    aspect: f32,
+    target: Vec3,
+    projection: Projection,
+) -> Mat4 {
+    let base_distance = fit_distance(aspect);
+    let distance = match projection {
+        Projection::Perspective => base_distance * zoom,
+        Projection::Orthographic => base_distance,
+    };
     let eye = target
         + Vec3::new(
             distance * pitch.cos() * yaw.cos(),
@@ -19,12 +55,24 @@ pub fn view_projection(yaw: f32, pitch: f32, zoom: f32, aspect: f32, target: Vec
             distance * pitch.sin(),
         );
     let view = Mat4::look_at_rh(eye, target, Vec3::Z);
-    let proj = Mat4::perspective_rh_gl(
-        45f32.to_radians(),
-        aspect.max(0.001),
-        0.001,
-        (distance + target.length() + 10.0).max(100.0),
-    );
+    let far = (distance + target.length() + 10.0).max(100.0);
+    let proj = match projection {
+        Projection::Perspective => {
+            Mat4::perspective_rh_gl(45f32.to_radians(), aspect.max(0.001), 0.001, far)
+        }
+        Projection::Orthographic => {
+            let half_height = base_distance * zoom * 22.5_f32.to_radians().tan();
+            let half_width = half_height * aspect.max(0.001);
+            Mat4::orthographic_rh_gl(
+                -half_width,
+                half_width,
+                -half_height,
+                half_height,
+                0.001,
+                far,
+            )
+        }
+    };
     proj * view
 }
 
@@ -83,6 +131,27 @@ fn camera_axes(yaw: f32, pitch: f32) -> (Vec3, Vec3, Vec3) {
         Vec3::new(-cy * sp, -sy * sp, cp),
         Vec3::new(cy * cp, sy * cp, sp),
     )
+}
+
+/// Corrige el target al hacer zoom para que el rayo del cursor interseque
+/// el mismo punto del plano perpendicular a la camara que pasa por `target`.
+/// No depende de profundidad, STL o pivote de orbita. El cursor esta en NDC
+/// (x/y -1..1), de modo que la escala DPI y el offset del visor no intervienen.
+/// Es valida para perspectiva y ortografica gracias a la escala comun en ese plano.
+pub fn zoom_target_at_cursor(
+    target: Vec3,
+    yaw: f32,
+    pitch: f32,
+    old_zoom: f32,
+    new_zoom: f32,
+    aspect: f32,
+    cursor_ndc: Vec2,
+) -> Vec3 {
+    let half_height = fit_distance(aspect) * old_zoom * 22.5_f32.to_radians().tan();
+    let (right, up, _) = camera_axes(yaw, pitch);
+    let offset = right * (cursor_ndc.x * half_height * aspect.max(0.001))
+        + up * (cursor_ndc.y * half_height);
+    target + offset * (1.0 - new_zoom / old_zoom)
 }
 
 pub fn orbit_target_around_pivot(
@@ -174,5 +243,81 @@ mod tests {
         let projected = mvp * target.extend(1.0);
         let ndc = projected.truncate() / projected.w;
         assert!(ndc.x.abs() < 1e-5 && ndc.y.abs() < 1e-5);
+    }
+
+    fn screen_xy(mvp: Mat4, world: Vec3) -> Vec2 {
+        let clip = mvp * world.extend(1.0);
+        (clip.truncate() / clip.w).truncate()
+    }
+
+    #[test]
+    fn zoom_to_cursor_holds_the_reference_for_both_projections() {
+        // El punto de referencia es matematico: NO se consulta ningun STL.
+        for mode in [Projection::Perspective, Projection::Orthographic] {
+            for (yaw, pitch, aspect, old_zoom, new_zoom, cursor) in [
+                (0.7, 0.35, 1.6, 1.0, 0.36, Vec2::new(0.85, -0.7)),
+                (-2.1, -0.6, 0.52, 0.36, 1.7, Vec2::new(-0.92, 0.8)),
+                (1.3, 1.0, 2.4, 4.0, 0.1, Vec2::new(0.0, 0.0)),
+            ] {
+                let target = Vec3::new(0.2, -0.3, 0.15);
+                let (right, up, _) = camera_axes(yaw, pitch);
+                let half_height = fit_distance(aspect) * old_zoom * 22.5_f32.to_radians().tan();
+                let anchor = target
+                    + right * (cursor.x * half_height * aspect)
+                    + up * (cursor.y * half_height);
+                let old_xy = screen_xy(
+                    view_projection_mode(yaw, pitch, old_zoom, aspect, target, mode),
+                    anchor,
+                );
+                let next_target =
+                    zoom_target_at_cursor(target, yaw, pitch, old_zoom, new_zoom, aspect, cursor);
+                let new_xy = screen_xy(
+                    view_projection_mode(yaw, pitch, new_zoom, aspect, next_target, mode),
+                    anchor,
+                );
+                assert!((old_xy - cursor).length() < 0.0001, "{mode:?}: {old_xy:?}");
+                assert!((new_xy - old_xy).length() < 0.0001, "{mode:?}: {new_xy:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn zoom_in_then_out_restores_camera_target() {
+        let target = Vec3::new(0.2, -0.1, 0.3);
+        let cursor = Vec2::new(-0.8, 0.65);
+        let closer = zoom_target_at_cursor(target, 0.9, 0.5, 1.0, 0.6, 1.4, cursor);
+        let restored = zoom_target_at_cursor(closer, 0.9, 0.5, 0.6, 1.0, 1.4, cursor);
+        assert!((restored - target).length() < 0.00001);
+    }
+
+    #[test]
+    fn orthographic_has_no_depth_dependent_screen_scale() {
+        let yaw = 0.6;
+        let pitch = 0.3;
+        let (_, _, backward) = camera_axes(yaw, pitch);
+        let matrix =
+            view_projection_mode(yaw, pitch, 0.5, 1.7, Vec3::ZERO, Projection::Orthographic);
+        let p = Vec3::new(0.2, 0.3, -0.2);
+        assert!((screen_xy(matrix, p) - screen_xy(matrix, p + backward)).length() < 0.00001);
+    }
+
+    #[test]
+    fn switching_projection_keeps_reference_plane_scale() {
+        let target = Vec3::new(0.13, 0.2, -0.1);
+        let yaw = 0.9;
+        let pitch = 0.4;
+        let (_, up, _) = camera_axes(yaw, pitch);
+        let point = target + up * 0.5;
+        let perspective = screen_xy(
+            view_projection_mode(yaw, pitch, 0.75, 1.5, target, Projection::Perspective),
+            point,
+        );
+        let orthographic = screen_xy(
+            view_projection_mode(yaw, pitch, 0.75, 1.5, target, Projection::Orthographic),
+            point,
+        );
+        assert!((perspective - orthographic).length() < 0.00001);
+        assert_eq!(Projection::Perspective.toggle(), Projection::Orthographic);
+        assert_eq!(Projection::Orthographic.toggle(), Projection::Perspective);
     }
 }

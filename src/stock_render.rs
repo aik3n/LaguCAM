@@ -3,7 +3,7 @@
 //! No modifica los VBO de la malla ni las coordenadas reales de proyecto.
 use crate::project::{Project, display::StockDisplay};
 use eframe::glow;
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 use glow::HasContext as _;
 
 /// Solo geometría visual en coordenadas normalizadas. La malla STL se conserva aparte.
@@ -97,6 +97,7 @@ pub struct Camera {
     pub zoom: f32,
     pub aspect: f32,
     pub pan: Vec3,
+    pub projection: crate::navigation::Projection,
 }
 
 pub struct StockRenderer {
@@ -205,28 +206,14 @@ void main() { out_color = u_color; }
         let Some(geometry) = geometry else {
             return;
         };
-        let Camera {
-            yaw,
-            pitch,
-            zoom,
-            aspect,
-            pan,
-        } = camera;
-        let distance = crate::render::fit_distance(aspect) * zoom;
-        let eye = pan
-            + Vec3::new(
-                distance * pitch.cos() * yaw.cos(),
-                distance * pitch.cos() * yaw.sin(),
-                distance * pitch.sin(),
-            );
-        let view = Mat4::look_at_rh(eye, pan, Vec3::Z);
-        let proj = Mat4::perspective_rh_gl(
-            45f32.to_radians(),
-            aspect.max(0.001),
-            0.001,
-            (distance + pan.length() + 10.0).max(100.0),
+        let mvp = crate::navigation::view_projection_mode(
+            camera.yaw,
+            camera.pitch,
+            camera.zoom,
+            camera.aspect,
+            camera.pan,
+            camera.projection,
         );
-        let mvp = proj * view;
         let rgb = geometry.display.color.rgb();
         unsafe {
             gl.enable(glow::DEPTH_TEST);

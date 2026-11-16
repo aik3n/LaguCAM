@@ -168,6 +168,7 @@ struct App {
     pitch: f32,
     distance: f32,
     pan: glam::Vec3,
+    projection: navigation::Projection,
     pending_pick: Option<egui::Pos2>,
     pick_result: PickMailbox,
     orbit_pivot: Option<glam::Vec3>,
@@ -229,6 +230,7 @@ impl App {
             pitch: 35f32.to_radians(),
             distance: 1.0,
             pan: glam::Vec3::ZERO,
+            projection: navigation::Projection::Perspective,
             pending_pick: None,
             pick_result: Arc::new(Mutex::new(None)),
             orbit_pivot: None,
@@ -942,6 +944,16 @@ impl App {
             return;
         }
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        // El selector se superpone al visor sin modificar los paneles acoplados.
+        let show_projection_control = rect.width() >= 180.0 && rect.height() >= 50.0;
+        let projection_control_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.right() - 156.0, rect.top() + 10.0),
+            egui::vec2(144.0, 28.0),
+        );
+        let over_projection_control = show_projection_control
+            && response
+                .hover_pos()
+                .is_some_and(|pos| projection_control_rect.contains(pos));
         // Dibujado antes del callback OpenGL; no se modifica la malla STL.
         // Cuatro vértices: azul más intenso arriba y claro abajo.
         let mut sky = egui::Mesh::default();
@@ -958,6 +970,7 @@ impl App {
         // si el mismo gesto se transforma en arrastre.
         if bindings.orbit_pressed(ui.ctx())
             && response.hovered()
+            && !over_projection_control
             && !self.busy()
             && self.project.model.is_some()
             && self.project.selection != project::selection::Selection::Origin
@@ -991,17 +1004,40 @@ impl App {
             self.pan += (-right * drag.x + up * drag.y) * units;
             ui.ctx().request_repaint();
         }
-        if response.hovered() {
+        if response.hovered() && !over_projection_control {
             let scroll = ui.ctx().input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                self.distance = (self.distance * (-scroll * 0.003).exp()).clamp(0.05, 20.0);
-                ui.ctx().request_repaint();
+            if scroll.is_finite() && scroll != 0.0 {
+                let old_zoom = self.distance;
+                let factor = (-scroll * 0.003).clamp(-2.0, 2.0).exp();
+                let new_zoom = (old_zoom * factor).clamp(0.05, 20.0);
+                if new_zoom != old_zoom
+                    && let Some(pointer) = response.hover_pos()
+                {
+                    // Las posiciones del raton y del viewport son puntos logicos de egui.
+                    // Su cociente produce NDC, independiente de DPI y del STL.
+                    let cursor = glam::Vec2::new(
+                        2.0 * (pointer.x - rect.left()) / rect.width() - 1.0,
+                        1.0 - 2.0 * (pointer.y - rect.top()) / rect.height(),
+                    );
+                    self.pan = navigation::zoom_target_at_cursor(
+                        self.pan,
+                        self.yaw,
+                        self.pitch,
+                        old_zoom,
+                        new_zoom,
+                        rect.width() / rect.height(),
+                        cursor,
+                    );
+                    self.distance = new_zoom;
+                    ui.ctx().request_repaint();
+                }
             }
         }
         let yaw = self.yaw;
         let pitch = self.pitch;
         let distance = self.distance;
         let pan = self.pan;
+        let projection = self.projection;
         let aspect = rect.width() / rect.height().max(1.0);
         let model_color = self.project.model_color;
         let renderer = Arc::clone(&self.renderer);
@@ -1030,7 +1066,7 @@ impl App {
                 {
                     let mut mesh = renderer.lock();
                     mesh.set_model_color(model_color);
-                    mesh.paint(painter.gl(), yaw, pitch, distance, aspect, pan);
+                    mesh.paint(painter.gl(), yaw, pitch, distance, aspect, pan, projection);
                 }
                 // Consultar la escena renderizada: no se relee el fichero ni se
                 // inspeccionan triángulos desde la UI. Solo una vez por clic sobre el modelo.
@@ -1051,7 +1087,9 @@ impl App {
                         },
                         x,
                         y,
-                        navigation::view_projection(yaw, pitch, distance, aspect, pan),
+                        navigation::view_projection_mode(
+                            yaw, pitch, distance, aspect, pan, projection,
+                        ),
                     );
                     *pick_result.lock() = Some(hit);
                     pick_ctx.request_repaint();
@@ -1066,6 +1104,7 @@ impl App {
                         zoom: distance,
                         aspect,
                         pan,
+                        projection,
                     },
                 );
             })),
@@ -1079,30 +1118,32 @@ impl App {
                 pitch,
                 zoom: distance,
                 pan,
+                projection,
             },
             response.clicked(),
             response.hover_pos(),
         );
         if let (Some(profiles), Some(model)) = (&self.sample_profiles, &self.project.model) {
-            profiles.paint(ui, rect, model, yaw, pitch, distance, pan);
+            profiles.paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
         if let (Some(sections), Some(model)) = (&self.section_profiles, &self.project.model) {
-            sections.paint(ui, rect, model, yaw, pitch, distance, pan);
+            sections.paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
         if let Some(model) = &self.project.model {
             self.test_parallel
-                .paint(ui, rect, model, yaw, pitch, distance, pan);
+                .paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
         if self.pivot_press.marker_visible()
             && let Some(pivot) = self.orbit_pivot
         {
             // El indicador marca el punto REAL seleccionado, no el centro de pantalla.
-            let mvp = navigation::view_projection(
+            let mvp = navigation::view_projection_mode(
                 self.yaw,
                 self.pitch,
                 self.distance,
                 rect.width() / rect.height().max(1.0),
                 self.pan,
+                self.projection,
             );
             let clip = mvp * pivot.extend(1.0);
             if clip.is_finite() && clip.w > 0.0 {
@@ -1138,6 +1179,21 @@ impl App {
             egui::FontId::monospace(12.0),
             egui::Color32::LIGHT_GRAY,
         );
+        // Dibujar despues de la escena para que el control quede delante.
+        if show_projection_control {
+            let title = match self.projection {
+                navigation::Projection::Perspective => "Perspectiva ↔",
+                navigation::Projection::Orthographic => "Ortográfica ↔",
+            };
+            if ui
+                .place(projection_control_rect, egui::Button::new(title))
+                .on_hover_text("Alternar perspectiva y ortográfica. Mantiene orientación y zoom.")
+                .clicked()
+            {
+                self.projection = self.projection.toggle();
+                ui.ctx().request_repaint();
+            }
+        }
     }
 }
 

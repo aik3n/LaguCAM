@@ -160,6 +160,7 @@ void main() {
         distance: f32,
         aspect: f32,
         pan: Vec3,
+        projection: crate::navigation::Projection,
     ) {
         unsafe {
             if self.clear_requested {
@@ -224,7 +225,9 @@ void main() {
             gl.clear_depth_f32(1.0);
             gl.clear(glow::DEPTH_BUFFER_BIT);
             if !self.active.is_empty() {
-                let mvp = crate::navigation::view_projection(yaw, pitch, distance, aspect, pan);
+                let mvp = crate::navigation::view_projection_mode(
+                    yaw, pitch, distance, aspect, pan, projection,
+                );
                 gl.use_program(Some(self.program));
                 gl.uniform_3_f32(
                     gl.get_uniform_location(self.program, "u_model_color")

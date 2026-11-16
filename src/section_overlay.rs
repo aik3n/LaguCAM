@@ -152,9 +152,11 @@ impl Sections {
         pitch: f32,
         zoom: f32,
         pan: Vec3,
+        projection: crate::navigation::Projection,
     ) {
         let aspect = rect.width() / rect.height().max(1.0);
-        let mvp = crate::navigation::view_projection(yaw, pitch, zoom, aspect, pan);
+        let mvp =
+            crate::navigation::view_projection_mode(yaw, pitch, zoom, aspect, pan, projection);
         let painter = ui.painter().with_clip_rect(rect);
         let colors = [
             egui::Color32::from_rgb(40, 224, 235),
