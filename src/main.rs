@@ -1007,13 +1007,14 @@ impl App {
         ui.painter().add(egui::Shape::mesh(sky));
         // No esperar a clicked(): ese evento llega al SOLTAR y no existe
         // si el mismo gesto se transforma en arrastre.
+        // V3D-05: el pivote sigue el puntero tambien al editar Origen CNC.
+        // El clic sin arrastre en un marcador rojo sigue gestionado por overlay::paint.
         if bindings.orbit_pressed(ui.ctx())
             && response.hovered()
             && !over_projection_control
             && !over_nav_cube
             && !self.busy()
             && self.project.model.is_some()
-            && self.project.selection != project::selection::Selection::Origin
             && let Some(pos) = response
                 .interact_pointer_pos()
                 .filter(|p| rect.contains(*p))
