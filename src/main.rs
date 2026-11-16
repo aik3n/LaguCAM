@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod nav_cube;
 mod navigation;
 mod options;
 mod overlay;
@@ -493,6 +494,17 @@ impl App {
         self.pivot_press = PivotPress::default();
     }
 
+    fn cube_view(&mut self, target: nav_cube::SnapTarget) {
+        // El cubo solo modifica la camara; mantiene el centro y la escala.
+        self.yaw = target.yaw;
+        self.pitch = target.pitch;
+        if target.axial {
+            self.projection = navigation::Projection::Orthographic;
+        }
+        self.pending_pick = None;
+        *self.pick_result.lock() = None;
+        self.pivot_press = PivotPress::default();
+    }
     fn center_view(&mut self) {
         self.yaw = 45f32.to_radians();
         self.pitch = 35f32.to_radians();
@@ -962,16 +974,25 @@ impl App {
             return;
         }
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-        // El selector se superpone al visor sin modificar los paneles acoplados.
+        // Cubo visible en el visor; se oculta en superficies demasiado estrechas.
+        // El selector de proyeccion permanece accesible bajo el cubo.
+        let cube_rect = nav_cube::viewport_rect(rect);
         let show_projection_control = rect.width() >= 180.0 && rect.height() >= 50.0;
+        let projection_top = if cube_rect.is_some() {
+            rect.top() + 134.0
+        } else {
+            rect.top() + 10.0
+        };
         let projection_control_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.right() - 156.0, rect.top() + 10.0),
+            egui::pos2(rect.right() - 156.0, projection_top),
             egui::vec2(144.0, 28.0),
         );
         let over_projection_control = show_projection_control
             && response
                 .hover_pos()
                 .is_some_and(|pos| projection_control_rect.contains(pos));
+        let over_nav_cube = cube_rect
+            .is_some_and(|area| response.hover_pos().is_some_and(|pos| area.contains(pos)));
         // Dibujado antes del callback OpenGL; no se modifica la malla STL.
         // Cuatro vértices: azul más intenso arriba y claro abajo.
         let mut sky = egui::Mesh::default();
@@ -989,6 +1010,7 @@ impl App {
         if bindings.orbit_pressed(ui.ctx())
             && response.hovered()
             && !over_projection_control
+            && !over_nav_cube
             && !self.busy()
             && self.project.model.is_some()
             && self.project.selection != project::selection::Selection::Origin
@@ -1000,7 +1022,7 @@ impl App {
             self.pivot_press.start();
             ui.ctx().request_repaint();
         }
-        if bindings.orbit_dragged(&response) {
+        if !over_nav_cube && bindings.orbit_dragged(&response) {
             // La seleccion mediante GL termina antes de ejecutar el arrastre.
             // La primera fraccion de movimiento no se pierde ni usa el pivote viejo.
             if let Some(drag) = self.pivot_press.motion(response.drag_motion()) {
@@ -1008,7 +1030,7 @@ impl App {
             }
             ui.ctx().request_repaint();
         }
-        if bindings.pan_dragged(&response) {
+        if !over_nav_cube && bindings.pan_dragged(&response) {
             let drag = response.drag_motion();
             // Usar la misma base que la proyeccion y el zoom:
             // Z x direccion se anula en una vista superior exacta.
@@ -1018,7 +1040,7 @@ impl App {
             self.pan += (-right * drag.x + up * drag.y) * units;
             ui.ctx().request_repaint();
         }
-        if response.hovered() && !over_projection_control {
+        if response.hovered() && !over_projection_control && !over_nav_cube {
             let scroll = ui.ctx().input(|i| i.smooth_scroll_delta.y);
             if scroll.is_finite() && scroll != 0.0 {
                 let old_zoom = self.distance;
@@ -1134,7 +1156,7 @@ impl App {
                 pan,
                 projection,
             },
-            response.clicked(),
+            response.clicked() && !over_nav_cube,
             response.hover_pos(),
         );
         if let (Some(profiles), Some(model)) = (&self.sample_profiles, &self.project.model) {
@@ -1193,7 +1215,19 @@ impl App {
             egui::FontId::monospace(12.0),
             egui::Color32::LIGHT_GRAY,
         );
-        // Dibujar despues de la escena para que el control quede delante.
+        if let Some(area) = cube_rect
+            && let Some(target) = nav_cube::paint(
+                ui,
+                area,
+                yaw,
+                pitch,
+                response.hover_pos(),
+                response.clicked(),
+            )
+        {
+            self.cube_view(target);
+            ui.ctx().request_repaint();
+        } // Dibujar despues de la escena para que el control quede delante.
         if show_projection_control {
             let title = match self.projection {
                 navigation::Projection::Perspective => "Perspectiva ↔",
