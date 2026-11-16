@@ -17,7 +17,7 @@
       50.252662658691406
     ],
     "sample_fnv64": "b2f043690b9e9f11",
-    "modified_unix_ms": 1794605238846
+    "modified_unix_ms": 1794810971107
   },
   "state": {
     "stock": {
@@ -61,6 +61,35 @@
       180,
       150
     ],
-    "operations": []
+    "operations": [
+      {
+        "name": "desb plana 10 s 10",
+        "kind": "parallel_test",
+        "status": "not_calculated",
+        "tool_id": "c50f2aa0-c17c-4140-b21d-7bc8fde3fd0b",
+        "toolpath_id": null,
+        "parallel_test": {
+          "diameter": 4.0,
+          "stepover": 10.0,
+          "longitudinal": 2.0,
+          "along_x": true,
+          "allowance_mm": 10.0
+        }
+      },
+      {
+        "name": "desb plana 10 s6",
+        "kind": "parallel_test",
+        "status": "not_calculated",
+        "tool_id": "c50f2aa0-c17c-4140-b21d-7bc8fde3fd0b",
+        "toolpath_id": null,
+        "parallel_test": {
+          "diameter": 4.0,
+          "stepover": 10.0,
+          "longitudinal": 2.0,
+          "along_x": true,
+          "allowance_mm": 6.0
+        }
+      }
+    ]
   }
 }
