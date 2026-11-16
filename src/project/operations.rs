@@ -1,5 +1,6 @@
 //! Operaciones CAM: definiciones persistentes, independientes del visor y de OpenGL.
 use crate::tools::model::ToolId;
+use cam_libre_visor::toolpath::RasterPattern;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,6 +37,9 @@ pub struct ParallelTestParameters {
     /// La estrategia TEST presupone que las coordenadas del STL son milimetros.
     #[serde(default, skip_serializing_if = "allowance_is_zero")]
     pub allowance_mm: f64,
+    /// Orden de corte de las pasadas: el patrón predeterminado conserva G25.1.
+    #[serde(default, skip_serializing_if = "RasterPattern::is_unidirectional")]
+    pub pass_pattern: RasterPattern,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub area_xy: Option<TestAreaXY>,
 }
@@ -52,6 +56,7 @@ impl Default for ParallelTestParameters {
             longitudinal: 2.0,
             along_x: true,
             allowance_mm: 0.0,
+            pass_pattern: RasterPattern::Unidirectional,
             area_xy: None,
         }
     }
@@ -307,5 +312,43 @@ mod g23_allowance_tests {
             ..Default::default()
         };
         assert!(p.validate().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod g25_2_pass_pattern_tests {
+    use super::*;
+
+    #[test]
+    fn old_projects_default_to_unidirectional_without_schema_change() {
+        let params = ParallelTestParameters::default();
+        let old_json = serde_json::to_value(params).unwrap();
+        assert!(old_json.get("pass_pattern").is_none());
+        let restored: ParallelTestParameters = serde_json::from_value(old_json).unwrap();
+        assert_eq!(restored.pass_pattern, RasterPattern::Unidirectional);
+    }
+
+    #[test]
+    fn zigzag_serializes_roundtrips_and_changes_strategy_identity() {
+        let baseline = ParallelTestParameters::default();
+        let mut zigzag = baseline;
+        zigzag.pass_pattern = RasterPattern::Zigzag;
+        assert_ne!(zigzag, baseline);
+        assert_ne!(
+            OperationKind::ParallelTest(zigzag),
+            OperationKind::ParallelTest(baseline)
+        );
+        assert_eq!(zigzag.validate(), Ok(()));
+        let json = serde_json::to_value(zigzag).unwrap();
+        assert_eq!(json["pass_pattern"].as_str(), Some("zigzag"));
+        let restored: ParallelTestParameters = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.pass_pattern, RasterPattern::Zigzag);
+    }
+
+    #[test]
+    fn rejects_unknown_pass_pattern_without_silent_fallback() {
+        let mut json = serde_json::to_value(ParallelTestParameters::default()).unwrap();
+        json["pass_pattern"] = serde_json::json!("unknown");
+        assert!(serde_json::from_value::<ParallelTestParameters>(json).is_err());
     }
 }

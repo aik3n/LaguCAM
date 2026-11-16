@@ -17,6 +17,7 @@ use cam_libre_visor::cam_geometry::{
     contact_solver::{ContactQuery, ContactSolver, CutterGeometry},
     service::ContactEngineLimits,
 };
+use cam_libre_visor::toolpath::{RasterPattern, Toolpath};
 use eframe::egui;
 use glam::Vec3;
 use std::{
@@ -150,7 +151,7 @@ impl SamplingPlan {
 
 #[derive(Debug)]
 struct Outcome {
-    lines: Vec<Vec<Option<[f64; 3]>>>,
+    toolpath: Toolpath,
     contacts: usize,
     lines_count: usize,
     samples_per_line: usize,
@@ -287,8 +288,13 @@ fn compute(
     {
         return Err("El archivo STL cambio durante el calculo".into());
     }
+    // G25.1: los huecos de contacto separan segmentos; nunca se inventan enlaces.
+    let toolpath =
+        Toolpath::from_contact_grid_with_pattern(lines, MAX_POINTS, plan.params.pass_pattern)
+            .map_err(|error| format!("Error construyendo trayectoria CAM: {error}"))?;
+    debug_assert_eq!(contacts, toolpath.contact_points);
     Ok(Outcome {
-        lines,
+        toolpath,
         contacts,
         lines_count: plan.lines,
         samples_per_line: plan.samples,
@@ -470,8 +476,11 @@ impl TestParallelPanel {
             match result {
                 Ok(outcome) => {
                     self.message = format!(
-                        "{} pasadas, {} puntos por pasada, {} contactos.",
-                        outcome.lines_count, outcome.samples_per_line, outcome.contacts
+                        "{} pasadas, {} puntos por pasada, {} contactos. Recorrido: {}.",
+                        outcome.lines_count,
+                        outcome.samples_per_line,
+                        outcome.contacts,
+                        outcome.toolpath.pattern.label()
                     );
                     self.results.insert(index, outcome);
                     self.result_signatures.insert(index, job.signature.clone());
@@ -648,6 +657,21 @@ impl TestParallelPanel {
                                             ui.radio_value(&mut p.along_x, true, "Eje X");
                                             ui.radio_value(&mut p.along_x, false, "Eje Y");
                                         });
+                                        egui::ComboBox::from_label("Recorrido de pasadas")
+                                            .selected_text(p.pass_pattern.label())
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(
+                                                    &mut p.pass_pattern,
+                                                    RasterPattern::Unidirectional,
+                                                    RasterPattern::Unidirectional.label(),
+                                                );
+                                                ui.selectable_value(
+                                                    &mut p.pass_pattern,
+                                                    RasterPattern::Zigzag,
+                                                    RasterPattern::Zigzag.label(),
+                                                );
+                                            });
+                                        ui.small("Solo sentido de corte: sin entradas, enlaces, rapidos ni G-code.");
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para acceder a sus parametros.");
@@ -944,19 +968,31 @@ impl TestParallelPanel {
                 continue;
             }
             let result = &self.results[&index];
-            for (line_index, line) in result.lines.iter().enumerate() {
-                let color = if (index + line_index) % 2 == 0 {
+            // Únicamente tramos continuos de corte; sin unir pasadas ni huecos.
+            for segment in &result.toolpath.segments {
+                let color = if (index + segment.pass_index) % 2 == 0 {
                     egui::Color32::from_rgb(35, 230, 235)
                 } else {
                     egui::Color32::from_rgb(255, 195, 65)
                 };
                 let mut previous = None;
-                for item in line {
-                    let next = (*item).and_then(&project);
+                let mut direction_mark = None;
+                for &position in &segment.points {
+                    let next = project(position);
                     if let (Some(a), Some(b)) = (previous, next) {
                         painter.line_segment([a, b], egui::Stroke::new(1.8, color));
+                        let vector = b - a;
+                        if direction_mark.is_none() && vector.length_sq() > 144.0 {
+                            direction_mark = Some((a, vector));
+                        }
                     }
                     previous = next;
+                }
+                // Marcador de sentido sobre un tramo de corte visible; no es un enlace.
+                if let Some((a, vector)) = direction_mark {
+                    let direction = vector.normalized() * 10.0;
+                    let middle = a + vector * 0.5;
+                    painter.arrow(middle - direction, direction, egui::Stroke::new(1.6, color));
                 }
             }
         }
@@ -994,6 +1030,7 @@ mod tests {
                 longitudinal: 3.0,
                 along_x: true,
                 allowance_mm: 0.0,
+                pass_pattern: RasterPattern::Unidirectional,
                 area_xy: None,
             },
         )
@@ -1014,6 +1051,7 @@ mod tests {
                 longitudinal: 3.0,
                 along_x: false,
                 allowance_mm: 0.0,
+                pass_pattern: RasterPattern::Unidirectional,
                 area_xy: None,
             },
         )
@@ -1227,7 +1265,7 @@ mod g20_library_sync_tests {
         panel.results.insert(
             index,
             Outcome {
-                lines: vec![],
+                toolpath: Toolpath::default(),
                 contacts: 0,
                 lines_count: 0,
                 samples_per_line: 0,
@@ -1347,13 +1385,135 @@ mod g23_operation_to_solver_tests {
                 &AtomicUsize::new(0),
             )
             .unwrap();
-            let nominal_z = original.lines[0][0].unwrap()[2];
-            let roughing_z = roughing.lines[0][0].unwrap()[2];
+            // El mismo contacto debe atravesar la conversión a G25.1 sin cambiar Z.
+            let nominal_z = original.toolpath.segments[0].points[0][2];
+            let roughing_z = roughing.toolpath.segments[0].points[0][2];
+            assert_eq!(roughing.toolpath.raster_passes, roughing.lines_count);
+            assert_eq!(
+                roughing.toolpath.samples_per_pass,
+                roughing.samples_per_line
+            );
             assert!((nominal_z - 5.0).abs() < 1.0e-10, "{cutter:?}: {nominal_z}");
             assert!(
                 (roughing_z - 7.0).abs() < 1.0e-10,
                 "{cutter:?}: {roughing_z}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod g25_2_pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn sampling_preserves_same_xy_and_contact_query_for_both_patterns() {
+        let area = Bounds {
+            min: [5.0, 5.0, 0.0],
+            max: [15.0, 15.0, 10.0],
+        };
+        let mut params = Parameters {
+            diameter: 4.0,
+            longitudinal: 10.0,
+            stepover: 10.0,
+            ..Default::default()
+        };
+        let nominal = SamplingPlan::new(area, params).unwrap();
+        params.pass_pattern = RasterPattern::Zigzag;
+        let zigzag = SamplingPlan::new(area, params).unwrap();
+        let cutter = CutterGeometry::Flat {
+            diameter_model: 4.0,
+        };
+        for line in 0..2 {
+            for sample in 0..2 {
+                assert_eq!(nominal.xy(line, sample), zigzag.xy(line, sample));
+                let a = nominal.contact_query(line, sample, cutter);
+                let b = zigzag.contact_query(line, sample, cutter);
+                assert_eq!(a.x_model.to_bits(), b.x_model.to_bits());
+                assert_eq!(a.y_model.to_bits(), b.y_model.to_bits());
+                assert_eq!(a.allowance_model.to_bits(), b.allowance_model.to_bits());
+                assert_eq!(a.cutter, b.cutter);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn real_solver_preserves_contact_heights_but_reverses_second_pass() {
+        // Triangulo horizontal grande: las cuatro consultas tienen contacto.
+        let mut bytes = vec![0u8; 80];
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&[0u8; 12]);
+        for p in [[0.0f32, 0.0, 5.0], [100.0, 0.0, 5.0], [0.0, 100.0, 5.0]] {
+            for v in p {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        bytes.extend_from_slice(&[0u8; 2]);
+        let path = std::env::temp_dir().join(format!("lagucam-g25-2-{}.stl", uuid::Uuid::new_v4()));
+        std::fs::write(&path, &bytes).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(path.clone());
+
+        let bounds = Bounds {
+            min: [5.0, 5.0, 5.0],
+            max: [15.0, 15.0, 5.0],
+        };
+        let mut params = Parameters {
+            diameter: 4.0,
+            longitudinal: 10.0,
+            stepover: 10.0,
+            ..Default::default()
+        };
+        let cutter = CutterGeometry::Flat {
+            diameter_model: 4.0,
+        };
+        let cancel = AtomicBool::new(false);
+        let normal = compute(
+            &path,
+            bytes.len() as u64,
+            1,
+            &SamplingPlan::new(bounds, params).unwrap(),
+            cutter,
+            &cancel,
+            &AtomicUsize::new(0),
+        )
+        .unwrap();
+        params.pass_pattern = RasterPattern::Zigzag;
+        let alternating = compute(
+            &path,
+            bytes.len() as u64,
+            1,
+            &SamplingPlan::new(bounds, params).unwrap(),
+            cutter,
+            &cancel,
+            &AtomicUsize::new(0),
+        )
+        .unwrap();
+        assert_eq!(normal.contacts, alternating.contacts);
+        assert_eq!(normal.contacts, 4);
+        assert_eq!(normal.toolpath.segments.len(), 2);
+        assert_eq!(alternating.toolpath.segments.len(), 2);
+        assert_eq!(
+            normal.toolpath.segments[0].points,
+            alternating.toolpath.segments[0].points
+        );
+        let forward = &normal.toolpath.segments[1].points;
+        let backwards = &alternating.toolpath.segments[1].points;
+        assert_eq!(
+            backwards,
+            &forward.iter().copied().rev().collect::<Vec<_>>()
+        );
+        assert_eq!(alternating.toolpath.segments[1].first_sample, 1);
+        assert!(
+            backwards
+                .iter()
+                .all(|p| p[2].to_bits() == 5.0_f64.to_bits())
+        );
     }
 }
