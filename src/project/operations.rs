@@ -172,8 +172,10 @@ mod tests {
     #[test]
     fn parallel_parameters_default_and_invalid_values() {
         assert!(ParallelTestParameters::default().validate().is_ok());
-        let mut p = ParallelTestParameters::default();
-        p.stepover = f64::NAN;
+        let mut p = ParallelTestParameters {
+            stepover: f64::NAN,
+            ..Default::default()
+        };
         assert!(p.validate().is_err());
         p.stepover = 2.0;
         p.diameter = 0.0;
@@ -210,13 +212,15 @@ mod test_area_xy_compatibility {
 
     #[test]
     fn rejects_non_finite_or_inverted_area() {
-        let mut p = ParallelTestParameters::default();
-        p.area_xy = Some(TestAreaXY {
-            x_min: 1.0,
-            x_max: 0.0,
-            y_min: 0.0,
-            y_max: 1.0,
-        });
+        let mut p = ParallelTestParameters {
+            area_xy: Some(TestAreaXY {
+                x_min: 1.0,
+                x_max: 0.0,
+                y_min: 0.0,
+                y_max: 1.0,
+            }),
+            ..Default::default()
+        };
         assert!(p.validate().is_err());
         p.area_xy = Some(TestAreaXY {
             x_min: 0.0,
@@ -292,12 +296,16 @@ mod g23_allowance_tests {
             f64::NEG_INFINITY,
             1_000_001.0,
         ] {
-            let mut p = ParallelTestParameters::default();
-            p.allowance_mm = bad;
+            let p = ParallelTestParameters {
+                allowance_mm: bad,
+                ..Default::default()
+            };
             assert!(p.validate().is_err(), "Invalid allowance accepted: {bad:?}");
         }
-        let mut p = ParallelTestParameters::default();
-        p.allowance_mm = 1_000_000.0;
+        let p = ParallelTestParameters {
+            allowance_mm: 1_000_000.0,
+            ..Default::default()
+        };
         assert!(p.validate().is_ok());
     }
 }

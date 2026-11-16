@@ -9,14 +9,7 @@ pub enum Projection {
     Orthographic,
 }
 
-impl Projection {
-    pub const fn toggle(self) -> Self {
-        match self {
-            Self::Perspective => Self::Orthographic,
-            Self::Orthographic => Self::Perspective,
-        }
-    }
-}
+// Los modos de proyeccion se seleccionan directamente en el visor.
 
 // Vista superior sobre los ejes del MODELO: +X derecha, +Y arriba.
 // Solo cambia la camara; no transforma el STL ni el sistema CNC.
@@ -325,8 +318,6 @@ mod tests {
             point,
         );
         assert!((perspective - orthographic).length() < 0.00001);
-        assert_eq!(Projection::Perspective.toggle(), Projection::Orthographic);
-        assert_eq!(Projection::Orthographic.toggle(), Projection::Perspective);
     }
 
     #[test]

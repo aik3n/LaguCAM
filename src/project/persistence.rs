@@ -600,7 +600,7 @@ where
 }
 
 #[cfg(windows)]
-fn replace_file(tmp: &Path, target: &Path, stamp: u128) -> Result<(), String> {
+fn replace_file(tmp: &Path, target: &Path, _stamp: u128) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     #[link(name = "Kernel32")]
     unsafe extern "system" {
@@ -617,7 +617,6 @@ fn replace_file(tmp: &Path, target: &Path, stamp: u128) -> Result<(), String> {
     if !target.exists() {
         return fs::rename(tmp, target).map_err(|e| e.to_string());
     }
-    let backup = target.with_extension(format!("lagucam.recovery.{stamp}.bak"));
     let wide = |path: &Path| {
         path.as_os_str()
             .encode_wide()
@@ -626,13 +625,12 @@ fn replace_file(tmp: &Path, target: &Path, stamp: u128) -> Result<(), String> {
     };
     let old = wide(target);
     let new = wide(tmp);
-    let bak = wide(&backup);
     // SAFETY: punteros UTF-16 terminados en cero; buffers viven durante la llamada síncrona.
     if unsafe {
         replace_file_w(
             old.as_ptr(),
             new.as_ptr(),
-            bak.as_ptr(),
+            std::ptr::null(),
             0,
             std::ptr::null(),
             std::ptr::null(),
@@ -850,6 +848,22 @@ mod tests {
         doc.state.origin.offset[0] = f64::NAN;
         assert!(write_project(&file, &doc).is_err());
         assert_eq!(fs::read(&file).unwrap(), b"{broken");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn repeated_saves_replace_project_without_recovery_files() {
+        let dir = workspace();
+        let file = dir.join("repeated.lagucam");
+        let mut doc = ProjectDocument::from_project(&Project::default(), None, &file).unwrap();
+        write_project(&file, &doc).unwrap();
+        doc.state.model_color = [7, 11, 13];
+        write_project(&file, &doc).unwrap();
+        assert_eq!(read_project(&file).unwrap(), doc);
+        let files: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(files, vec![std::ffi::OsString::from("repeated.lagucam")]);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

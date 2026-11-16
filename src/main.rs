@@ -9,6 +9,7 @@ mod portable;
 mod preview;
 mod project;
 mod project_ui;
+mod recent_projects;
 mod render;
 mod sample_direct;
 mod sample_overlay;
@@ -47,10 +48,11 @@ struct OpeningProject {
     warning: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum FileAction {
     New,
     OpenProject,
+    OpenRecent(PathBuf),
     OpenStl,
     Exit,
 }
@@ -151,6 +153,7 @@ struct App {
     tool_ui: tools_ui::ToolUi,
     test_parallel: test_parallel::TestParallelPanel,
     project_path: Option<PathBuf>,
+    recent_projects: recent_projects::RecentProjects,
     current_stl_path: Option<PathBuf>,
     pending_stl_path: Option<PathBuf>,
     opening_project: Option<OpeningProject>,
@@ -211,6 +214,7 @@ impl App {
             tool_ui: tools_ui::ToolUi::new(tool_error),
             test_parallel: test_parallel::TestParallelPanel::default(),
             project_path: None,
+            recent_projects: recent_projects::RecentProjects::load(),
             current_stl_path: None,
             pending_stl_path: None,
             opening_project: None,
@@ -339,13 +343,18 @@ impl App {
                     } else {
                         Some(persistence::ProjectState::capture(&self.project))
                     };
-                    self.project_path = Some(opening.path);
+                    self.project_path = Some(opening.path.clone());
                     self.message = match opening.warning {
                         Some(warning) => {
                             format!("Proyecto recuperado: {}. {warning}", self.filename)
                         }
                         None => format!("Proyecto recuperado correctamente: {}", self.filename),
                     };
+                    // UI-07: el historial solo cambia al finalizar la carga real en GPU.
+                    if let Err(error) = self.recent_projects.record(&opening.path) {
+                        self.message
+                            .push_str(&format!(" Aviso: recientes no actualizado: {error}"));
+                    }
                 } else {
                     self.project.loaded(self.filename.clone(), success.info);
                     self.project_path = None;
@@ -571,6 +580,7 @@ impl App {
                 self.center_view();
             }
             FileAction::OpenProject => self.open_project_dialog(ctx),
+            FileAction::OpenRecent(path) => self.open_project_path(path, ctx),
             FileAction::OpenStl => self.file_dialog_raw(ctx),
             FileAction::Exit => {
                 self.exit_approved = true;
@@ -627,6 +637,10 @@ impl App {
                 self.project_path = Some(target.clone());
                 self.saved_state = Some(persistence::ProjectState::capture(&self.project));
                 self.message = format!("Proyecto guardado: {}", target.display());
+                if let Err(error) = self.recent_projects.record(&target) {
+                    self.message
+                        .push_str(&format!(" Aviso: recientes no actualizado: {error}"));
+                }
                 true
             }
             Err(error) => {
@@ -643,6 +657,10 @@ impl App {
         else {
             return;
         };
+        self.open_project_path(path, ctx);
+    }
+
+    fn open_project_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let result = (|| -> Result<(), String> {
             let doc = persistence::read_project(&path)?;
             let Some(mut stl_path) = doc.resolve_stl(&path) else {
@@ -659,6 +677,10 @@ impl App {
                 self.filename = "Ningún STL abierto".into();
                 self.property_error.clear();
                 self.message = format!("Proyecto abierto: {}", path.display());
+                if let Err(error) = self.recent_projects.record(&path) {
+                    self.message
+                        .push_str(&format!(" Aviso: recientes no actualizado: {error}"));
+                }
                 return Ok(());
             };
             // Si la referencia se perdió o difiere, no importar un STL equivocado.
@@ -783,6 +805,70 @@ impl App {
                     ui.close();
                     self.save_project(true);
                 }
+                if !self.recent_projects.entries().is_empty() {
+                    ui.separator();
+                    // UI-07b: papelera vectorial junto al encabezado de recientes.
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("PROYECTOS RECIENTES").small().weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let clear = ui
+                                .add_enabled(
+                                    enabled,
+                                    egui::Button::new("")
+                                        .min_size(egui::vec2(23.0, 21.0))
+                                        .frame(false),
+                                )
+                                .on_hover_text("Limpiar historial de proyectos recientes");
+
+                            let center = clear.rect.center();
+                            let color = if !enabled {
+                                ui.visuals().widgets.noninteractive.fg_stroke.color
+                            } else if clear.hovered() {
+                                ui.visuals().widgets.hovered.fg_stroke.color
+                            } else {
+                                ui.visuals().widgets.inactive.fg_stroke.color
+                            };
+                            let stroke = egui::Stroke::new(1.4, color);
+                            let point = |x: f32, y: f32| center + egui::vec2(x, y);
+                            let painter = ui.painter();
+                            painter.line_segment([point(-5.0, -4.5), point(5.0, -4.5)], stroke);
+                            painter.line_segment([point(-2.0, -6.0), point(2.0, -6.0)], stroke);
+                            painter.line_segment([point(-4.0, -2.7), point(-3.0, 5.5)], stroke);
+                            painter.line_segment([point(4.0, -2.7), point(3.0, 5.5)], stroke);
+                            painter.line_segment([point(-3.0, 5.5), point(3.0, 5.5)], stroke);
+                            painter.line_segment([point(-1.2, -2.0), point(-1.2, 3.7)], stroke);
+                            painter.line_segment([point(1.2, -2.0), point(1.2, 3.7)], stroke);
+
+                            if clear.clicked() {
+                                ui.close();
+                                if let Err(error) = self.recent_projects.clear() {
+                                    self.message = format!("ERROR al limpiar recientes: {error}");
+                                }
+                            }
+                        });
+                    });
+                    // Copiar rutas evita retener una referencia al estado al lanzar la acción.
+                    for path in self.recent_projects.entries().to_vec() {
+                        let exists = path.is_file();
+                        let name = path.file_name().map_or_else(
+                            || path.display().to_string(),
+                            |name| name.to_string_lossy().into_owned(),
+                        );
+                        let label = if exists { name } else { format!("{name} (no encontrado)") };
+                        if ui
+                            .add_enabled(enabled && exists, egui::Button::new(label))
+                            .on_hover_text(path.display().to_string())
+                            .clicked()
+                        {
+                            ui.close();
+                            self.request_action(FileAction::OpenRecent(path), ui.ctx().clone());
+                        }
+                    }
+                }
+                if let Some(error) = self.recent_projects.error() {
+                    ui.label(egui::RichText::new("Aviso: historial no disponible").small().weak())
+                        .on_hover_text(error);
+                }
                 ui.separator();
                 if ui
                     .add_enabled(enabled, egui::Button::new("Abrir STL…"))
@@ -821,9 +907,9 @@ impl App {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("Secciones reales LaguCAM", &["csv"])
                         .pick_file()
+                        && let Some(model) = self.project.model.as_ref()
                     {
-                        if let Some(model) = self.project.model.as_ref() {
-                            match section_overlay::Sections::load(&path, model) {
+                        match section_overlay::Sections::load(&path, model) {
                                 Ok(sections) => {
                                     let count = sections.piece_count();
                                     self.sample_profile_job = None;
@@ -835,7 +921,6 @@ impl App {
                                 }
                                 Err(error) => self.message = format!("ERROR: {error}"),
                             }
-                        }
                     }
                 }
                 if ui.add_enabled(self.section_profiles.is_some(),

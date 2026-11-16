@@ -7,7 +7,10 @@ use std::{
 use uuid::Uuid;
 
 fn path_for(executable: &Path, file: &str) -> Result<PathBuf, String> {
-    if !matches!(file, "settings.json" | "panels.json" | "tools.json") {
+    if !matches!(
+        file,
+        "settings.json" | "panels.json" | "tools.json" | "recent_projects.json"
+    ) {
         return Err("Nombre de configuración no permitido".into());
     }
     let parent = executable
@@ -97,7 +100,12 @@ mod tests {
     #[test]
     fn files_share_a_portable_config_directory() {
         let executable = Path::new("LaguCAM").join("LaguCAM.exe");
-        for name in ["settings.json", "panels.json", "tools.json"] {
+        for name in [
+            "settings.json",
+            "panels.json",
+            "tools.json",
+            "recent_projects.json",
+        ] {
             assert_eq!(
                 path_for(&executable, name).unwrap(),
                 Path::new("LaguCAM").join("config").join(name)

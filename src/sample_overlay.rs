@@ -52,7 +52,7 @@ impl Profiles {
         }
         let mut passes: [Vec<Option<[f64; 3]>>; PASSES] =
             std::array::from_fn(|_| Vec::with_capacity(SAMPLES_PER_PASS));
-        for pass in 0..PASSES {
+        for (pass, samples) in passes.iter_mut().enumerate() {
             for point in 0..SAMPLES_PER_PASS {
                 let line = lines.next().ok_or("CSV incompleto: faltan puntos")?;
                 let fields: Vec<&str> = line.trim_end_matches('\r').split(',').collect();
@@ -86,7 +86,7 @@ impl Profiles {
                     "no" if fields[4].is_empty() => None,
                     _ => return Err("Columna de contacto incoherente".into()),
                 };
-                passes[pass].push(sample);
+                samples.push(sample);
             }
         }
         if lines.any(|line| !line.trim().is_empty()) {
@@ -100,6 +100,10 @@ impl Profiles {
 
     /// Dibuja por delante de la escena; no hace prueba de profundidad (visualización de rayos X).
     /// El Z representa la punta de la fresa esférica, NO necesariamente la superficie del STL.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Contrato de render existente: camara y contexto explicitos; no modificar la geometria"
+    )]
     pub fn paint(
         &self,
         ui: &egui::Ui,

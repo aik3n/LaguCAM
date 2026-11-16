@@ -220,10 +220,9 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
                             egui::Button::new("+ Nueva operación"),
                         )
                         .double_clicked()
+                        && let Ok(index) = project.operations.add_new()
                     {
-                        if let Ok(index) = project.operations.add_new() {
-                            project.selection = Selection::Operation(index);
-                        }
+                        project.selection = Selection::Operation(index);
                     }
                 });
             });

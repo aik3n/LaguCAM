@@ -739,6 +739,10 @@ impl FileBvh {
 
 // Se leen bloques próximos en disco, pero las alturas se combinan en el
 // orden original del recorrido BVH, conservando su resultado bit a bit.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Contrato G15: referencias de cache, estadisticas y cancelacion se mantienen explicitas"
+)]
 fn g15_process_batch(
     source: &mut File,
     total_records: usize,
@@ -1232,7 +1236,7 @@ impl FileBvh {
             // La partición std no admite cancelación en su interior.
             // Comprobamos periódicamente después de particiones. No se puede
             // interrumpir una partición individual con esta API.
-            if stats.partitions % 16384 == 0 {
+            if stats.partitions.is_multiple_of(16384) {
                 control.check_g17(cancel)?;
                 stats.cancel_checks += 1;
             }

@@ -802,13 +802,11 @@ impl TestParallelPanel {
             return;
         }
 
-        if cancel_job {
-            if let Some((_, job)) = &self.active_job {
-                job.cancel.store(true, Ordering::Relaxed);
-                self.cancelling = true;
-                self.results.remove(&index);
-                self.message = "Cancelacion solicitada...".into();
-            }
+        if cancel_job && let Some((_, job)) = &self.active_job {
+            job.cancel.store(true, Ordering::Relaxed);
+            self.cancelling = true;
+            self.results.remove(&index);
+            self.message = "Cancelacion solicitada...".into();
         }
         if accept || generate {
             if draft.visible {
@@ -893,6 +891,10 @@ impl TestParallelPanel {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Contrato de render existente: camara y contexto explicitos; no modificar la geometria"
+    )]
     pub fn paint(
         &self,
         ui: &egui::Ui,
@@ -1023,8 +1025,10 @@ mod tests {
 
     #[test]
     fn invalid_or_excessive_parameters_are_rejected() {
-        let mut params = Parameters::default();
-        params.longitudinal = 0.00001;
+        let mut params = Parameters {
+            longitudinal: 0.00001,
+            ..Default::default()
+        };
         assert!(SamplingPlan::new(bounds(), params).is_err());
         params.longitudinal = 2.0;
         params.stepover = f64::NAN;
@@ -1064,15 +1068,17 @@ mod test_area_xy_sampling {
 
     #[test]
     fn limited_area_uses_exact_new_boundaries() {
-        let mut p = Parameters::default();
-        p.area_xy = Some(TestAreaXY {
-            x_min: 2.0,
-            x_max: 7.0,
-            y_min: 12.0,
-            y_max: 15.0,
-        });
-        p.stepover = 4.0;
-        p.longitudinal = 3.0;
+        let p = Parameters {
+            area_xy: Some(TestAreaXY {
+                x_min: 2.0,
+                x_max: 7.0,
+                y_min: 12.0,
+                y_max: 15.0,
+            }),
+            stepover: 4.0,
+            longitudinal: 3.0,
+            ..Default::default()
+        };
         let plan = SamplingPlan::new(
             Bounds {
                 min: [0.0, 10.0, -4.0],
@@ -1088,13 +1094,15 @@ mod test_area_xy_sampling {
 
     #[test]
     fn area_outside_stl_is_not_silently_clipped() {
-        let mut p = Parameters::default();
-        p.area_xy = Some(TestAreaXY {
-            x_min: -1.0,
-            x_max: 7.0,
-            y_min: 12.0,
-            y_max: 15.0,
-        });
+        let p = Parameters {
+            area_xy: Some(TestAreaXY {
+                x_min: -1.0,
+                x_max: 7.0,
+                y_min: 12.0,
+                y_max: 15.0,
+            }),
+            ..Default::default()
+        };
         assert!(
             SamplingPlan::new(
                 Bounds {
@@ -1141,8 +1149,10 @@ mod operation_editor_tabs_tests {
         assert!(draft.validate().is_err());
         draft.name = "Operacion A".into();
         assert!(draft.validate().is_ok());
-        let mut p = Parameters::default();
-        p.stepover = -1.0;
+        let p = Parameters {
+            stepover: -1.0,
+            ..Default::default()
+        };
         draft.kind = OperationKind::ParallelTest(p);
         assert!(draft.validate().is_err());
     }
@@ -1257,8 +1267,10 @@ mod g23_operation_to_solver_tests {
             min: [5.0, 5.0, 0.0],
             max: [10.0, 10.0, 10.0],
         };
-        let mut params = Parameters::default();
-        params.allowance_mm = 2.5;
+        let params = Parameters {
+            allowance_mm: 2.5,
+            ..Default::default()
+        };
         let plan = SamplingPlan::new(bounds, params).unwrap();
         let cutter = CutterGeometry::Flat {
             diameter_model: 12.0,
@@ -1305,11 +1317,13 @@ mod g23_operation_to_solver_tests {
                 diameter_model: 4.0,
             },
         ] {
-            let mut params = Parameters::default();
-            params.diameter = 4.0;
-            params.stepover = 5.0;
-            params.longitudinal = 5.0;
-            params.allowance_mm = 0.0;
+            let mut params = Parameters {
+                diameter: 4.0,
+                stepover: 5.0,
+                longitudinal: 5.0,
+                allowance_mm: 0.0,
+                ..Default::default()
+            };
             let nominal_plan = SamplingPlan::new(bounds, params).unwrap();
             let original = compute(
                 &file,

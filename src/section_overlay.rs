@@ -143,6 +143,10 @@ impl Sections {
 
     /// Superposicion 2D proyectada sobre la camara. No utiliza profundidad;
     /// las secciones detras del relieve tambien son visibles (modo rayos X).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Contrato de render existente: camara y contexto explicitos; no modificar la geometria"
+    )]
     pub fn paint(
         &self,
         ui: &egui::Ui,

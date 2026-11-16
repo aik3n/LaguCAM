@@ -152,6 +152,10 @@ void main() {
         self.error.take()
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Contrato de render existente: camara y contexto explicitos; no modificar la geometria"
+    )]
     pub fn paint(
         &mut self,
         gl: &glow::Context,
