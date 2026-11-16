@@ -482,6 +482,17 @@ impl App {
         }
     }
 
+    fn top_view(&mut self) {
+        // Mantener el centro de navegacion y el zoom actuales.
+        self.yaw = navigation::TOP_VIEW_YAW;
+        self.pitch = navigation::TOP_VIEW_PITCH;
+        self.projection = navigation::Projection::Orthographic;
+        // Descartar un picking pendiente de la orientacion anterior.
+        self.pending_pick = None;
+        *self.pick_result.lock() = None;
+        self.pivot_press = PivotPress::default();
+    }
+
     fn center_view(&mut self) {
         self.yaw = 45f32.to_radians();
         self.pitch = 35f32.to_radians();
@@ -495,7 +506,9 @@ impl App {
 
     fn orbit_by(&mut self, drag: egui::Vec2) {
         let next_yaw = self.yaw - drag.x * 0.008;
-        let next_pitch = (self.pitch + drag.y * 0.008).clamp(-1.45, 1.45);
+        // Admitir +/-90 grados sin saltar a 83 grados en el primer arrastre.
+        let next_pitch = (self.pitch + drag.y * 0.008)
+            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
         if let Some(pivot) = self.orbit_pivot {
             self.pan = navigation::orbit_target_around_pivot(
                 self.pan, pivot, self.yaw, self.pitch, next_yaw, next_pitch,
@@ -891,6 +904,11 @@ impl App {
                 ui.separator();
                 });
                 ui.separator();
+                if ui.button("Vista superior (+Z)").clicked() {
+                    self.top_view();
+                    ui.ctx().request_repaint();
+                    ui.close();
+                }
                 if ui.button("Centrar vista").clicked() {
                     self.center_view();
                     ui.ctx().request_repaint();
@@ -992,13 +1010,9 @@ impl App {
         }
         if bindings.pan_dragged(&response) {
             let drag = response.drag_motion();
-            let direction = glam::Vec3::new(
-                self.pitch.cos() * self.yaw.cos(),
-                self.pitch.cos() * self.yaw.sin(),
-                self.pitch.sin(),
-            );
-            let right = glam::Vec3::Z.cross(direction).normalize();
-            let up = direction.cross(right);
+            // Usar la misma base que la proyeccion y el zoom:
+            // Z x direccion se anula en una vista superior exacta.
+            let (right, up, _) = navigation::camera_axes(self.yaw, self.pitch);
             let distance = render::fit_distance(rect.width() / rect.height()) * self.distance;
             let units = 2.0 * distance * (22.5f32.to_radians()).tan() / rect.height();
             self.pan += (-right * drag.x + up * drag.y) * units;

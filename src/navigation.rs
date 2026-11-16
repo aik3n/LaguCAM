@@ -18,6 +18,11 @@ impl Projection {
     }
 }
 
+// Vista superior sobre los ejes del MODELO: +X derecha, +Y arriba.
+// Solo cambia la camara; no transforma el STL ni el sistema CNC.
+pub const TOP_VIEW_YAW: f32 = -std::f32::consts::FRAC_PI_2;
+pub const TOP_VIEW_PITCH: f32 = std::f32::consts::FRAC_PI_2;
+
 /// Distancia que encuadra el cubo visual normalizado [-1, 1]^3.
 pub fn fit_distance(aspect: f32) -> f32 {
     let vertical = 22.5_f32.to_radians();
@@ -54,7 +59,10 @@ pub fn view_projection_mode(
             distance * pitch.cos() * yaw.sin(),
             distance * pitch.sin(),
         );
-    let view = Mat4::look_at_rh(eye, target, Vec3::Z);
+    // La base de camara mantiene el eje vertical bien definido incluso
+    // cuando la direccion de vision es paralela a Z (vista superior exacta).
+    let (_, up, _) = camera_axes(yaw, pitch);
+    let view = Mat4::look_at_rh(eye, target, up);
     let far = (distance + target.length() + 10.0).max(100.0);
     let proj = match projection {
         Projection::Perspective => {
@@ -123,7 +131,7 @@ pub fn unproject_depth(
 /// hasta que exista un arrastre del usuario.
 /// Se rota el sistema ortonormal completo de la camara, por lo que el pivote
 /// conserva sus coordenadas de pantalla al cambiar yaw y pitch.
-fn camera_axes(yaw: f32, pitch: f32) -> (Vec3, Vec3, Vec3) {
+pub(crate) fn camera_axes(yaw: f32, pitch: f32) -> (Vec3, Vec3, Vec3) {
     let (sy, cy) = yaw.sin_cos();
     let (sp, cp) = pitch.sin_cos();
     (
@@ -319,5 +327,58 @@ mod tests {
         assert!((perspective - orthographic).length() < 0.00001);
         assert_eq!(Projection::Perspective.toggle(), Projection::Orthographic);
         assert_eq!(Projection::Orthographic.toggle(), Projection::Perspective);
+    }
+
+    #[test]
+    fn top_view_has_exact_model_xy_screen_orientation() {
+        // Vista desde +Z hacia -Z: X a la derecha e Y hacia arriba.
+        let target = Vec3::new(0.2, -0.3, 0.1);
+        let mvp = view_projection_mode(
+            TOP_VIEW_YAW,
+            TOP_VIEW_PITCH,
+            0.73,
+            1.6,
+            target,
+            Projection::Orthographic,
+        );
+        assert!(mvp.is_finite());
+        let origin = screen_xy(mvp, target);
+        let x = screen_xy(mvp, target + Vec3::X * 0.25);
+        let y = screen_xy(mvp, target + Vec3::Y * 0.25);
+        let z = screen_xy(mvp, target + Vec3::Z * 0.25);
+        assert!(origin.length() < 1e-5);
+        assert!(x.x > origin.x);
+        assert!(y.y > origin.y);
+        assert!((x.y - origin.y).abs() < 1e-5);
+        assert!((y.x - origin.x).abs() < 1e-5);
+        assert!((z - origin).length() < 1e-5);
+    }
+
+    #[test]
+    fn top_view_basis_is_finite_and_continuous_on_first_orbit() {
+        let (right, up, back) = camera_axes(TOP_VIEW_YAW, TOP_VIEW_PITCH);
+        assert!((right - Vec3::X).length() < 1e-5);
+        assert!((up - Vec3::Y).length() < 1e-5);
+        assert!((back - Vec3::Z).length() < 1e-5);
+        let target = Vec3::ZERO;
+        let point = Vec3::new(0.3, 0.2, 0.1);
+        let exact = view_projection_mode(
+            TOP_VIEW_YAW,
+            TOP_VIEW_PITCH,
+            0.8,
+            1.5,
+            target,
+            Projection::Orthographic,
+        );
+        let slightly_tilted = view_projection_mode(
+            TOP_VIEW_YAW,
+            TOP_VIEW_PITCH - 0.00001,
+            0.8,
+            1.5,
+            target,
+            Projection::Orthographic,
+        );
+        assert!(slightly_tilted.is_finite());
+        assert!((screen_xy(exact, point) - screen_xy(slightly_tilted, point)).length() < 1e-4);
     }
 }
