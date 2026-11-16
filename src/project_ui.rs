@@ -19,8 +19,12 @@ enum TreeIcon {
 }
 
 fn paint_tree_icon(ui: &egui::Ui, rect: egui::Rect, icon: TreeIcon, header: bool, selected: bool) {
-    let x = if header { 27.0 } else { 9.0 };
-    let center = egui::pos2(rect.left() + x, rect.center().y);
+    let center = if header {
+        // La cabecera coloca el icono en un rectangulo propio, sin espacios de texto.
+        rect.center()
+    } else {
+        egui::pos2(rect.left() + 9.0, rect.center().y)
+    };
     let color = if selected {
         ui.visuals().selection.stroke.color
     } else {
@@ -100,6 +104,23 @@ fn icon_selectable_label(
     paint_tree_icon(ui, response.rect, icon, false, selected);
     response
 }
+// Cabeceras: 16 puntos de ancho para el icono de 12 puntos.
+// El dibujo deja 2 puntos libres dentro del rectangulo por la derecha:
+// 6 puntos de espaciado de egui + 2 internos = 8 puntos visuales.
+// El espaciado no depende de la fuente, del tema ni de espacios en el texto.
+fn tree_header_label(ui: &mut egui::Ui, icon: TreeIcon, title: &str) -> bool {
+    ui.spacing_mut().item_spacing.x = 6.0;
+    let height = ui.spacing().interact_size.y;
+    let (icon_rect, icon_response) =
+        ui.allocate_exact_size(egui::vec2(16.0, height), egui::Sense::click());
+    paint_tree_icon(ui, icon_rect, icon, true, false);
+    let title_response = ui.add(
+        egui::Label::new(egui::RichText::new(title).text_style(egui::TextStyle::Button))
+            .sense(egui::Sense::click()),
+    );
+    icon_response.clicked() || title_response.clicked()
+}
+
 #[derive(Default)]
 pub struct OperationTreeActions {
     pub edit: Option<usize>,
@@ -108,9 +129,22 @@ pub struct OperationTreeActions {
 pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
     let mut actions = OperationTreeActions::default();
     ui.separator();
-    let root_header = egui::CollapsingHeader::new("      LaguCAM")
-        .default_open(true)
-        .show(ui, |ui| {
+    ui.vertical(|ui| {
+        // Se mantiene el ID anterior para conservar el estado abierto/cerrado.
+        let root_id = ui.make_persistent_id("       LaguCAM");
+        let mut root_clicked = false;
+        let mut root_header = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            root_id,
+            true,
+        )
+        .show_header(ui, |ui| {
+            root_clicked = tree_header_label(ui, TreeIcon::Project, "LaguCAM");
+        });
+        if root_clicked {
+            root_header.toggle();
+        }
+        root_header.body(|ui| {
             let name = project
                 .model
                 .as_ref()
@@ -145,53 +179,56 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
             {
                 project.selection = Selection::Origin;
             }
-            let group_header = ui.collapsing("      Operaciones", |ui| {
-                if project.operations.items.is_empty() {
-                    ui.label("(vacía)");
-                }
-                for (i, op) in project.operations.items.iter().enumerate() {
-                    let response = icon_selectable_label(
-                        ui,
-                        project.selection == Selection::Operation(i),
-                        &op.name,
-                        TreeIcon::Operation,
-                    );
-                    if response.clicked() {
-                        project.selection = Selection::Operation(i);
-                    }
-                    if response.double_clicked() {
-                        actions.edit = Some(i);
-                    }
-                }
-                // La accion de crear siempre queda debajo de las operaciones existentes.
-                let count = project.operations.items.len();
-                if ui
-                    .add_enabled(
-                        project.model.is_some() && count < 32,
-                        egui::Button::new("+ Nueva operación"),
+            ui.vertical(|ui| {
+                let group_id = ui.make_persistent_id("       Operaciones");
+                let mut group_clicked = false;
+                let mut group_header =
+                    egui::collapsing_header::CollapsingState::load_with_default_open(
+                        ui.ctx(),
+                        group_id,
+                        false,
                     )
-                    .double_clicked()
-                {
-                    if let Ok(index) = project.operations.add_new() {
-                        project.selection = Selection::Operation(index);
-                    }
+                    .show_header(ui, |ui| {
+                        group_clicked = tree_header_label(ui, TreeIcon::Operations, "Operaciones");
+                    });
+                if group_clicked {
+                    group_header.toggle();
                 }
+                group_header.body(|ui| {
+                    if project.operations.items.is_empty() {
+                        ui.label("(vacía)");
+                    }
+                    for (i, op) in project.operations.items.iter().enumerate() {
+                        let response = icon_selectable_label(
+                            ui,
+                            project.selection == Selection::Operation(i),
+                            &op.name,
+                            TreeIcon::Operation,
+                        );
+                        if response.clicked() {
+                            project.selection = Selection::Operation(i);
+                        }
+                        if response.double_clicked() {
+                            actions.edit = Some(i);
+                        }
+                    }
+                    // La accion de crear siempre queda debajo de las operaciones existentes.
+                    let count = project.operations.items.len();
+                    if ui
+                        .add_enabled(
+                            project.model.is_some() && count < 32,
+                            egui::Button::new("+ Nueva operación"),
+                        )
+                        .double_clicked()
+                    {
+                        if let Ok(index) = project.operations.add_new() {
+                            project.selection = Selection::Operation(index);
+                        }
+                    }
+                });
             });
-            paint_tree_icon(
-                ui,
-                group_header.header_response.rect,
-                TreeIcon::Operations,
-                true,
-                false,
-            );
         });
-    paint_tree_icon(
-        ui,
-        root_header.header_response.rect,
-        TreeIcon::Project,
-        true,
-        false,
-    );
+    });
     actions
 }
 

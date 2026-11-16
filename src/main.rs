@@ -977,16 +977,15 @@ impl App {
         // Cubo visible en el visor; se oculta en superficies demasiado estrechas.
         // El selector de proyeccion permanece accesible bajo el cubo.
         let cube_rect = nav_cube::viewport_rect(rect);
-        let show_projection_control = rect.width() >= 180.0 && rect.height() >= 50.0;
-        let projection_top = if cube_rect.is_some() {
-            rect.top() + 134.0
-        } else {
-            rect.top() + 10.0
-        };
+        // V3D-06: proyeccion como dos modos excluyentes bajo el cubo.
+        // El ancho y centro coinciden con el cubo; en visores pequenos se oculta.
+        let projection_top = cube_rect.map_or(rect.top() + 10.0, |area| area.bottom() + 8.0);
         let projection_control_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.right() - 156.0, projection_top),
-            egui::vec2(144.0, 28.0),
+            egui::pos2(rect.right() - 126.0, projection_top),
+            egui::vec2(114.0, 26.0),
         );
+        let show_projection_control =
+            rect.width() >= 180.0 && projection_control_rect.bottom() <= rect.bottom() - 8.0;
         let over_projection_control = show_projection_control
             && response
                 .hover_pos()
@@ -1230,17 +1229,55 @@ impl App {
             ui.ctx().request_repaint();
         } // Dibujar despues de la escena para que el control quede delante.
         if show_projection_control {
-            let title = match self.projection {
-                navigation::Projection::Perspective => "Perspectiva ↔",
-                navigation::Projection::Orthographic => "Ortográfica ↔",
-            };
-            if ui
-                .place(projection_control_rect, egui::Button::new(title))
-                .on_hover_text("Alternar perspectiva y ortográfica. Mantiene orientación y zoom.")
-                .clicked()
+            // Ambos estados permanecen visibles; solo el activo se resalta.
+            // Se toman los colores del tema de egui (claro u oscuro).
+            let selected_background = ui.visuals().selection.bg_fill;
+            let normal_background = ui.visuals().widgets.inactive.bg_fill;
+            let selected_foreground = ui.visuals().selection.stroke.color;
+            let normal_foreground = ui.visuals().text_color();
+            let border = ui.visuals().widgets.inactive.bg_stroke.color;
+            let gap = 4.0;
+            let segment_width = (projection_control_rect.width() - gap) / 2.0;
+            for (index, (mode, label, help)) in [
+                (
+                    navigation::Projection::Perspective,
+                    "Persp",
+                    "Proyección en perspectiva. Conserva orientación y zoom.",
+                ),
+                (
+                    navigation::Projection::Orthographic,
+                    "Orto",
+                    "Proyección ortográfica. Conserva orientación y zoom.",
+                ),
+            ]
+            .into_iter()
+            .enumerate()
             {
-                self.projection = self.projection.toggle();
-                ui.ctx().request_repaint();
+                let active = self.projection == mode;
+                let segment_rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        projection_control_rect.left() + index as f32 * (segment_width + gap),
+                        projection_control_rect.top(),
+                    ),
+                    egui::vec2(segment_width, projection_control_rect.height()),
+                );
+                let text_color = if active {
+                    selected_foreground
+                } else {
+                    normal_foreground
+                };
+                let fill = if active {
+                    selected_background
+                } else {
+                    normal_background
+                };
+                let button = egui::Button::new(egui::RichText::new(label).color(text_color))
+                    .fill(fill)
+                    .stroke(egui::Stroke::new(1.0, border));
+                if ui.place(segment_rect, button).on_hover_text(help).clicked() && !active {
+                    self.projection = mode;
+                    ui.ctx().request_repaint();
+                }
             }
         }
     }
