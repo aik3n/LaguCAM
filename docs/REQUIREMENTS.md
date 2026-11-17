@@ -3,7 +3,7 @@
 > **Requisitos y criterios**, no estado vivo de implementación. Estado actualizado y SHA cubierto: [`STATUS.md`](STATUS.md).
 
 
-**Estado:** borrador vivo · **Revisión documental:** 2026-11-15. Los estados en tablas son hitos observados hasta `13a439a`; la evidencia detallada está en STATUS.
+**Estado:** requisitos vigentes · **Revisión:** 2026-11-17. Los estados son observaciones estáticas del código público hasta `5cd41c7`; la evidencia de pruebas y la distinción local/remoto están en STATUS.
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -13,7 +13,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | --- | --- | --- |
 | UI-01 | Visor tridimensional con rotación, zoom, desplazamiento y centrado | Usuario validó interacción |
 | UI-02 | Abrir STL binarios cercanos a 1 GB sin perder fluidez al navegar en el equipo de referencia | Usuario validó caso real; faltan métricas |
-| UI-03 | Árbol de proyecto y propiedades, biblioteca global desde menú principal | Implementado en código; selección de herramienta por operación pendiente |
+| UI-03 | Árbol de proyecto y propiedades, biblioteca global desde menú principal | Implementado, incluido selector de fresa por operación; validación funcional pendiente |
 | UI-04 | Bruto rectangular editable, tamaño, posición, extras por cada cara y representación visual | Observado en código; usuario probó bruto |
 | UI-05 | Origen CNC con referencia a bruto o modelo, marcadores seleccionables, offset y orientación | Observado en código |
 | PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | Implementado en código desde 6eb12e1; validación gráfica de versión actual pendiente |
@@ -30,14 +30,16 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | GEO-02 | Distinguir geometría real de renderización normalizada | Observado en código; requisito permanente |
 | GEO-03 | Admitir STL primero y otros formatos, especialmente sólidos STEP, a futuro | Acordado; STEP pendiente |
 | GEO-04 | Abstracciones por **capacidad geométrica**, sin obligar a convertir todo B-Rep a una malla única | Acordado como criterio arquitectónico |
-| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | Prototipo de contacto esférico/BVH implementado; rendimiento real por validar |
+| GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | ContactSolver esférico, plano y toroidal/BVH implementado; rendimiento real por validar |
 | GEO-06 | Permitir representaciones auxiliares (p. ej. heightfield), con error definido | Acordado; implementación pendiente |
 | CAM-01 | Estrategias iniciales estrictamente 3 ejes, husillo fijo paralelo al Z del setup | Acordado |
 | CAM-02 | Posibilitar 4/5 ejes sin implementar hoy su cinemática | Acordado |
 | CAM-03 | Desbaste, semiacabado, acabado, contorno, conforme se desarrollen | Previsto, no implementado |
 | CAM-04 | Estrategias disponibles según capacidades del modelo, no solo extensión del fichero | Acordado |
-| CAM-05 | Primera estrategia de prueba: acabado paralelo con fresa esférica | Prototipo TEST aceptado; muestreo/previsualización, sin trayectoria CNC válida |
-| CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Acordado; implementación pendiente |
+| CAM-05 | Primera estrategia de prueba: acabado paralelo con fresa esférica | TEST con raster, movimiento neutral y enlaces propuestos; sin trayectoria CNC segura |
+| CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Validador estructural G25 implementado; tolerancias entre muestras y colisiones pendientes |
+| CAM-08 | Trayectoria neutral separada de estrategia y post | G25 implementado; enlaces propuestos y validación estructural, sin exportación CNC |
+| CAM-09 | Contrato F/S y conversión al origen de trabajo 3 ejes | F1.1–F1.2 implementados; comprobación de máquina y unidades pendiente |
 
 ## 3. Herramientas, máquinas y control
 
@@ -45,10 +47,10 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | --- | --- | --- |
 | TL-01 | Biblioteca **global**, reutilizable y sin carpetas obligatorias | Implementado en código |
 | TL-02 | Filtros por nombre, tipo y diámetro; favoritas/recentes como mejora futura | Filtros implementados en código |
-| TL-03 | Tipos inicialmente considerados: plana, esférica, cónica V, cónica punta plana y cónica punta esférica | **Propuesta de catálogo**, aún por cerrar |
+| TL-03 | Familias de fresas: plana, esférica, toroidal, cónica V, cónica punta plana y cónica punta esférica | Seis variantes en biblioteca; solver solo para plana/esférica/toroidal |
 | TL-04 | Editor con vista técnica de perfil y parámetros coherentes para cada tipo | Implementado en código; validación visual actual pendiente |
 | TL-05 | Separar geometría cortante, mango/cuello, montaje y velocidades/avances | Acordado |
-| TL-06 | Operación guarda UUID global sin snapshot; trayectoria futura compara huella y dependencias antes de usarse | UUID compartido implementado; resolución e invalidación pendientes |
+| TL-06 | Operación guarda UUID global sin snapshot; trayectoria futura compara huella y dependencias antes de usarse | UUID, resolución y SHA de herramienta implementados para previews; dependencias globales pendientes |
 | MACH-01 | Biblioteca de perfiles de máquina, independiente de herramientas y postprocesadores | Acordado |
 | MACH-02 | Características físicas, límites, husillo y modo de cambio manual/ATC según máquina | Acordado; aún no implementado |
 | MACH-03 | Perfil de la máquina de pruebas con FluidNC y cambio manual | Confirmado como caso de uso; valores físicos de captura por verificar |
@@ -89,8 +91,8 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 ## Requisitos añadidos tras D-033 y D-034
 
-- **TL-10 — Huella geométrica (ACEPTADA, función implementada; integración CAM pendiente):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
-- **TL-11 — Vigencia de resultados (ACORDADO COMO OBJETIVO; aún sin trazabilidad de trayectorias):** futuro cálculo resuelve UUID actual y toma copia temporal inmutable; trayectoria identifica hash geométrico y demás dependencias; prohibir exportación si están obsoletas.
+- **TL-10 — Huella geométrica (ACEPTADA, integrada parcialmente en previsualizaciones):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
+- **TL-11 — Vigencia de resultados (PARCIAL):** el cálculo ya resuelve UUID y registra firma geométrica para previsualización; faltan modelo, bruto, setup, estrategia, tolerancias y post antes de reutilizar/exportar. No autorizar exportación de resultados obsoletos.
 - **PRJ-06 — Compatibilidad experimental (ACEPTADO):** durante desarrollo no mantener versiones anteriores ni migraciones obligatorias; comunicar incompatibilidades y no destruir archivos personales.
 - **CAM-07 — Separación de validez:** cambios tecnológicos como avance y RPM pueden requerir regenerar G-code sin modificar la geometría calculada; una coincidencia de hash geométrico no valida por sí sola máquina, setup ni programa.
 

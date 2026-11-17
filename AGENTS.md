@@ -1,65 +1,75 @@
 # LaguCAM — Instrucciones para asistentes y colaboradores
 
-**Protocolo de colaboración vigente:** 2026-11-15. **Repositorio:** https://github.com/aik3n/LaguCAM.
+**Protocolo actualizado:** 2026-11-17 · **Proyecto:** LaguCAM · **Repositorio de referencia:** https://github.com/aik3n/LaguCAM.
 
-> No tomar un SHA fijo de este archivo como estado actual. Antes de cada tarea, comprobar HEAD de GitHub y consultar `docs/STATUS.md`: distingue el último **código revisado** del último **código documentado**, que puede estar rezagado de forma deliberada.
+> **Lugar de trabajo para implementar: la carpeta local `Escritorio/LaguCAM`.** Los chats no realizan operaciones Git. El responsable del proyecto controla los commits y la publicación. Para el último corte técnico documentado consultar [`docs/STATUS.md`](docs/STATUS.md); puede diferir de los archivos locales mientras se aplica un parche o de GitHub tras un commit.
 
-## 1. Responsabilidades
+## 1. Autoridad y responsabilidades
 
-**Responsable del proyecto (usuario):** decide prioridades y aprueba especificaciones, cambios, validaciones y publicación. Sus pruebas en equipo real se registran con su alcance; no sustituyen una validación geométrica ni de seguridad CNC.
+- **Responsable del proyecto (usuario):** decide prioridades, acepta cada alcance, ejecuta los parches y las pruebas en su Windows, valida la aplicación y realiza personalmente todas las operaciones Git (commits, ramas, merges, push). No se presupone un commit ni se solicita al chat que lo cree.
+- **Chat de dirección técnica/documentación:** debate, audita código y evidencias, prepara instrucciones y un **parche documental `.ps1`** cuando se autoriza la fase documental. Nunca declara cambios locales aplicados si el usuario no ha ejecutado el parche.
+- **Chat de programación:** inspecciona los archivos **locales** proporcionados/accesibles, implementa el alcance autorizado y entrega **un único parche `.ps1` por avance**, junto con comandos de aplicación, compilación y tests. No usa Git y no edita `*.md` por iniciativa propia.
+- **Chat de motor CAM:** las mismas restricciones de parche, Git y documentación; limita los cambios a los algoritmos autorizados. No altera interfaz, persistencia ni post sin consentimiento.
+- **GitHub:** referencia del código **ya versionado** y fuente para auditorías remotas; no sustituye el estado real de archivos locales antes de preparar/aplicar parches. El usuario podrá comunicar el SHA publicado tras el commit.
 
-**Chat de dirección técnica y documentación:** debate alternativas, revisa commits y evidencias, mantiene las decisiones técnicas y **actualiza los Markdown del proyecto una vez terminada la validación**, cuando el usuario lo solicita o dentro de una entrega documental autorizada. Solo redacta prompts de implementación cuando se le piden.
+## 2. Ciclo obligatorio de cinco fases (D-036)
 
-**Chat de programación:** lee el código real, implementa únicamente el cambio aprobado, ejecuta las pruebas disponibles y entrega SHA, cambios y evidencias. **No modifica documentación (`*.md`) por iniciativa propia**; prepara un resumen de hechos verificables para su actualización posterior. No amplía silenciosamente alcance o dependencias.
+1. **Debate:** problema, alternativas, riesgos, dependencias y criterios de prueba; ninguna idea supone aprobación automática.
+2. **Aceptación:** el responsable autoriza expresamente el alcance; si requiere implementación, se determina qué archivos y contratos pueden cambiar.
+3. **Implementación por parche:** el chat entrega el `.ps1` completo, **sin ejecutarlo en el equipo del usuario**, y las instrucciones necesarias. No toca Markdown salvo encargo documental explícito.
+4. **Validación:** el usuario ejecuta el parche, compila y pasa los tests indicados, comprueba la GUI cuando proceda y comunica errores/resultados. Los fallos se corrigen con un nuevo parche controlado, no mediante un commit automático.
+5. **Documentación:** al aceptar las pruebas, se prepara/aplica un parche documental que registra el alcance y la evidencia concreta. **El commit/push posterior es exclusivamente del usuario.**
 
-**Chat especializado en motor CAM:** investiga y desarrolla algoritmos geométricos dentro del alcance aprobado; no modifica documentación, interfaz, proyecto, bibliotecas ni postprocesadores sin autorización expresa.
+No es obligatorio documentar cada pequeño cambio intermedio. `docs/STATUS.md` indica exactamente el SHA de código versionado cubierto y, cuando proceda, la base local observada; una diferencia temporal no es un error si está explicada.
 
-**GitHub:** fuente de verdad para el **código versionado**. `docs/STATUS.md` es la fuente de verdad del **último estado documentado**, con un SHA base inequívoco. La validación se acredita con sus resultados, no con la mera presencia del código.
+## 3. Contrato de entrega del parche `.ps1` (D-037 y D-038)
 
-## 2. Ciclo de cinco fases (obligatorio)
+Disposición obligatoria de archivos:
 
-1. **Debate:** delimitar problema, alternativas y riesgos; no generar código por iniciativa propia.
-2. **Aceptación:** el usuario aprueba objetivo y alcance; el encargo de implementación explicita qué no debe cambiar.
-3. **Implementación:** cambios acotados, commits identificables y referencia al SHA de partida; sin actualizar los Markdown.
-4. **Validación:** ejecutar pruebas técnicas y, cuando corresponda, comprobación del usuario; entregar evidencia, fallos y limitaciones. No declarar aceptado un comportamiento no comprobado.
-5. **Documentación:** este chat sincroniza `docs/STATUS.md` y únicamente los otros documentos afectados; registra el SHA del código validado y el nivel de evidencia. No es obligatorio documentar cada commit intermedio.
+```text
+Escritorio/
+├── LaguCAM/                   # Carpeta de proyecto existente
+└── parche_nombre_hito.ps1    # Entregado por el chat
+```
 
-**La documentación puede estar temporalmente atrasada y eso no constituye por sí mismo un fallo.** Lo inadmisible es presentarla como vigente para un commit posterior al que cubre. Una nueva tarea debe verificar el código HEAD antes de asumir datos documentales.
+- El usuario guarda el script **junto a** `LaguCAM`, no dentro; el script localiza el proyecto a partir de `$PSScriptRoot` (no depende del directorio actual ni de rutas de otro usuario).
+- Antes de escribir, comprobar carpeta, archivos esperados, compatibilidad del estado de partida y destino de los cambios. **Rechazar conflictos y fallos sin sobrescribir silenciosamente.** Las escrituras serán atómicas por archivo o tan seguras como permita el cambio.
+- Cada parche debe ser específico, legible, de alcance limitado e idealmente reejecutable sin duplicar cambios. No ejecutar `git`, no modificar ramas ni publicar nada; no realizar descargas inesperadas ni cambios externos al proyecto.
+- No crear backups automáticos de proyectos `.lagucam` ni archivos `.recovery.*.bak` (D-039). Evitar también manipular archivos STL personales; no confundir los temporales internos del parche con copias de seguridad persistentes.
+- Entregar **comando PowerShell de aplicación**, **comandos concretos para `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, `cargo build --release` según el riesgo**, y pasos de prueba manual si hay cambios visuales/CAM. Si es exclusivamente documental, indicarlo y no atribuir tests Rust innecesarios.
+- El chat informa de **qué se modificará**; el usuario confirma después qué se ejecutó. El chat no promete aplicación, compilación o validación en Windows sin evidencia.
 
-Detalles del protocolo y entrega: `docs/WORKFLOW.md`.
+Comando habitual desde PowerShell (usando la ubicación real del script):
 
-## 3. Niveles de evidencia
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\<usuario>\Desktop\parche_nombre_hito.ps1"
+```
 
-- **IMPLEMENTADO EN CÓDIGO:** inspección del SHA y componentes correspondientes; no implica prueba de funcionamiento.
-- **PRUEBAS EJECUTADAS:** comandos, resultado y SHA/entorno precisados; las referencias de terceros se atribuyen.
-- **VALIDADO POR EL USUARIO:** conducta observada en su equipo, hardware y casos ensayados, sin extrapolación.
-- **VALIDACIÓN CAM PENDIENTE:** aún faltan referencias independientes, tolerancias, comprobación del recorrido y seguridad.
-- **FUTURO / PROPUESTO:** no implementado o no aprobado para desarrollo.
+## 4. Evidencia y estado
 
-No llamar «seguro», «verificado» o «apto para mecanizado» a una previsualización o a un build correcto.
+- **INSPECCIONADO:** código, archivos o parche revisados; no equivale a ejecución.
+- **PRUEBAS REPORTADAS:** comando, versión local o SHA identificado, Windows/entorno, resultado y ejecutor.
+- **VALIDADO POR EL USUARIO:** comportamiento observado en hardware y caso concreto, sin generalizar.
+- **VALIDACIÓN CAM PENDIENTE:** faltan tolerancias independientes, barrido continuo, colisiones, simulación o condiciones de máquina.
+- **PROPUESTO / FUTURO:** no implementado o aún sin autorización.
 
-## 4. Contexto técnico estable
+No llamar «seguro», «verificado para CNC» o «mecanizable» al contacto por puntos, una vista previa, un `cargo build`, una validación estructural o un archivo G-code experimental.
 
-- CAM experimental libre, Rust 2024, egui/eframe, glow/OpenGL; tres ejes inicialmente, herramienta paralela al Z del setup.
-- STL binario grande como formato inicial; cálculo `f64` sobre las coordenadas originales del archivo (decodificadas desde `f32`), nunca sobre la malla GPU normalizada.
-- Biblioteca global de cinco familias de fresas. UUID = identidad; revisión = historial; SHA-256 geométrico = equivalencia de definición física. El proyecto conserva UUID, **no snapshots persistentes** de la herramienta.
-- El primer postprocesador objetivo será FluidNC, sin acoplarlo al motor CAM. `G54` no implica rotación del marco y `M6` no garantiza cambio físico de herramienta.
-- La documentación viva es experimental: **no se exigen migraciones de formatos durante desarrollo**; nunca sobrescribir ni eliminar datos personales silenciosamente.
-- El cálculo de contacto, el muestreo experimental, una trayectoria CNC válida y un programa G-code seguro son niveles diferentes. No confundirlos.
+## 5. Contexto técnico e invariantes
 
-Consulta el estado implementado **actualizado hasta un SHA concreto** en `docs/STATUS.md`, la arquitectura en `docs/ARCHITECTURE.md` y las decisiones en `docs/DECISIONS.md`.
+- Rust 2024; egui/eframe + glow/OpenGL. STL binario original (vértices `f32`) y operaciones geométricas en `f64`; la malla GPU normalizada no sirve para CAM.
+- Tres ejes, herramienta paralela al Z del modelo/setup admitido. Las unidades del STL no están codificadas: el TEST actual supone milímetros; no convertirlo en supuesto implícito para producción.
+- Biblioteca de herramientas global: UUID identifica herramienta; SHA-256 canónico identifica geometría física. No se guardan snapshots editables de herramienta en la operación. No basta el hash para validar toda la trayectoria.
+- ContactSolver experimental: esférica, plana y toroidal. Resultado sin contacto (`None`) nunca es un movimiento seguro. Falta verificación de mango, portaherramientas, fijaciones y volumen barrido.
+- Trayectoria neutral, enlaces propuestos y validador **estructural** existen en código; todavía no hay verificación integral de colisiones, biblioteca de máquinas ni postprocesador FluidNC operativo.
+- Durante desarrollo pueden cambiar esquemas sin migración obligatoria, pero no se eliminan datos personales ni archivos del usuario silenciosamente.
 
-## 5. Antes de tocar código
+## 6. Antes de cada trabajo y al entregarlo
 
-1. Comprobar rama, HEAD, árbol de trabajo y diferencias respecto de `docs/STATUS.md`.
-2. Leer `docs/INDEX.md`, decisiones relevantes y archivos de código realmente afectados.
-3. Identificar objetivo aprobado, exclusiones, pruebas y limitaciones de acceso.
-4. No usar datos/documentos de una versión anterior como sustituto del código actual.
+1. Consultar archivos reales de la carpeta local; si solo se dispone de GitHub, declarar que se revisa una versión **remota** y no afirmar identidad con la carpeta local.
+2. Leer `docs/INDEX.md`, `docs/STATUS.md`, `docs/DECISIONS.md` y las fuentes afectadas. Pedir lo indispensable si el chat no puede ver el estado local.
+3. Fijar alcance autorizado, archivos afectados, precondiciones, comportamiento esperado, exclusiones y pruebas.
+4. Entregar el `.ps1` y comandos de ejecución/validación. **No usar Git**. Después de las pruebas, dejar constancia de resultados reportados y pendientes.
+5. En la fase documental, actualizar `STATUS.md` y los documentos que correspondan; no declarar SHA futuro hasta que el usuario lo comunique.
 
-## 6. Entrega del chat de implementación
-
-Informar, de forma breve: SHA base y SHA final (solo si hay commit), archivos alterados, pruebas **realmente** ejecutadas con entorno y resultados, pruebas pendientes, regresiones observadas, limitaciones y asuntos que requieren aceptación. **Sin modificar Markdown**.
-
-Ante un cambio de alcance, seguridad, formatos persistentes o licencia, consultar antes de implementarlo. Nunca presentar una simulación como validación física. No publicar ni fusionar cambios por iniciativa propia.
-
-**Regla de continuidad:** el repositorio manda sobre el código; `STATUS.md` manda sobre lo que la documentación afirma haber revisado; las pruebas mandan sobre lo que se considera validado.
+Más detalle: [`docs/WORKFLOW.md`](docs/WORKFLOW.md), [`docs/TESTING.md`](docs/TESTING.md) y [`docs/ROADMAP.md`](docs/ROADMAP.md).

@@ -1,72 +1,113 @@
-# Flujo de trabajo y sincronización documental de LaguCAM
+# Flujo de trabajo, parches y sincronización documental de LaguCAM
 
-**Protocolo vigente desde:** 2026-11-15. Autoridad: aprobación del responsable del proyecto.
+**Vigente:** 2026-11-17 · **Autoridad:** responsable del proyecto · **Decisiones:** D-036–D-039.
 
-## 1. Cinco fases, en este orden
+## 1. Las cinco fases
 
-1. **Debate.** Usuario y dirección técnica delimitan el problema, las alternativas y los riesgos. Una idea no es una decisión aprobada.
-2. **Aceptación.** El usuario autoriza alcance y criterios de salida. El chat de dirección prepara una instrucción breve **solo si se solicita**.
-3. **Implementación.** El chat de programación, o el especializado en motor, parte de HEAD verificado; modifica código y pruebas sin ampliar el alcance. **No edita documentación**.
-4. **Validación.** Pruebas Rust y geométricas, revisión del commit y comprobación del usuario si es necesaria. La entrega especifica evidencias, plataforma, resultados y limitaciones. Es legítimo detenerse por una validación insuficiente.
-5. **Documentación.** Este chat actualiza, tras la validación, `docs/STATUS.md` y los documentos afectados; separa código observado de pruebas acreditadas y documenta decisiones realmente aceptadas.
-
-La documentación se puede agrupar **por hitos**, no por cada commit. No bloquear la implementación por la sincronización documental pendiente; sí detener cualquier afirmación de «validado» que carezca de pruebas.
-
-## 2. Dos referencias, nunca una supuesta sincronización
-
-`docs/STATUS.md` debe mostrar:
-
-- **HEAD de código observado al hacer la revisión**, con rama y SHA.
-- **Código cubierto por la documentación:** SHA concreto hasta el que el documento ha sido reconciliado con el repositorio. Este SHA **no** se actualiza por la mera existencia de commits posteriores.
-- **Evidencia disponible:** pruebas ejecutadas en qué sistema, por quién y contra qué versión; resultados pendientes o no reproducidos.
-
-Al iniciar cualquier nueva tarea: comparar HEAD con el SHA documentado. Si son diferentes, **examinar los commits nuevos antes de usar las afirmaciones de STATUS**. Las decisiones estables siguen vigentes, salvo modificación explícita.
-
-## 3. Un solo documento para cada función
-
-| Documento | Responsabilidad |
+| Fase | Responsable y salida |
 | --- | --- |
-| `docs/STATUS.md` | Único estado vigente: implementado, probado y pendiente, con SHAs |
-| `docs/DECISIONS.md` | Registro de decisiones aprobadas, propuestas o sustituidas; no estado de compilación |
-| `docs/ARCHITECTURE.md` | Componentes, contratos, invariantes y límites; evitar repetir el estado actual |
-| `docs/REQUIREMENTS.md` | Requisitos y criterios de aceptación; remitir a STATUS para su grado de cumplimiento |
-| `docs/ROADMAP.md` | Objetivos, dependencias e hitos; no inventariar cada commit |
-| `docs/TESTING.md` | Cómo comprobar y qué evidencia se exige; las ejecuciones concretas se registran en STATUS |
-| `docs/LIBRARIES.md` | Definiciones de herramientas, máquinas y posts |
-| `docs/CHANGELOG.md` | Historia fechada de entregas y decisiones, sin actuar como otro STATUS |
-| `README.md` | Presentación, compilación y enlaces al estado vigente |
-| `AGENTS.md` / `docs/WORKFLOW.md` | Reglas estables de colaboración; no fijar un SHA «actual» permanente |
+| **1. Debate** | Usuario y chat delimitan objetivo, alternativas, riesgos y criterios de aceptación. |
+| **2. Aceptación** | El usuario aprueba expresamente el alcance; el chat no implementa propuestas no aprobadas. |
+| **3. Implementación** | Chat entrega **parche `.ps1`** para la carpeta local y comandos de ejecución; no modifica `*.md` por iniciativa propia ni utiliza Git. |
+| **4. Validación** | Usuario ejecuta parche y pruebas Windows, comprueba la aplicación y reporta resultados. Una prueba fallida bloquea el cierre del hito. |
+| **5. Documentación** | Chat documental entrega el parche documental, lo aplica el usuario y registra evidencias y limitaciones. El usuario decide si y cuándo crea el commit. |
 
-No crear un documento nuevo para cada entrega salvo que contenga información técnica que no encaje en los anteriores. Conservar archivos históricos existentes cuando tengan valor probatorio; corregir enlaces rotos.
+El chat no hace `git status`, `git checkout`, `git commit`, `git merge`, `git push` ni ninguna operación Git como parte de su trabajo. Puede utilizar SHA **comunicados por el usuario** o revisar GitHub para una auditoría del código versionado, pero la fuente de la modificación es la **carpeta local**.
 
-## 4. Entrega mínima para pasar de validación a documentación
+## 2. Paquete de entrega de cada mejora
 
 ```text
-Objetivo aprobado:
-SHA base / SHA final:
-Archivos y comportamiento modificados:
-Pruebas: comando + sistema + resultado; evidencia o informe disponible:
-Prueba manual del responsable: resultado concreto / pendiente:
-Limitaciones técnicas o de seguridad:
-Incompatibilidades de formato o datos:
-Estado: aceptado / requiere corrección / validación pendiente:
+C:\Users\<usuario>\Desktop\
+├── LaguCAM\
+│   ├── Cargo.toml
+│   ├── src\
+│   └── docs\
+└── parche_nombre_hito.ps1
 ```
 
-El chat de documentación comprueba el commit y no adopta sin atribución frases como «130 tests superados» o «fluido en STL grande». Cuando no puede verificar una ejecución, la atribuye al informe de quien la realizó.
+El parche se ejecuta **desde el Escritorio, al mismo nivel que `LaguCAM`**. Usa `$PSScriptRoot` para encontrar `LaguCAM`, de modo que funciona independientemente del directorio de trabajo de PowerShell.
 
-## 5. Política de Git y archivos personales
+Requisitos de calidad del script:
 
-- Identificar siempre SHA base, rama y cambios locales antes de modificar.
-- Commits de código pequeños y trazables; consolidación documental posterior con su propio commit.
-- No publicar, fusionar ni reescribir `main` sin autorización del responsable.
-- No eliminar STL personales ni sobrescribir configuraciones por conveniencia. Los STL grandes reales quedan fuera de Git salvo decisión expresa.
-- Durante desarrollo no se requieren migraciones de formatos; informar de las incompatibilidades y no destruir archivos del usuario.
-- Si falta permiso de escritura en GitHub, entregar archivos o parche exactos, **sin afirmar que se ha publicado un commit**.
+1. Verificar previamente estructura y archivos de partida; abortar si hay conflictos, rutas ausentes o versiones inesperadas.
+2. Modificar solo archivos aprobados. Evitar efectos parciales; usar ficheros temporales y reemplazo seguro por archivo cuando proceda. No descargar recursos ni tocar configuraciones ajenas sin autorización.
+3. Ser idempotente cuando sea posible: si ya se aplicó, informarlo en vez de duplicar secciones o alterar otra vez el código.
+4. No generar copias automáticas `.bak`/`.recovery.*.bak` de proyectos `.lagucam` (D-039). Proteger STL y archivos personales.
+5. Mostrar el resultado y el listado de archivos modificados. Ningún mensaje del script equivale a un commit.
 
-## 6. Control de calidad y seguridad CAM
+El chat entrega junto al `.ps1` los comandos necesarios (aplicación, formato, check/clippy, tests y Release según el alcance) y los pasos de comprobación manual. No sustituir las pruebas reales por frases genéricas. Un cambio solo documental no requiere recompilar Rust salvo que se justifique expresamente.
 
-Compilar ≠ ejecutar correctamente ≠ calcular geometría precisa ≠ disponer de una trayectoria CNC segura. Evaluar según corresponda: pruebas de referencia independientes, tolerancias, rendimiento con mallas grandes, regresión del visor y flujo de verificación de la máquina. La interfaz puede visualizar muestras sin que estas se consideren trayectorias listas para postprocesar.
+Ejemplo de aplicación cuando el script está realmente en el Escritorio:
 
-## 7. Cómo reanudar desde otro chat
+```powershell
+& "$env:USERPROFILE\Desktop\parche_nombre_hito.ps1"
+```
 
-Proporcionar repositorio, SHA o rama a revisar y rol del chat. Leer `AGENTS.md`, `docs/INDEX.md` y `docs/STATUS.md`; contrastar HEAD y las decisiones. Si la documentación va por detrás, indicarlo y consultar el código real, no inferir que el desarrollo está detenido.
+Si la política de ejecución lo impide, ejecutar desde PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Desktop\parche_nombre_hito.ps1"
+```
+
+Ejemplo de comprobación de código Rust, **desde `LaguCAM`**:
+
+```powershell
+cd "$env:USERPROFILE\Desktop\LaguCAM"
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+cargo check --locked --all-targets
+cargo build --locked --release
+```
+
+La lista se adapta al cambio. El usuario ejecuta los comandos en su Windows; el chat distingue pruebas hechas de comandos únicamente propuestos.
+
+## 3. Estado local, commits y documentación
+
+- **Archivos locales:** verdad para preparar y probar un parche. Pueden incluir cambios sin commit.
+- **GitHub `main`:** código publicado, útil para auditoría o recuperar una base conocida; puede no coincidir con el escritorio.
+- **`docs/STATUS.md`:** último corte documental con SHA de código inspeccionado, plataforma, pruebas **reportadas** y pendientes. No representa automáticamente el estado local o remoto posterior.
+- **Commits:** todos los realiza el usuario. Tras hacerlo, puede facilitar el nuevo SHA para el siguiente corte. No se inventan SHAs de parches todavía no versionados.
+
+La documentación puede agruparse por hitos y quedar rezagada mientras se valida. No se altera el SHA de código cubierto solo por preparar un parche o recibir un resultado de un commit distinto.
+
+## 4. Documentos y responsabilidades
+
+| Documento | Contenido |
+| --- | --- |
+| `AGENTS.md` y `WORKFLOW.md` | Reglas estables y entrega mediante `.ps1` |
+| `docs/STATUS.md` | Implementación observada, evidencia y límites por SHA |
+| `docs/DECISIONS.md` | Decisiones aceptadas, propuestas y sustituidas |
+| `docs/ARCHITECTURE.md` | Contratos, módulos y responsabilidades |
+| `docs/REQUIREMENTS.md` | Requisitos y criterios de aceptación |
+| `docs/ROADMAP.md` | Secuencia de hitos hacia el prototipo |
+| `docs/TESTING.md` | Comandos, pruebas, benchmarks y seguridad |
+| `docs/LIBRARIES.md` | Herramientas, máquinas y postprocesadores |
+| `docs/CHANGELOG.md` | Cambios de entregas; no reemplaza `STATUS.md` |
+
+Historiales y documentos de una etapa antigua pueden conservarse como referencia fechada; señalar cuándo ya no describen la versión actual.
+
+## 5. Informe mínimo al cerrar un avance
+
+```text
+Objetivo y alcance aceptados:
+Base local / SHA público de referencia, si se conoce:
+Nombre del parche .ps1 y archivos modificados:
+Comando de aplicación y resultado reportado por el usuario:
+Comandos de compilación/tests + Windows/Rust + resultado real:
+Comprobación GUI y caso de prueba:
+Regresiones y limitaciones:
+Datos/esquemas afectados:
+¿Fase documental aplicada?:
+SHA de commit posterior (solo si el usuario lo aporta):
+```
+
+No escribir «pruebas superadas» cuando solo se ha preparado el comando. La ausencia de evidencia no invalida automáticamente la implementación, pero impide afirmar que esté validada.
+
+## 6. Seguridad y calidad CAM
+
+Compilación, validación estructural, contacto geométrico, ausencia de colisiones y aptitud para ejecutar una CNC son **niveles distintos**. Los enlaces de despeje y las alturas propuestas no prueban que el mango, fijaciones, máquina o volumen barrido sean seguros. La exportación FluidNC será un hito separado y estará bloqueada o claramente limitada hasta cumplir condiciones verificables.
+
+## 7. Reanudación desde un nuevo chat
+
+Indicar que LaguCAM se trabaja **localmente por parches `.ps1`**, sin operaciones Git del chat. Consultar `AGENTS.md`, `docs/STATUS.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md` y los archivos locales reales. Si solo puede accederse al repositorio remoto, declararlo antes de proponer cambios que dependan de suponer identidad con el Escritorio. **No implementar sin aceptación del usuario**.

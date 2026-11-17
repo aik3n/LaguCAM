@@ -1,58 +1,39 @@
-# G19 — Contrato inicial de Contact Solver
+# ContactSolver — contrato y evolución G19–G24
 
-**Base:** LaguCAM `main` en `13a439ab15fb5baf8942bcb87af78c6da59d49fb` · **Desarrollo:** rama local `feature/contact-solver-g19` · **Estado:** pendiente de compilar y validar en Windows.
+**Revisión técnica:** 2026-11-17 · **Base observada:** `main` en `5cd41c7` · **Evidencia:** revisión estática; no sustituye los tests ni la validación geométrica independiente.
 
-## Responsabilidades
+## Contrato y responsabilidades
 
-- **Geometry Engine** (`cam_geometry::stl`, `service`): gestiona el STL original, BVH, lectura por bloques y consultas de contacto de esfera sin conocer estrategias CAM.
-- **Contact Solver** (`cam_geometry::contact_solver`): recibe una geometría matemática de fresa, posición XY y sobrematerial; resuelve la posición vertical geométrica compatible con esa consulta.
-- **Estrategia CAM** (`test_parallel`): decide posiciones y sucesión de pasadas; utiliza el solver con **sobrematerial cero**, manteniendo el resultado del TEST anterior. El nuevo parámetro de sobrematerial no está todavía expuesto en la UI.
-- **Biblioteca de herramientas**: mantiene UUID, medidas, metadatos y parámetros tecnológicos; su vinculación al solver queda para una entrega posterior.
+- **Geometry Engine (`cam_geometry`)**: STL binario protegido, BVH XY, caché de bloques y evaluadores analíticos. Los triángulos originales se decodifican desde `f32` y se operan en `f64`.
+- **`ContactSolver`**: API tipada sin UI ni UUID. `ContactQuery` recibe `x_model`, `y_model`, `CutterGeometry` y `allowance_model >= 0`; devuelve `ContactSolution { tip_z_model: Option<f64>, diagnósticos }` o error explícito.
+- **Adaptador biblioteca–CAM (`tools/cam_adapter.rs`)**: resuelve UUID global a geometría matemática en unidades del modelo, captura SHA-256 de geometría y comprueba vigencia de previsualizaciones. No inventa diámetros de respaldo.
+- **Estrategia (`test_parallel.rs`)**: elige muestras XY, patrón de pasada y sobrematerial; el motor solo resuelve posiciones de contacto. Trayectorias y enlaces se construyen después en módulos separados.
 
-## Contrato G19
+Las consultas actuales trabajan con eje de fresa paralelo a **+Z del STL/modelo**. La transformación al origen CNC se hace después, no dentro del solver. La hipótesis actual del TEST es **1 unidad STL = 1 mm**, no un dato embebido en el STL.
 
-```text
-ContactQuery {
-    x_model, y_model,                 // eje de herramienta, marco del STL
-    cutter: CutterGeometry,          // geometría matemática; sin UUID
-    allowance_model,                 // separación uniforme >= 0
-}
-    -> ContactSolution { tip_z_model: Option<f64>, contadores de diagnóstico }
-    -> ContactSolverError (tipado)
-```
+## Geometrías implementadas
 
-Unidades: las **unidades implícitas del STL** para todas las longitudes. No se realiza transformación al marco CNC. Solo se implementa `BallNose`, con eje de herramienta alineado con +Z del STL. `Flat`, `BullNose`, `VBit`, `ConicalFlat` y `ConicalBall` son variantes reconocidas pero **no implementadas**; devolverán error explícito y no simularán geometría esférica.
+| Etapa | Geometría | Contacto | Sobrematerial |
+| --- | --- | --- | --- |
+| G19 | `BallNose` esférica | Sí | Offset euclídeo de envolvente superior; radio de consulta `r+a` y corrección `+a` |
+| G21–G22 | `Flat` plana | Sí, disco plano sobre caras/aristas/paredes | Sí; dilatación geométrica con radio de influencia `r+a`, no simple suma vertical |
+| G24 | `BullNose` toroidal | Sí, plano central y esquina redondeada | Sí; esquina efectiva `corner+a`, alcance `outer+a`, corrección vertical según perfil |
+| Futuro | `VBit`, `ConicalFlat`, `ConicalBall` | **No** | Deben devolver error de geometría no soportada |
 
-`tip_z_model = None` indica ausencia de contacto dentro de la zona de influencia, nunca autorización para mover la herramienta. Una respuesta numérica representa el extremo inferior de la fresa esférica a una posición XY determinada: no incluye eje/mango, portaherramientas, mordazas, colisiones, enlaces ni movimientos CNC seguros.
+En el caso esférico el contacto en rampa de 45° con sobreespesor `a` aumenta aproximadamente `a·sqrt(2)`, no `a`. En plana y toroidal se conserva también la geometría de desplazamiento euclídeo respecto de las superficies evaluadas.
 
-## Sobrematerial uniforme, únicamente para esfera
+**`tip_z_model = None` significa ausencia de contacto local, no altura de seguridad ni permiso de avance.** El resultado es una cota de herramienta en una posición fija XY. No garantiza ausencia de colisión con mango, pinza, portaherramientas, fijaciones, bruto remanente o durante un segmento entre consultas.
 
-Sea `r` el radio físico de la esfera y `a >= 0` el sobrematerial. Para la envolvente visible desde +Z se calcula:
+## Precisión, escalabilidad y limitaciones
 
-```text
-Z_punta(r, a) = ContactoEsferico(STL, X, Y, radio = r + a) + a
-```
+- G19 conserva la regresión esférica cuando `allowance_model = 0` y G22 conserva el comportamiento plano sin sobreespesor; los módulos contienen pruebas sintéticas y contratos Windows.
+- G24 emplea optimización numérica acotada en aristas. Se necesita referencia independiente y control de error máximo, especialmente en tangencias y degeneraciones.
+- BVH y caché protegen la memoria contabilizada del motor, **no** garantizan RSS total ni rendimiento medido en el STL real de cerca de 20 M de triángulos.
+- STL no garantiza superficie cerrada/manifold ni semántica inequívoca de interior/exterior. La envolvente superior no resuelve cavidades no accesibles ni todo el volumen de mecanizado.
+- Los límites y cancelaciones están previstos en el API, pero compilar/testear no verifica trayectorias completas ni resistencia a cualquier STL.
 
-La llamada al motor interno devuelve la altura de la punta de una esfera **de radio `r+a`**. La suma posterior `+a` convierte esa cota en la del extremo inferior de la esfera física de radio `r`.
+## Pruebas y evidencias
 
-Esto equivale, en la envolvente superior accesible, a respetar una distancia euclídea uniforme respecto a la superficie triangulada. No se reduce a `Z_nominal + a`: en una rampa de 45° el incremento vertical interior es `a·sqrt(2)`. Con `a=0`, la nueva fachada conserva el resultado anterior de forma bit a bit.
+Pruebas de contrato existentes: `tests/g19_contract.rs`, `g21_contract.rs`, `g22_contract.rs`, `g24_contract.rs`, además de unitarias. Los contratos de integración que abren STL están condicionados a Windows. El commit G20–G22 reportó 161 pruebas; esta documentación **no reproduce esa ejecución**. La aprobación de G19 por el usuario corresponde a su ensayo anterior, no acredita por sí sola G24 ni G25.
 
-**Restricción importante:** un STL no garantiza un volumen sólido orientado, manifold, ni una cara exterior inequívoca. Esta operación no es una compensación global garantizada de todo sólido cerrado, especialmente en cavidades, socavados, zonas no accesibles o regiones fuera de la envolvente +Z. Para producción se exigirán reglas de topología, orientación y verificación adicional. El sobrematerial se expresa respecto al **modelo nominal final**, no a la operación anterior.
-
-## Alcance de la entrega
-
-- Nueva API tipada, fachada sobre el motor esférico G17 y la misma indexación BVH.
-- `test_parallel` consume el nuevo solver con `allowance_model = 0.0`; sin cambio de UX ni del formato `.lagucam`.
-- Pruebas unitarias de validación de consulta y geometrías reservadas; pruebas G19 en Windows: regresión exacta G17, plano horizontal, rampa 45°, ausencia de contacto, parámetros inválidos y cancelación.
-- **No se implementan** todavía otras formas de fresa, selección UUID, invalidación de trayectorias, generalización a setups rotados, stock remanente, G-code o validación de seguridad CNC.
-
-## Verificación requerida antes de fusionar
-
-```powershell
-cargo fmt --all -- --check
-cargo test --locked --all-targets
-cargo check --locked --all-targets
-cargo build --locked --release
-```
-
-Además, abrir un STL y generar «Acabado paralelo — TEST» con los mismos parámetros que antes. Si hay error, **no fusionar la rama a `main`**.
+Para el siguiente hito aplicar el procedimiento de [`TESTING.md`](TESTING.md): `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked --all-targets`, `cargo check --locked --all-targets`, `cargo build --locked --release`; añadir referencias analíticas externas y benchmark sobre la malla grande. Ningún resultado autoriza uso CNC sin la verificación de la trayectoria completa.

@@ -1,6 +1,6 @@
 # Registro de decisiones técnicas
 
-**Última revisión documental:** 2026-11-15 · **Código cubierto:** `13a439ab15fb5baf8942bcb87af78c6da59d49fb` · **Estado y pruebas:** [`STATUS.md`](STATUS.md)
+**Última revisión documental:** 2026-11-17 · **Código público inspeccionado:** `5cd41c7b394309ea672c43b6a1e6455369e7cf2f` · **Estado y pruebas:** [`STATUS.md`](STATUS.md)
 
 Una decisión se cambia mediante una nueva entrada con justificación, no reescribiendo silenciosamente lo que se acordó. Las entradas **PROPUESTAS** no autorizan implementación.
 
@@ -21,8 +21,8 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-013 | **ACEPTADA** | Modo de cambio manual/automático pertenece a capacidades de máquina/control | La máquina actual cambia fresas a mano; otras pueden tener ATC |
 | D-014 | **ACEPTADA** | No fijar T1/T2 a la geometría de la fresa | Asignación en configuración de máquina/trabajo |
 | D-015 | **ACEPTADA** | Proyecto separado del STL externo; archivo con esquema versionado | Evitar duplicar gigabytes y permitir evolución del formato |
-| D-016 | **ACEPTADA** | Dirección técnica y desarrollo en chats separados; GitHub como fuente del código | Debate/aprobación antes de implementar; pruebas y commits verificables |
-| D-017 | **ACEPTADA** | Documentación viva en el repositorio, revisada por commit significativo | Poder reanudar otro chat con evidencia, sin depender de su memoria |
+| D-016 | **ACEPTADA; PRECISADA POR D-037** | Dirección técnica y desarrollo en chats separados; GitHub registra código versionado | Los chats trabajan sobre archivos **locales** y no realizan operaciones Git; el usuario gestiona commits y publicación |
+| D-017 | **ACEPTADA; PRECISADA POR D-038** | Documentación viva por hitos validados, mediante parches locales | Poder reanudar otro chat con evidencia; la publicación Git corresponde solo al usuario |
 | D-018 | **ACEPTADA** | Para cambios de setup, no asumir que G54 efectúa rotación | G54 selecciona offsets; rotaciones requieren soporte/configuración explícitos del control |
 | D-019 | **ACEPTADA** | No asumir que M6 ejecuta cambio manual en FluidNC | La secuencia exacta debe validarse con la configuración de la máquina |
 | D-020 | **PROPUESTA** | Cinco tipos iniciales: plana, esférica, V, cónica plana y cónica esférica | Referencia DeskProto; por cerrar tras definir geometrías y fórmulas |
@@ -41,7 +41,10 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-033 | **ACEPTADA** | Durante desarrollo no se exige compatibilidad de formatos ni migraciones | Documentar roturas y conservar datos personales; `.lagucam` v1 se rechaza en el SHA revisado |
 | D-034 | **ACEPTADA; FUNCIÓN IMPLEMENTADA** | SHA-256 geométrico binario canónico y versionado | Igual geometría → mismo hash entre revisiones; aún no valida trayectorias |
 | D-035 | **ACEPTADA PARA PROTOTIPO** | Crear operación vacía y editarla en ventana única con pestañas, abriéndola con doble clic | UI experimental incorporada en `7de83c9` y `13a439a`; no genera G-code |
-| D-036 | **ACEPTADA; PROCESO VIGENTE** | Cinco fases: debate → aceptación → implementación → validación → documentación | La documentación la actualiza este chat al cierre del hito, no programación; STATUS registra SHA de código cubierto y evidencia |
+| D-036 | **ACEPTADA; PROCESO VIGENTE** | Cinco fases: debate → aceptación → implementación → validación → documentación | La documentación se prepara tras validar; ejecución de parches y commit final son del usuario (D-037/D-038) |
+| D-037 | **ACEPTADA (2026-11-17)** | Los chats no usan Git; trabajan sobre carpeta local `Escritorio/LaguCAM` | Único responsable de branches, commits, merges y push es el usuario. Un SHA remoto no sustituye el estado local sin comprobar |
+| D-038 | **ACEPTADA (2026-11-17)** | Todo avance se entrega como parche PowerShell `.ps1` situado junto a la carpeta de proyecto, con ejecución, compilación y tests | El script usa `$PSScriptRoot`, verifica la base y evita sobrescrituras inesperadas; lo aplica/prueba el usuario. Documentación solo en fase autorizada |
+| D-039 | **ACEPTADA (2026-11-17)** | Guardado de `.lagucam` por reemplazo sin copias `.recovery.*.bak` automáticas | No guardar backups de cada sobrescritura; mantener manejo explícito de errores y respeto a los archivos personales |
 
 ## Cómo registrar una nueva decisión
 
@@ -52,7 +55,7 @@ No convertir automáticamente una recomendación de un asistente en **ACEPTADA**
 ## Preguntas abiertas
 
 - Los cinco tipos tienen convenciones implementadas (ángulo cónico **total** y radio de esfera definido). Antes de CAM deben verificarse matemáticamente para contacto, no solo dibujo.
-- ¿Incluir toroidal y «ball with flat tip» en la primera entrega o después? Son perfiles distintos.
+- La toroidal ya está en código (G24); «ball with flat tip» sería otra geometría y queda fuera del primer cierre. No confundir implementación con validación independiente.
 - Política de colocación de herramienta y offsets de longitud por máquina/control.
 - Representación del portaherramientas y pruebas de colisión en la primera versión CAM.
 - Modelo de selección de máquina (por proyecto, setup u operación).

@@ -1,6 +1,6 @@
 # Documentación de LaguCAM
 
-El documento principal para conocer el **estado actual documentado** es [`STATUS.md`](STATUS.md). Siempre indica **hasta qué SHA se ha comprobado el código**. El HEAD de GitHub puede ser posterior porque el proceso aprobado termina con la documentación.
+El documento principal del **último corte documentado** es [`STATUS.md`](STATUS.md). Declara el SHA público inspeccionado y las pruebas acreditadas; el código local del Escritorio puede ser anterior o posterior. **Los chats entregan parches `.ps1` y no realizan operaciones Git.** Ver [`WORKFLOW.md`](WORKFLOW.md).
 
 ## Orden de lectura
 
@@ -8,7 +8,7 @@ El documento principal para conocer el **estado actual documentado** es [`STATUS
 2. [`DECISIONS.md`](DECISIONS.md) — Acuerdos aprobados y decisiones abiertas.
 3. [`ARCHITECTURE.md`](ARCHITECTURE.md) — Componentes, límites e invariantes técnicos.
 4. [`ROADMAP.md`](ROADMAP.md) — Hitos pendientes y criterios de salida.
-5. [`WORKFLOW.md`](WORKFLOW.md) — Ciclo debate → aceptación → implementación → validación → documentación.
+5. [`WORKFLOW.md`](WORKFLOW.md) — Ciclo de cinco fases, parche PowerShell desde Escritorio, tests Windows y Git exclusivo del usuario.
 
 ## Documentación de referencia
 
@@ -30,6 +30,6 @@ El documento principal para conocer el **estado actual documentado** es [`STATUS
 - **VALIDADO POR EL USUARIO:** prueba concreta en el hardware y escenario descritos; no representa garantía universal.
 - **PENDIENTE / FUTURO:** funcionalidad no terminada, no comprobada o todavía propuesta.
 
-La documentación **no debe simular sincronización** con commits posteriores. Para una nueva tarea, verificar rama y HEAD, contrastar diferencias y tomar las decisiones aprobadas como restricciones estables, salvo sustitución formal.
+La documentación **no debe simular sincronización** con commits posteriores ni con parches locales pendientes. Al reanudar una tarea, inspeccionar primero **archivos locales reales** o declarar expresamente que solo se dispone del SHA público. Respetar las decisiones hasta su sustitución formal.
 
 Los archivos históricos `AUDITORIA.md` y `DEPENDENCIAS.md` se conservan como referencia de etapas anteriores. Los documentos `LAGUCAM_004.md` a `LAGUCAM_007.md`, `PROJECT_TREE.md` e `INSTALACION_DOCUMENTACION.md` **se eliminaron** y no forman parte del índice vigente.

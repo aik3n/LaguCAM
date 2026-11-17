@@ -1,70 +1,55 @@
-# Hoja de ruta de LaguCAM
+# Hoja de ruta de LaguCAM — prototipo completo de tres ejes
 
-**Revisión:** 2026-11-15. Este documento expresa prioridades y criterios de salida, **no** es otra copia del estado de código. Ver [`STATUS.md`](STATUS.md) para SHA y validaciones. No implica fechas ni autoriza automáticamente nuevas tareas.
+**Revisión:** 2026-11-17. **Código público de referencia:** `5cd41c7`. Este documento define prioridades, no concede autorización automática para implementar. Para pruebas y SHA completo consultar [`STATUS.md`](STATUS.md).
 
-## Etapas
+## Objetivo de salida del prototipo
 
-| Hito | Resultado esperado | Situación |
+Flujo reproducible **STL → proyecto/bruto/origen → fresa de biblioteca → operación de acabado paralelo → contacto geométrico → trayectoria neutral y enlaces → comprobaciones → programa FluidNC → revisión externa**, con visualización y diagnósticos. El primer cierre debe limitarse a **tres ejes y una estrategia**. Que pueda exportarse un archivo experimental no demuestra seguridad de mecanizado.
+
+## Hitos y situación
+
+| Hito | Resultado | Estado observado hasta `5cd41c7` |
 | --- | --- | --- |
-| **0.1 — Visor STL grande** | Abrir y mover en 3D STL reales cercanos a 1 GB | **USUARIO-VALIDADO** para el equipo y archivo probados; faltan métricas automatizadas |
-| **0.2 — Entorno de proyecto** | Árbol lateral, bruto, origen, representación coherente | **IMPLEMENTADO** en código; comprobaciones funcionales positivas del usuario |
-| **Etapa 1 — Persistencia** | Nuevo/abrir/guardar/guardar como, rutas STL externas, archivo versionado, unidades | **IMPLEMENTADO EN CÓDIGO** (v2); prueba manual actual pendiente |
-| **Etapa 2 — Biblioteca de herramientas** | Editor de geometrías, perfil gráfico, catálogo global y selector filtrado | **EDITOR Y BIBLIOTECA IMPLEMENTADOS**; UUID global unificado; selector por operación pendiente |
-| **Etapa 3 — Máquina y post** | Perfiles de máquina; abstracción post independiente; primer dialecto FluidNC | **ACORDADO COMO OBJETIVO**, sin implementación |
-| **Etapa 4 — Base geométrica CAM** | STL, consultas espaciales, contacto herramienta-pieza y tests patrón | **PROTOTIPO IMPLEMENTADO; VALIDACIÓN ABIERTA** |
-| **Etapa 5 — Primera estrategia** | Acabado paralelo 3 ejes con fresa esférica | **TEST DE CONTACTOS/PREVISUALIZACIÓN**, no trayectoria válida |
-| **Etapa 6 — Verificación y exportación controlada** | Trayectorias visibles, comprobaciones de colisión/retirada/recorrido, post FluidNC, validación segura | **PENDIENTE** |
-| **Etapas posteriores** | Desbaste, semiacabado, contorno, stock remanente, optimización, B-Rep/STEP, 4/5 ejes según demanda | **FUERA DEL ALCANCE INICIAL** |
+| 0. Visor y proyecto | Abrir STL grande, navegar, bruto, origen, guardar `.lagucam` | Implementado; uso del visor grande comunicado por el usuario; regresión cuantitativa pendiente |
+| 1. Biblioteca de fresas | Identidad UUID, geometrías y conexión CAM | Implementado para esférica, plana y toroidal; verificaciones físicas pendientes |
+| 2. Motor geométrico | ContactSolver, sobrematerial, BVH y tests | Prototipo G19–G24 implementado; precisión y rendimiento con STL grande pendientes |
+| 3. Primera estrategia | Acabado paralelo con patrones y parámetros | TEST operativo en código; sigue sin verificación completa de recorrido |
+| 4. Movimientos neutrales | Segmentos, enlaces, aproximaciones, retiradas | G25 implementado **como propuesta experimental**; validador estructural, no anticolisiones |
+| 5. Contrato y marco de trabajo | Condiciones F/S, modelo → cero CNC 3 ejes | F1.1–F1.2 implementados en código; integración extremo a extremo y unidades por cerrar |
+| 6. Máquina y post | Perfil mínimo, exportación FluidNC desacoplada | Pendiente; condiciones y capacidades reales de máquina sin acreditar |
+| 7. Verificación + UI de salida | Chequeos adicionales, inspección, exportación limitada | Pendiente; condición para terminar prototipo |
+| Posteriores | STEP, 4/5 ejes, nuevas estrategias, stock remanente | Fuera del alcance inicial |
 
-No hay dependencia obligatoria de desarrollar la pantalla de máquinas antes de investigar las consultas geométricas. Se pueden estudiar subsistemas en paralelo, pero **un G-code utilizable requiere que herramientas, geometría, setup, máquina y post estén integrados y verificados**.
+## Secuencia recomendada para los próximos chats
 
-## Criterios de salida de cada etapa
+### P1 — Cerrar el contrato y la trazabilidad CAM
 
-### Persistencia
+Aceptar explícitamente unidades STL/mm y conversiones, referencia de trabajo, esquema de operación y F/S, identidad/huella de herramienta, dependencias de bruto/modelo/setup y caducidad de resultados. Verificar que las operaciones y movimientos usan las mismas coordenadas y que los parámetros persistentes se leen correctamente. **Sin post ni G-code aún.**
 
-- Round-trip de parámetros, sin alteración de `f64`.
-- Referencias relativas a STL, error recuperable ante falta/cambio de archivo.
-- Guardado seguro ante fallos; versión de esquema y validación.
-- Datos cargados no sobrescritos por los valores por defecto del importador.
-- Prueba manual de abrir un proyecto real tras reiniciar; se conservará la fluidez del visor.
+**Salida:** pruebas unitarias y de integración de transformaciones, origen, cambios de herramienta/parámetros y rechazos explícitos; al menos un caso real de proyecto y previsualización.
 
-### Herramientas
+### P2 — Cerrar las garantías verificables del recorrido
 
-- Tipos y fórmulas geométricas aprobados.
-- Validación de dimensiones y perfiles de prueba con casos degenerados.
-- Biblioteca global implementada; referencia UUID sin snapshot; selector filtrado desde operación aún pendiente.
-- SHA-256 geométrico canónico v1 implementado como función; queda por conectar UUID y huella a resultados de cálculo y a otras dependencias.
-- Visualización técnica y datos de corte no confundidos con geometría.
+A partir de G25.4 estructural, diseñar comprobaciones independientes de segmentos entre muestras, enlaces y alturas. Definir tolerancias geométricas, cuerpo de herramienta, obstáculos/utillaje y qué casos no pueden verificarse. **Ante incertidumbre, bloquear la exportación operativa en lugar de emitir una garantía ficticia.**
 
-### Motor geométrico
+**Salida:** patrones de referencia, escenarios de colisión y errores deterministas; rendimiento/memoria sobre STL creciente y el grande cuando esté disponible.
 
-- Consultas independientemente testeables sin la GUI.
-- Resultados analíticos de contacto con planos, rampas, esferas y geometrías patrón.
-- Tolerancia explícita y pruebas de errores máximos.
-- Rendimiento comparado en mallas crecientes, incluyendo el STL de montaña cuando esté disponible.
-- Herramientas planas/esféricas primero; ampliaciones solo tras geometría verificada.
+### P3 — Perfil mínimo de máquina y primer post FluidNC
 
-### Post y seguridad
+Aprobar las capacidades reales del controlador y del equipo de pruebas: ejes, recorridos, homing, G54, límites, RPM/F, parada y **cambio manual**. Construir postprocesador independiente que solo acepte datos con precondiciones comprobadas.
 
-- Trayectoria neutral y G-code separados.
-- Capacidad real de FluidNC y configuración de la máquina verificadas.
-- Números de herramienta, cambio manual y offsets tratados sin supuestos inseguros.
-- Simulación/comprobación offline, ejecución en vacío y pruebas controladas antes del mecanizado real.
+**Salida:** G-code experimental inspeccionable, tests de secuencia/modalidad con archivos golden y rechazo de operaciones no válidas. No presuponer que `M6` cambia la herramienta o que `G54` rota coordenadas.
 
-## Próximo hito técnico sugerido (pendiente de autorización específica)
+### P4 — Flujo UI y cierre de prototipo
 
-1. Validar el contacto esférico con referencias independientes, degeneraciones y tolerancias numéricas explícitas.
-2. Medir el BVH y las consultas sobre modelos crecientes y el STL real de referencia; registrar RAM/RSS y tiempos, no solo límites estimados.
-3. Controlar el error entre muestras del acabado paralelo; no generar G-code sobre puntos conectados sin verificar el recorrido.
-4. Vincular las operaciones a la biblioteca UUID y, al existir resultados reutilizables, a hash geométrico y todas sus dependencias.
-5. Después, cerrar trayectoria neutral y criterios de seguridad antes de abordar FluidNC. STEP y nuevas estrategias no preceden a la validación del motor inicial.
+Integrar configuración, generación, estado de incidencias, visualización y exportación; pruebas end-to-end desde proyecto persistido hasta salida del post. Validar en Windows con STL representativo y simulación offline. El salto a mecanizado real requerirá proceso controlado adicional.
 
-**Política de desarrollo:** se permiten cambios de esquema incompatibles sin migración; siempre documentados y sin borrar datos personales.
+## Criterios de calidad transversales
 
-## Riesgos estratégicos
+- Separación estricta entre **código CAM**, render, almacenamiento, post y seguridad de máquina.
+- Conservación `f64` en coordenadas geométricas; rechazo de NaN/infinitos, desbordamientos y consultas fuera de rango.
+- Resultados y pruebas vinculados a versión/entorno; no extrapolar de «cargo build» a precisión ni de un STL visual fluido a BVH CAM rápido.
+- Desarrollo por **parches `.ps1` locales**, sin operaciones Git del chat. Debate y aceptación previos; documentación después de validar; los commits son del usuario (D-036–D-039).
+- Proyectos `.lagucam` mediante reemplazo seguro, **sin backups automáticos**; no tocar STL personales.
 
-- Optimizar el render cuando ya cumple el objetivo sin medir un cuello de botella.
-- Empezar algoritmos CAM sin definición formal de herramienta/tolerancia.
-- Confundir los valores de una captura de DeskProto con los parámetros reales de una máquina FluidNC.
-- Convertir cada idea del debate en una orden de programación y dispersar el esfuerzo.
-- Confiar en la memoria de un chat sin mantener `STATUS.md`, decisiones y changelog en el repositorio.
+**Primera tarea al reanudar:** inspeccionar los archivos locales actuales y proponer únicamente el alcance de **P1**, con criterios de aceptación y pruebas. No implementar antes de la aprobación.

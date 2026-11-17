@@ -1,49 +1,52 @@
 # LaguCAM
 
-**CAM libre experimental para fresado CNC.** Licencia MIT. Repositorio: https://github.com/aik3n/LaguCAM.
+**Prototipo experimental de CAM libre (MIT)** para fresado CNC. Código público: https://github.com/aik3n/LaguCAM.
 
-LaguCAM comienza con relieves topográficos representados en STL binarios grandes y una primera estrategia de acabado paralelo de tres ejes. La arquitectura pretende incorporar más estrategias, máquinas y formatos geométricos en fases posteriores.
+Objetivo inicial: **acabado paralelo de tres ejes sobre STL**, con arquitectura extensible a otras estrategias, máquinas y formatos más adelante. Consultar siempre [`docs/STATUS.md`](docs/STATUS.md) para el SHA inspeccionado, evidencia y límites.
 
-> **Estado vigente, evidencias y SHA de referencia:** [`docs/STATUS.md`](docs/STATUS.md). El README explica capacidades generales; no mantiene otra copia del estado por commit.
+## Capacidades observadas en el código (`5cd41c7`, 2026-11-17)
 
-## Qué ofrece el prototipo
+- Visor STL binario de gran tamaño, navegación, selección de pivote, cubo de orientación y vista ortográfica/perspectiva. El usuario ha probado navegación fluida de un STL cercano a 1 GB; no es un benchmark CAM.
+- Proyectos `.lagucam` con referencia externa al STL, bruto, origen de trabajo, operaciones y guardado por reemplazo; recientes en configuración portable. **Sin backups automáticos de proyectos**, por decisión del usuario.
+- Biblioteca global de fresas con UUID, SHA-256 geométrico, editor y perfiles; ContactSolver para esférica, plana y toroidal, incluido sobrematerial geométrico.
+- Acabado paralelo **TEST**, patrones unidireccional/zigzag, trayectoria neutral y enlaces de aproximación/retirada propuestos, marcadores de inicio/fin y validación **estructural**.
+- Contrato CAM con condiciones F/S opcionales y transformación inicial de coordenadas modelo → trabajo para traslación y giro alrededor de Z.
 
-- Visor STL con carga en bloques, navegación 3D y pivote visual sobre la superficie; el responsable ha probado la navegación de un STL real cercano a 1 GB, **sin benchmark de rendimiento formal**.
-- Proyectos `.lagucam` v2 con referencia a STL externo, bruto, origen y operaciones configurables.
-- Biblioteca global de cinco geometrías de herramienta, UUID, revisiones y función SHA-256 de geometría física; la integración del hash con trayectorias está pendiente.
-- Motor geométrico experimental, independiente del render, con contacto de punta esférica sobre triángulos originales y aceleración espacial BVH.
-- Estrategia experimental **«Acabado paralelo — TEST»**: muestras de contacto y previsualización 3D, parámetros y zona XY, cancelación y guardado de configuración. **No son movimientos CNC verificados.**
-- Paneles reordenables, temas claro/oscuro y configuración portable junto al ejecutable.
+**No está terminado el flujo CNC:** faltan verificación continua de colisiones, perfiles de máquina, postprocesador FluidNC, exportación controlada y validación real. «Correcto estructuralmente» **no** significa seguro para fresar.
 
-**No existe todavía exportación de G-code ni un flujo de mecanizado seguro y verificado.** No hay comprobación integral de colisiones, movimientos de entrada/retirada ni postprocesador FluidNC implementado. No utilizar una previsualización como programa de mecanizado.
+## Compilación y pruebas en Windows
 
-## Compilación
+Requiere Rust según `rust-toolchain.toml` y entorno compatible con OpenGL/glow. El ejecutable Cargo sigue llamándose `cam-libre-visor.exe`.
 
-Requiere Rust según `rust-toolchain.toml`, entorno gráfico compatible con egui/eframe y OpenGL/glow.
-
-```bash
+```powershell
+cd "$env:USERPROFILE\Desktop\LaguCAM"
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
+cargo check --locked --all-targets
 cargo build --locked --release
 ```
 
-El paquete y ejecutable Cargo siguen denominándose `cam-libre-visor` (`cam-libre-visor.exe` en Windows). No interpretar esta lista de comandos como prueba de que CI haya sido configurado o ejecutado.
+La existencia de estos comandos no significa que hayan sido ejecutados en el HEAD documentado o que exista CI configurada.
 
-## Persistencia y datos
+## Desarrollo mediante parches locales
 
-La configuración portable se guarda en `config/tools.json`, `config/settings.json` y `config/panels.json` al lado del ejecutable. Los proyectos `.lagucam` hacen referencia al STL externo; no duplican la malla ni la definición editable de las fresas. Durante el desarrollo **no se exige compatibilidad retroactiva de formatos**, pero jamás deben destruirse datos personales sin autorización.
+**Los chats no realizan operaciones Git.** Cada mejora aceptada se entrega mediante un **script `.ps1` colocado en el Escritorio, junto a la carpeta `LaguCAM`**. El script usa `$PSScriptRoot` para localizar el proyecto; el chat proporciona instrucciones de aplicación, compilación, pruebas y comprobaciones manuales. El usuario ejecuta el parche, valida y realiza **personalmente** los commits y publicaciones. Los chats de programación no editan documentación por iniciativa propia; la sincronización se hace al final del hito.
 
-Los STL binarios almacenan vértices `f32`; los cálculos del motor operan con esos valores convertidos a `f64`. No recuperan precisión perdida en el archivo original. La malla de GPU normalizada no sirve para el cálculo CAM.
+Reglas exactas: [`AGENTS.md`](AGENTS.md) y [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
+
+## Archivos y datos
+
+Configuración portable junto al ejecutable: `config/settings.json`, `config/panels.json`, `config/tools.json` y `config/recent_projects.json`. El proyecto guarda referencia al STL externo, no una copia gigante de la malla ni un snapshot editable de la fresa. Los STL originales almacenan vértices `f32`, decodificados a `f64` para cálculos geométricos; el render normalizado no es autoridad CAM. Durante desarrollo no se exigen migraciones automáticas, pero nunca se destruyen datos personales silenciosamente.
 
 ## Documentación
 
-- [Estado actual y validación](docs/STATUS.md)
-- [Índice documental](docs/INDEX.md)
+- [Estado, SHA y evidencia](docs/STATUS.md)
+- [Índice](docs/INDEX.md)
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Decisiones](docs/DECISIONS.md)
-- [Plan de desarrollo](docs/ROADMAP.md)
+- [Hoja de ruta hacia el prototipo](docs/ROADMAP.md)
 - [Pruebas y seguridad](docs/TESTING.md)
-- [Proceso de trabajo](docs/WORKFLOW.md)
+- [Proceso por parches PS1](docs/WORKFLOW.md)
 
-Si el último SHA de GitHub es posterior al indicado en `docs/STATUS.md`, hay cambios aún **no sincronizados documentalmente**; revisar esos commits antes de tomar decisiones.
+El SHA de `STATUS.md` es el **último corte documentado**, no necesariamente el de los archivos locales aún no versionados. No atribuir pruebas realizadas sobre un SHA distinto.

@@ -1,52 +1,48 @@
 # Estado verificable de LaguCAM
 
-**Corte documental:** 2026-11-15. **Rama comprobada:** `main`.
+**Corte documental preparado:** 2026-11-17. **Código público inspeccionado:** `main` en [`5cd41c7b394309ea672c43b6a1e6455369e7cf2f`](https://github.com/aik3n/LaguCAM/commit/5cd41c7b394309ea672c43b6a1e6455369e7cf2f).
 
-| Referencia | Valor |
+| Referencia | Evidencia y alcance |
 | --- | --- |
-| Código HEAD consultado al preparar este corte | [`13a439ab15fb5baf8942bcb87af78c6da59d49fb`](https://github.com/aik3n/LaguCAM/commit/13a439ab15fb5baf8942bcb87af78c6da59d49fb) |
-| Código cubierto por esta documentación | `13a439ab15fb5baf8942bcb87af78c6da59d49fb` |
-| Evidencia técnica revisada aquí | Inspección estática de código y cambios GitHub; **sin ejecución propia de Rust, GUI ni CNC** |
-| Pruebas automáticas comunicadas | Informe previo del entorno Windows: **130 tests** en el commit de integración `7de83c9`; no ejecución reproducida en esta revisión |
-| Pruebas manuales comunicadas | Abrir STL real cercano a 1 GB y navegarlo (fase de visor); abrir STL y crear/editar/eliminar operaciones tras la integración CAM |
-| Estado de mecanizado | **No apto para producción:** no hay G-code, postprocesado, colisiones ni trayectorias verificadas |
+| SHA de código público cubierto por este corte | `5cd41c7b394309ea672c43b6a1e6455369e7cf2f` |
+| Método de revisión | Inspección estática de commits y archivos de GitHub, sin ejecución propia de Rust/GUI/CNC; no se ha inspeccionado la carpeta local del usuario |
+| Pruebas anteriores comunicadas | 130 tests Windows en `7de83c9` (históricas); validación funcional G19 comunicada por el usuario tras sus pruebas; 161/161 tests declarados en el mensaje de commit `d12ebcc` (G20–G22), **no reproducidos aquí** |
+| Comprobación de tests en `5cd41c7` | **No acreditada en esta revisión**. No hay resultado CI publicado observado; ejecutar en Windows antes de cerrar siguiente hito |
+| STL real ~1 GB | Navegación del visor reportada por el usuario en fase anterior; **no** es benchmark del BVH ni del CAM |
+| Mecanizado real | **NO APTO PARA PRODUCCIÓN:** todavía no hay post FluidNC, perfil de máquina operativo ni verificación integral de colisiones |
 
-**Regla de sincronización:** este archivo describe el código hasta el SHA indicado. Si `main` avanza, este documento **no** queda automáticamente al día. Consultar HEAD antes de iniciar una tarea. Es normal que los SHA difieran hasta el cierre documental del siguiente hito. Ver [`WORKFLOW.md`](WORKFLOW.md).
+**Nota de continuidad:** este SHA corresponde al código publicado inspeccionado, no garantiza que los archivos del Escritorio coincidan con GitHub. Los chats modifican archivos locales exclusivamente mediante parches `.ps1` ejecutados por el usuario; los commits los realiza él. Cuando se aplique un parche y aún no haya commit, registrar referencia local del parche, **no inventar un nuevo SHA**.
 
-## Capacidades verificables
+## Capacidades implementadas en el código inspeccionado
 
-| Subsistema | Implementación observada | Qué falta acreditar / completar |
+| Subsistema | Avance observado | Validación o dependencia pendiente |
 | --- | --- | --- |
-| STL binario y visor | Lectura en bloques, gestión GPU, cámara, pivote y navegación | Benchmarks medidos, regresión cuantitativa en STL de ~1 GB |
-| Proyecto y configuración | `.lagucam` v2, modelo externo, bruto, origen, guardado; preferencias portables | Más validación de proyectos reales y compatibilidad de cambios experimentales |
-| Biblioteca de herramientas | Cinco geometrías; UUID/revisión; hash canónico SHA-256 implementado | Resolver herramienta desde operación; comparar hash en resultados CAM |
-| Motor geométrico | `src/cam_geometry/`: contacto fresa esférica–triángulo `f64`, índice BVH XY, lectura STL por bloques/caché, límites y cancelación | Validación matemática independiente y rendimiento medido con 20 M de triángulos; alcance de colisiones |
-| Operaciones CAM | Crear, editar, eliminar; editor por pestañas; parámetros persistentes | Selección real de herramienta; modelo de dependencias de resultados |
-| Acabado paralelo TEST | Consultas de altura por muestras XY; previsualización; cancelación; límite temporal de 12.000 puntos | Garantía de error entre muestras, enlaces seguros, retiradas, colisiones, tolerancias |
-| Trayectoria neutral y post | **No implementados** | Diseño y validación antes de generar código ejecutable |
-| Máquinas, FluidNC, STEP, 4/5 ejes | **Objetivos futuros** | No confundir con capacidad disponible |
+| **Visor STL** | Importación por bloques, renderer GPU, cámara, selección de pivote, zoom al cursor, cubo de orientación, control ortográfico/perspectiva | Regresión visual Windows y métricas reproducibles con STL cercano a 1 GB |
+| **Proyectos** | `.lagucam` versionado, modelo externo, bruto, origen, operaciones, guardado por reemplazo y lista portable de cinco proyectos recientes | Round-trip manual de casos reales y pruebas ante fallos/archivos faltantes; sin backups automáticos de proyecto por decisión del usuario |
+| **Herramientas** | Biblioteca global por UUID, perfiles y validación; geometrías esférica, plana y toroidal enlazadas al ContactSolver mediante adaptador | Otras geometrías reconocidas aún no tienen solver; verificar montaje y colisiones; la huella geométrica no cubre todas las dependencias del cálculo |
+| **Contacto geométrico G19–G24** | Solver tipado, BVH sobre STL original, sobrematerial euclídeo esférico/plano/toroidal; límites, diagnósticos y cancelación | Referencias independientes, precisión en degeneraciones y rendimiento sobre malla de ~20 M de triángulos |
+| **Acabado paralelo experimental** | Pasadas X/Y, área, sobreespesor, patrón unidireccional/zigzag, elección de fresa, previews y cancelación | Error entre muestras, barrido continuo, colisiones y material remanente; aún experimental |
+| **Trayectorias G25** | Segmentos neutrales de corte, enlaces/descensos/retiradas propuestos, marcadores de inicio/fin y validación **estructural** con incidencias por movimiento | No comprueba volumen barrido ni obstáculos reales; no autoriza ejecutar G-code |
+| **Contrato CAM F1.1** | Vista inmutable de movimientos validados estructuralmente y condiciones F/S opcionales, sin postprocesador | Control completo de vigencia de resultados; no interpretar F/S presentes como autorización de máquina |
+| **Coordenadas F1.2** | Conversión modelo → coordenadas de trabajo en mm con traslación y giro alrededor de Z; rechaza inclinaciones Rx/Ry | Cierre de unidades y marco de máquina, integración con post y validación de setups reales |
+| **Máquinas y postprocesado** | FluidNC como primer objetivo de diseño | **No implementados** perfil operativo de máquina, post, simulación/verificación completa ni exportación de programa |
 
-## Hechos técnicos del prototipo CAM
+## Seguridad: límites que no deben omitirse
 
-- `src/cam_geometry/mod.rs`: cálculo de altura de contacto de punta esférica sobre caras/aristas/vértices y consulta O(N) de referencia.
-- `src/cam_geometry/stl.rs` y `service.rs`: BVH espacial sobre STL original, caché de bloques, presupuesto estimado y fachada de consulta. El límite es de memoria contabilizada **del motor**, no de la RAM/RSS total del proceso.
-- `src/test_parallel.rs`: cálculo experimental en hilo trabajador con cancelación. Diámetro introducido manualmente; **no selecciona todavía la fresa global por UUID**. Los puntos dibujados no certifican que los segmentos intermedios sean seguros.
-- La fachada del motor de contacto declara soporte de apertura protegida en **Windows**; no presume soporte idéntico en otros sistemas.
-- Los STL originales codifican vértices en `f32`. Su conversión a `f64` reduce error aritmético posterior pero no añade precisión de origen.
+- `None` en ContactSolver significa falta de contacto, no permiso de desplazamiento.
+- `is_structurally_valid()` solo significa continuidad, orden y cotas coherentes según el contrato G25; **no** detecta colisiones con mango, portaherramientas, utillaje, stock remanente o máquina.
+- El estado UI «Ready» corresponde al cálculo experimental con movimientos de corte y validación estructural, no a una operación lista para producción.
+- STL no almacena unidades: el TEST actual parte de la hipótesis **1 unidad STL = 1 mm**. No exportar a máquina sin una definición explícita verificable.
+- El frame F1.2 conserva el eje vertical de tres ejes; el control CNC no hereda automáticamente una rotación `Rz` por seleccionar `G54`.
 
-## Evidencias y sus límites
+## Próximo objetivo: prototipo 3 ejes de extremo a extremo
 
-- En `docs/CAM_INTEGRACION_2026-11-15.md` constan resultados comunicados en Windows: `cargo fmt --check`, `cargo test --all-targets` (130), `cargo check` y `cargo build --release` relativos a la base experimental `7de83c9`.
-- El commit de consolidación `13a439a` elimina avisos menores y actualiza documentación; **no hay ejecución independiente de los comandos sobre este SHA acreditada en esta revisión**.
-- No se ha comprobado CI activo en el árbol del commit inspeccionado.
-- El STL grande del usuario prueba experiencia de navegación del **visor**, no tiempo de construcción del BVH ni precisión del **motor CAM**.
+1. **Cerrar integración y vigencia:** origen, unidades, biblioteca, F/S, configuración de operación y dependencias de la trayectoria; sin usar datos obsoletos.
+2. **Validador adicional independiente:** referencia de contacto, tolerancia entre puntos, límites, volumen barrido, colisiones de corte/mango/utillaje, alturas y secuencias. La validación estructural existente **no basta**.
+3. **Perfil mínimo de máquina y post FluidNC:** separar estrategia → trayectoria neutral → validación → post; contrastar capacidad concreta de FluidNC, homing, límites y cambio manual.
+4. **Flujo UI completo:** crear/abrir proyecto, seleccionar herramienta y setup, generar, visualizar incidencias y exportar **solo tras verificaciones definidas**.
+5. **Validación Windows:** `fmt`, `clippy`, `test`, `check`, `build --release`, simulación offline independiente, prueba en vacío y benchmark de STL grande antes de considerar corte real.
 
-## Próximos criterios de validación (no entregas aprobadas automáticamente)
+No priorizar STEP, cinco ejes, desbaste u otras estrategias hasta cerrar un primer ciclo reproducible de acabado paralelo.
 
-1. Contrastar el contacto esférico con casos analíticos independientes, superficies degeneradas y aristas, fijando tolerancias numéricas.
-2. Medir tiempos de construcción del BVH, consultas y pico de memoria con STL crecientes, incluido el real de ~1 GB, sin inventar métricas.
-3. Definir control de error entre muestras y recorridos seguros antes de considerar una trayectoria CNC.
-4. Resolver herramientas desde la biblioteca, capturar su geometría durante el cálculo y comprobar el hash al validar resultados; diferenciar cambios geométricos y tecnológicos.
-5. Solo después, diseñar trayectorias neutrales, simulación/colisiones y postprocesado FluidNC.
-
-**Decisiones aceptadas:** `docs/DECISIONS.md`. **Fases y pruebas:** `docs/WORKFLOW.md` y `docs/TESTING.md`.
+**Documentos:** [`ROADMAP.md`](ROADMAP.md) (prioridades), [`WORKFLOW.md`](WORKFLOW.md) (parches `.ps1`), [`TESTING.md`](TESTING.md) (evidencia), [`DECISIONS.md`](DECISIONS.md) (decisiones).

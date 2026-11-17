@@ -1,5 +1,15 @@
 # Historial de LaguCAM
 
+## 2026-11-17 — Sincronización documental y procedimiento local por parches
+
+- **Base de código público inspeccionada:** `5cd41c7` (no es un SHA nuevo del parche documental). Inspección estática, **sin ejecución propia de Cargo, GUI o CNC**.
+- Evolución acumulada posterior a `13a439a`: ContactSolver G19–G24 para esférica, plana y toroidal; biblioteca UUID conectada al CAM y SHA-256 de herramienta para previews; sobreespesor y patrón de pasadas.
+- G25 incorpora segmentos de corte neutros, enlaces propuestos, marcadores de inicio/fin y validación **estructural**. F1.1–F1.2 añaden contrato de operación F/S y marco de trabajo Rz/traslación; **no** post ni verificación integral de colisiones.
+- UI: cubo de orientación, zoom/pivote, proyectos recientes; proyectos `.lagucam` sin backups de recuperación automática por decisión del usuario.
+- **D-037–D-039:** los chats no usan Git, modifican la carpeta local exclusivamente mediante **parches `.ps1` colocados en el Escritorio junto a `LaguCAM`**, entregando comandos de ejecución, compilación y tests. El usuario aplica, valida y hace commits. Mantener D-036: documentar después de la validación.
+- Evidencia diferenciada en `STATUS.md`: las pruebas anteriores se atribuyen a su SHA/ejecutor; no se certifica precisión ni rendimiento CAM sobre STL real por inspección del repositorio.
+
+
 ## 2026-11-15 — Motor CAM experimental y consolidación (`7de83c9`, `13a439a`)
 
 - `7de83c9`: se añade `cam_geometry/*` (contacto esférico, BVH STL, lectura por bloques/caché, cancelación y límites), operaciones y muestreo de acabado paralelo TEST con previsualización. **No** G-code, trayectoria CNC segura ni postprocesador.

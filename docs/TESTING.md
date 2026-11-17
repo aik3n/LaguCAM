@@ -1,6 +1,6 @@
 # Política de pruebas, regresión y seguridad CNC
 
-**Política vigente:** 2026-11-15. El registro de **ejecuciones concretas** está en [`STATUS.md`](STATUS.md); este documento define requisitos de prueba. Modificar documentación no implica ejecutar Cargo, GUI o máquina.
+**Política vigente:** 2026-11-17. Ejecuciones concretas y SHA público en [`STATUS.md`](STATUS.md). Esta política se aplica a **parches `.ps1` locales** ejecutados por el usuario. Actualizar Markdown no ejecuta Rust, GUI ni CNC.
 
 ## Comprobaciones de identidad UUID y proyecto v2
 
@@ -12,25 +12,27 @@
 
 - Idéntico tipo y geometría → mismo hash, aunque difieran UUID, revisión, nombre o metadatos.
 - Ø6 → Ø4 → Ø6: primera y tercera huella iguales si todas las cotas relevantes coinciden; la de Ø4 diferente.
-- Variar cada parámetro físico relevante en los cinco tipos: cambia hash. Cambiar RPM, avance, nombre o notas: no cambia hash geométrico.
-- Cinco vectores SHA-256 de referencia independientes para las cinco variantes; representación canónica binaria y versionada en milímetros: orden de campos, codificación f64, `+0.0`/`-0.0`, NaN/infinito y límites numéricos.
+- Variar cada parámetro físico relevante en las seis familias: cambia hash. Cambiar RPM, avance, nombre o notas: no cambia hash geométrico.
+- Seis vectores SHA-256 de referencia independientes para las seis variantes (incluida toroidal); representación canónica binaria y versionada en milímetros: orden de campos, codificación f64, `+0.0`/`-0.0`, NaN/infinito y límites numéricos.
 - El código del hash se mantiene independiente de las operaciones y `.lagucam`. Antes de validar una futura trayectoria habrá que contrastar UUID, hash y el resto de sus dependencias.
 
 
-**Estado:** criterios para futuras etapas; no constituye certificación del software. **Fecha:** 2026-11-14.
+**Estado:** criterios para el prototipo en curso; **no** constituyen certificación del software.
 
 ## 1. Comandos de calidad de Rust
 
 Comandos de referencia desde la raíz del repositorio:
 
-```bash
+```powershell
+cd "$env:USERPROFILE\Desktop\LaguCAM"
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+cargo test --locked --all-targets
+cargo check --locked --all-targets
 cargo build --locked --release
 ```
 
-Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` revisado hasta `13a439a` no contenía workflow de CI activo; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
+Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` inspeccionado en `5cd41c7` no contenía workflow de CI activo; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
 
 ## 2. Pruebas del visor y proyecto
 
@@ -100,7 +102,19 @@ La cadena de verificación debe incluir:
 
 Registrar explícitamente cuál se realizó y cuál falta.
 
-## 7. Trazabilidad de pruebas por hito
+## 7. Pruebas por parche y contratos G19–G25 / F1
+
+1. Guardar `parche_*.ps1` en el Escritorio, al lado de `LaguCAM`. Ejecutar la instrucción exacta facilitada; **no hay operaciones Git del chat**.
+2. Antes de aplicar, el script debe comprobar estructura y base local, identificar conflictos y no sobrescribir cambios inesperados. Informar archivos afectados y abortar ante error.
+3. Aplicar el parche y comprobar el comportamiento. Si hay código Rust, usar los comandos de la sección 1; si solo hay documentación, comprobar contenido y enlaces sin recompilar por obligación.
+4. Para G19–G24: pruebas de contacto de esférica, plana y toroidal con geometría independiente, sobreespesor, tangencias, paredes y regresiones bit a bit de casos nominales.
+5. Para G25: verificar continuidad, orden, alturas, patrones, huecos de contacto, segmentos aislados y que **el validador estructural no se anuncie como comprobador de colisiones**.
+6. Para F1.1–F1.2: comprobar F/S válidos/faltantes, unidades, cero de trabajo, Rz, rechazo de Rx/Ry, conservación de movimientos originales y errores de desbordamiento.
+7. **Cierre del prototipo:** añadir comprobaciones de volumen barrido/cuerpos/stock/utillaje, post FluidNC con casos golden, simulación independiente, pruebas sin material y rendimiento del STL grande. Las restricciones de una CNC real deben comprobarse antes de uso.
+
+Registrar resultado **reportado por el usuario** y entorno/versión concreta. Nunca afirmar un número de tests sin la salida correspondiente.
+
+## 8. Trazabilidad de pruebas por hito
 
 La fase **validación** precede a la fase **documentación**. Desarrollo entrega SHA, versión Rust, SO, comandos y resultado; documentación registra lo verificado y lo comunicado, sin repetir pruebas imaginarias.
 
