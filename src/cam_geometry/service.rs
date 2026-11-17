@@ -17,7 +17,9 @@
 use super::ContactError;
 #[cfg(windows)]
 use super::stl::BuildControl;
-use super::stl::{BuildStats, FileBvh, G16AccessMode, G16MemoryEstimate, StlBvhError};
+use super::stl::{
+    BuildStats, FileBvh, G16AccessMode, G16MemoryEstimate, GeometryAffine, StlBvhError,
+};
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -123,6 +125,24 @@ impl BallContactEngine {
         limits: ContactEngineLimits,
         cancelled: &AtomicBool,
     ) -> Result<(Self, ContactEngineOpenReport), ContactEngineError> {
+        Self::open_stl_affine(path, limits, cancelled, None)
+    }
+
+    pub fn open_stl_transformed(
+        path: &Path,
+        limits: ContactEngineLimits,
+        cancelled: &AtomicBool,
+        affine: GeometryAffine,
+    ) -> Result<(Self, ContactEngineOpenReport), ContactEngineError> {
+        Self::open_stl_affine(path, limits, cancelled, Some(affine))
+    }
+
+    fn open_stl_affine(
+        path: &Path,
+        limits: ContactEngineLimits,
+        cancelled: &AtomicBool,
+        affine: Option<GeometryAffine>,
+    ) -> Result<(Self, ContactEngineOpenReport), ContactEngineError> {
         if cancelled.load(Ordering::Relaxed) {
             return Err(ContactEngineError::Cancelled);
         }
@@ -133,7 +153,7 @@ impl BallContactEngine {
         }
         #[cfg(not(windows))]
         {
-            let _ = (path, limits);
+            let _ = (path, limits, affine);
             return Err(ContactEngineError::UnsupportedPlatform);
         }
         #[cfg(windows)]
@@ -143,7 +163,12 @@ impl BallContactEngine {
                 max_index_bytes: limits.max_accounted_bytes,
                 cancel_file: None,
             };
-            let (mut index, build) = FileBvh::build_g17_cancelable(path, &control, cancelled)?;
+            let (mut index, build) = match affine {
+                Some(affine) => {
+                    FileBvh::build_g17_cancelable_transformed(path, &control, cancelled, affine)?
+                }
+                None => FileBvh::build_g17_cancelable(path, &control, cancelled)?,
+            };
             if cancelled.load(Ordering::Relaxed) {
                 return Err(ContactEngineError::Cancelled);
             }

@@ -2,7 +2,7 @@
 //! hasta confirmar la subida completa del reemplazo.
 use crate::preview::PreviewMesh;
 use eframe::glow;
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use glow::HasContext as _;
 
 struct GpuChunk {
@@ -13,6 +13,7 @@ struct GpuChunk {
 pub struct Render3d {
     program: glow::Program,
     model_color: [f32; 3],
+    visual_transform: Mat4,
     vao: glow::VertexArray,
     active: Vec<GpuChunk>,
     staging: Vec<GpuChunk>,
@@ -37,12 +38,14 @@ impl Render3d {
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_normal;
 uniform mat4 u_mvp;
+uniform mat4 u_model_transform;
 out vec3 v_normal;
 out float v_height;
 void main() {
-    gl_Position = u_mvp * vec4(a_pos, 1.0);
-    v_normal = a_normal;
-    v_height = a_pos.z;
+    vec4 model = u_model_transform * vec4(a_pos, 1.0);
+    gl_Position = u_mvp * model;
+    v_normal = mat3(transpose(inverse(u_model_transform))) * a_normal;
+    v_height = model.z;
 }"#,
             );
             gl.compile_shader(vs);
@@ -98,6 +101,7 @@ void main() {
                 .inspect_err(|_| gl.delete_program(program))?;
             Ok(Self {
                 model_color: [160.0 / 255.0, 180.0 / 255.0, 150.0 / 255.0],
+                visual_transform: Mat4::IDENTITY,
                 program,
                 vao,
                 active: vec![],
@@ -115,6 +119,10 @@ void main() {
     /// Solo cambia un uniform; no se reenvían vertices del STL.
     pub fn set_model_color(&mut self, color: [u8; 3]) {
         self.model_color = color.map(|v| f32::from(v) / 255.0);
+    }
+
+    pub fn set_visual_transform(&mut self, transform: Mat4) {
+        self.visual_transform = transform;
     }
 
     pub fn begin_upload(&mut self) {
@@ -244,6 +252,12 @@ void main() {
                     gl.get_uniform_location(self.program, "u_mvp").as_ref(),
                     false,
                     &mvp.to_cols_array(),
+                );
+                gl.uniform_matrix_4_f32_slice(
+                    gl.get_uniform_location(self.program, "u_model_transform")
+                        .as_ref(),
+                    false,
+                    &self.visual_transform.to_cols_array(),
                 );
                 gl.bind_vertex_array(Some(self.vao));
                 gl.enable_vertex_attrib_array(0);

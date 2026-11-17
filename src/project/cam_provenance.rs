@@ -63,6 +63,7 @@ pub struct CamProvenance {
     source_modified: SystemTime,
     model_bounds_min: [f64; 3],
     model_bounds_max: [f64; 3],
+    model_transform: super::model_transform::ModelTransform,
     stock_min: [f64; 3],
     stock_size: [f64; 3],
     tool: ToolSignature,
@@ -115,6 +116,7 @@ impl CamProvenance {
             source_modified: modified,
             model_bounds_min: model.bounds.min,
             model_bounds_max: model.bounds.max,
+            model_transform: project.model_transform,
             stock_min: stock.min,
             stock_size: stock.size,
             tool,
@@ -149,6 +151,7 @@ impl CamProvenance {
             || model.triangles != self.source_triangles
             || model.bounds.min != self.model_bounds_min
             || model.bounds.max != self.model_bounds_max
+            || project.model_transform != self.model_transform
             || stock.min != self.stock_min
             || stock.size != self.stock_size
             || self.calculation != (*params).into()
@@ -211,6 +214,7 @@ mod tests {
         project.model = Some(ModelReference {
             name: "patron.stl".into(),
             bounds,
+            raw_bounds: bounds,
             triangles: 1,
             size_bytes: 134,
         });
@@ -270,6 +274,15 @@ mod tests {
             p.spindle_rpm = Some(16000.0);
         }
         assert!(stamp.is_current(&project, 0, &library));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn changing_transform_always_invalidates_even_with_equal_aabb() {
+        let (mut project, library, path, stamp) = sample_fixture();
+        assert!(stamp.is_current(&project, 0, &library));
+        project.model_transform.rotation_degrees[2] = 180.0;
+        assert!(!stamp.is_current(&project, 0, &library));
         fs::remove_file(path).unwrap();
     }
 

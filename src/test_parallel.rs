@@ -19,6 +19,7 @@ use cam_libre_visor::cam_contract::{CamOperationView, CuttingConditions};
 use cam_libre_visor::cam_geometry::{
     contact_solver::{ContactQuery, ContactSolver, CutterGeometry},
     service::ContactEngineLimits,
+    stl::GeometryAffine,
 };
 use cam_libre_visor::toolpath::{RasterPattern, Toolpath};
 use cam_libre_visor::toolpath_links::{PlannedMoveKind, PlannedToolpath};
@@ -142,7 +143,7 @@ impl SamplingPlan {
     }
 
     /// El sobreespesor procede de la operacion, no de la biblioteca de herramientas.
-    /// En TEST la escala es 1 unidad STL = 1 mm (misma hipotesis que G20).
+    /// En TEST, el muestreo y las herramientas usan el modelo fisico en mm.
     fn contact_query(&self, line: usize, sample: usize, cutter: CutterGeometry) -> ContactQuery {
         let [x, y] = self.xy(line, sample);
         ContactQuery {
@@ -231,6 +232,7 @@ impl Job {
         plan: SamplingPlan,
         tool: ResolvedCutter,
         provenance: CamProvenance,
+        affine: Option<GeometryAffine>,
         ctx: egui::Context,
     ) -> Result<Self, String> {
         let cutter = tool.cutter;
@@ -249,6 +251,7 @@ impl Job {
                     expected_triangles,
                     &plan,
                     cutter,
+                    affine,
                     &token,
                     &worker_progress,
                 );
@@ -282,6 +285,7 @@ fn compute(
     expected_triangles: u32,
     plan: &SamplingPlan,
     cutter: CutterGeometry,
+    affine: Option<GeometryAffine>,
     cancelled: &AtomicBool,
     progress: &AtomicUsize,
 ) -> Result<Outcome, String> {
@@ -297,15 +301,15 @@ fn compute(
     if size != expected_size {
         return Err("El STL ha cambiado de tamano desde que se abrio".into());
     }
-    let (mut engine, report) = ContactSolver::open_stl(
-        path,
-        ContactEngineLimits {
-            max_triangles: MAX_TRIANGLES,
-            max_accounted_bytes: ENGINE_BYTES,
-            cache_bytes: CACHE_BYTES,
-        },
-        cancelled,
-    )
+    let limits = ContactEngineLimits {
+        max_triangles: MAX_TRIANGLES,
+        max_accounted_bytes: ENGINE_BYTES,
+        cache_bytes: CACHE_BYTES,
+    };
+    let (mut engine, report) = match affine {
+        Some(matrix) => ContactSolver::open_stl_transformed(path, limits, cancelled, matrix),
+        None => ContactSolver::open_stl(path, limits, cancelled),
+    }
     .map_err(|e| format!("Error preparando el motor geometrico: {e}"))?;
     if report.triangles != expected_triangles as usize {
         return Err("El numero de triangulos del STL no coincide con el modelo abierto".into());
@@ -830,7 +834,7 @@ impl TestParallelPanel {
                                             };
                                         }
                                         if let Some(area) = p.area_xy.as_mut() {
-                                            ui.small("Limites en coordenadas originales del STL.");
+                                            ui.small("Limites del modelo transformado, en mm.");
                                             ui.horizontal(|ui| {
                                                 ui.label("X min");
                                                 ui.add(egui::DragValue::new(&mut area.x_min).speed(0.1));
@@ -1109,20 +1113,26 @@ impl TestParallelPanel {
                     tool.ensure_supported()?;
                     let provenance =
                         CamProvenance::capture(project, index, path, tool.signature.clone())?;
+                    let affine = if project.model_transform.is_identity() {
+                        None
+                    } else {
+                        Some(project.model_transform.affine(&model.raw_bounds)?)
+                    };
                     let mut effective = params;
                     effective.diameter = tool.diameter_model();
                     SamplingPlan::new(model.bounds, effective)
                         .and_then(|plan| plan.with_stock(project.stock.as_ref()))
-                        .map(|plan| (plan, tool, provenance))
+                        .map(|plan| (plan, tool, provenance, affine))
                 });
                 match prepared {
-                    Ok((plan, tool, provenance)) => match Job::start(
+                    Ok((plan, tool, provenance, affine)) => match Job::start(
                         path.to_path_buf(),
                         model.size_bytes,
                         model.triangles,
                         plan,
                         tool,
                         provenance,
+                        affine,
                         ctx.clone(),
                     ) {
                         Ok(job) => {
@@ -1310,6 +1320,10 @@ mod g25_3_cone_direction_tests {
                 min: [0.0, 0.0, 0.0],
                 max: [10.0, 10.0, 10.0],
             },
+            raw_bounds: Bounds {
+                min: [0.0, 0.0, 0.0],
+                max: [10.0, 10.0, 10.0],
+            },
             triangles: 1,
             size_bytes: 0,
         }
@@ -1448,6 +1462,7 @@ mod tests {
                 CutterGeometry::BallNose {
                     diameter_model: 4.0
                 },
+                None,
                 &cancel,
                 &AtomicUsize::new(0)
             )
@@ -1614,6 +1629,7 @@ mod g20_library_sync_tests {
         project.model = Some(crate::project::model::ModelReference {
             name: "patron.stl".into(),
             bounds,
+            raw_bounds: bounds,
             triangles: 1,
             size_bytes: 134,
         });
@@ -1740,6 +1756,7 @@ mod g23_operation_to_solver_tests {
                 1,
                 &nominal_plan,
                 cutter,
+                None,
                 &cancel,
                 &AtomicUsize::new(0),
             )
@@ -1752,6 +1769,7 @@ mod g23_operation_to_solver_tests {
                 1,
                 &roughing_plan,
                 cutter,
+                None,
                 &cancel,
                 &AtomicUsize::new(0),
             )
@@ -1851,6 +1869,7 @@ mod g25_2_pipeline_tests {
             1,
             &SamplingPlan::new(bounds, params).unwrap(),
             cutter,
+            None,
             &cancel,
             &AtomicUsize::new(0),
         )
@@ -1862,6 +1881,7 @@ mod g25_2_pipeline_tests {
             1,
             &SamplingPlan::new(bounds, params).unwrap(),
             cutter,
+            None,
             &cancel,
             &AtomicUsize::new(0),
         )

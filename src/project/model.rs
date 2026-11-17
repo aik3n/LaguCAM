@@ -3,7 +3,10 @@ use crate::stl::{Bounds, StlInfo};
 #[derive(Clone, Debug)]
 pub struct ModelReference {
     pub name: String,
+    /// AABB tras la transformacion fisica, expresada en mm internos.
     pub bounds: Bounds,
+    /// AABB original del STL, sin reinterpretacion de unidades.
+    pub raw_bounds: Bounds,
     pub triangles: u32,
     pub size_bytes: u64,
 }
@@ -13,6 +16,7 @@ impl ModelReference {
         Self {
             name,
             bounds: info.bounds,
+            raw_bounds: info.bounds,
             triangles: info.triangles,
             size_bytes: info.size_bytes,
         }
@@ -51,6 +55,7 @@ mod tests {
         let model = ModelReference {
             name: "test".into(),
             bounds,
+            raw_bounds: bounds,
             triangles: 2,
             size_bytes: 0,
         };

@@ -303,6 +303,7 @@ mod tests {
         project.model = Some(ModelReference {
             name: "reference".into(),
             bounds,
+            raw_bounds: bounds,
             triangles: 12,
             size_bytes: 684,
         });

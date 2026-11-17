@@ -209,6 +209,10 @@ mod tests {
                 min: [50.0, 100.0, 150.0],
                 max: [70.0, 120.0, 170.0],
             },
+            raw_bounds: Bounds {
+                min: [50.0, 100.0, 150.0],
+                max: [70.0, 120.0, 170.0],
+            },
         };
         assert_eq!(
             model.visual_point([50.0, 100.0, 150.0]).unwrap(),

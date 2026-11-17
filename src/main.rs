@@ -1172,6 +1172,17 @@ impl App {
         let projection = self.projection;
         let aspect = rect.width() / rect.height().max(1.0);
         let model_color = self.project.model_color;
+        let visual_transform = self
+            .project
+            .model
+            .as_ref()
+            .and_then(|model| {
+                self.project
+                    .model_transform
+                    .preview_matrix(&model.raw_bounds, &model.bounds)
+                    .ok()
+            })
+            .unwrap_or(glam::Mat4::IDENTITY);
         let renderer = Arc::clone(&self.renderer);
         let stock_renderer = Arc::clone(&self.stock_renderer);
         let cam_marker_renderer = Arc::clone(&self.cam_marker_renderer);
@@ -1202,6 +1213,7 @@ impl App {
                 {
                     let mut mesh = renderer.lock();
                     mesh.set_model_color(model_color);
+                    mesh.set_visual_transform(visual_transform);
                     mesh.paint(painter.gl(), yaw, pitch, distance, aspect, pan, projection);
                 }
                 // Consultar la escena renderizada: no se relee el fichero ni se
@@ -1259,10 +1271,14 @@ impl App {
             response.clicked() && !over_nav_cube,
             response.hover_pos(),
         );
-        if let (Some(profiles), Some(model)) = (&self.sample_profiles, &self.project.model) {
+        if self.project.model_transform.is_identity()
+            && let (Some(profiles), Some(model)) = (&self.sample_profiles, &self.project.model)
+        {
             profiles.paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
-        if let (Some(sections), Some(model)) = (&self.section_profiles, &self.project.model) {
+        if self.project.model_transform.is_identity()
+            && let (Some(sections), Some(model)) = (&self.section_profiles, &self.project.model)
+        {
             sections.paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
         if let Some(model) = &self.project.model {
@@ -1436,6 +1452,7 @@ impl eframe::App for App {
             egui::Panel::top("lagucam_status").show(ui, |ui| self.status_bar(ui));
         }
         let enabled = !self.busy();
+        let before_transform = self.project.model_transform;
         let open_docked =
             self.panels
                 .show_docked(ui, &mut self.project, &mut self.property_error, enabled);
@@ -1446,6 +1463,14 @@ impl eframe::App for App {
             &mut self.property_error,
             enabled,
         );
+        if self.project.model_transform != before_transform {
+            self.section_profiles = None;
+            self.sample_profiles = None;
+            self.sample_profile_job = None;
+            self.test_parallel
+                .sync_tools(&mut self.project, &self.tool_library);
+            self.message = "Transformacion STL aplicada: bruto reajustado y CAM invalidado; revisar setup y area de corte".into();
+        }
         if let Some(index) = self.panels.take_edit_operation() {
             self.test_parallel.open_editor(index, &self.project);
         }

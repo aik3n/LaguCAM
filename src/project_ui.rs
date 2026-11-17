@@ -239,18 +239,153 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 ui.label(format!("Archivo: {}", model.name));
                 ui.label(format!("Triángulos: {}", model.triangles));
                 ui.label(format!("Tamaño STL: {} bytes", model.size_bytes));
+                ui.label("Dimensiones fisicas del modelo (mm):");
                 for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
                     ui.label(format!(
-                        "{axis}: {:.6} .. {:.6}",
-                        model.bounds.min[i], model.bounds.max[i]
+                        "{axis}: {:.6} .. {:.6} ({} mm)",
+                        model.bounds.min[i],
+                        model.bounds.max[i],
+                        model.bounds.max[i] - model.bounds.min[i],
                     ));
                 }
                 ui.horizontal(|ui| {
                     ui.label("Color del modelo STL");
                     ui.color_edit_button_srgb(&mut project.model_color);
                 });
-                ui.small("El color conserva iluminación y relieve; el STL sigue opaco.");
-                ui.small("Coordenadas originales f64. STL sin unidades definidas.");
+                ui.small("STL original sin modificar; geometria y CAM expresados en mm.");
+                ui.separator();
+                ui.heading("Transformacion del modelo");
+                let id = ui.make_persistent_id((
+                    "lagucam_model_transform_draft",
+                    &model.name,
+                    model.triangles,
+                    model.size_bytes,
+                ));
+                let mut candidate = ui
+                    .ctx()
+                    .data_mut(|data| {
+                        data.get_temp::<crate::project::model_transform::ModelTransform>(id)
+                    })
+                    .unwrap_or(project.model_transform);
+                ui.label("Unidades del STL importado");
+                let mut changed = false;
+                egui::ComboBox::from_id_salt("unidad_stl_de_origen")
+                    .selected_text(match candidate.source_unit {
+                        crate::project::model_transform::StlSourceUnit::Millimeters => {
+                            "Milimetros (mm)"
+                        }
+                        crate::project::model_transform::StlSourceUnit::Inches => "Pulgadas (inch)",
+                    })
+                    .show_ui(ui, |ui| {
+                        use crate::project::model_transform::StlSourceUnit;
+                        changed |= ui
+                            .selectable_value(
+                                &mut candidate.source_unit,
+                                StlSourceUnit::Millimeters,
+                                "Milimetros (mm)",
+                            )
+                            .changed();
+                        changed |= ui
+                            .selectable_value(
+                                &mut candidate.source_unit,
+                                StlSourceUnit::Inches,
+                                "Pulgadas (inch)",
+                            )
+                            .changed();
+                    });
+                ui.separator();
+                ui.label("Escala (factor adicional sin unidades)");
+                let uniform_id = id.with("uniform");
+                let mut uniform = ui
+                    .ctx()
+                    .data_mut(|data| data.get_temp::<bool>(uniform_id))
+                    .unwrap_or(true);
+                if ui
+                    .checkbox(&mut uniform, "Mantener proporciones XYZ")
+                    .changed()
+                {
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(uniform_id, uniform));
+                    if uniform {
+                        candidate.scale_xyz = [candidate.scale_xyz[0]; 3];
+                        changed = true;
+                    }
+                }
+                if uniform {
+                    let mut factor = candidate.scale_xyz[0];
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut factor)
+                                .speed(0.01)
+                                .range(0.000001..=1000000.0)
+                                .prefix("XYZ: "),
+                        )
+                        .changed()
+                    {
+                        candidate.scale_xyz = [factor; 3];
+                        changed = true;
+                    }
+                } else {
+                    changed |= vector(ui, &mut candidate.scale_xyz);
+                }
+                ui.separator();
+                ui.label("Rotacion XYZ (grados; Rz · Ry · Rx)");
+                changed |= vector(ui, &mut candidate.rotation_degrees);
+                ui.label("Desplazamiento XYZ (mm)");
+                changed |= vector(ui, &mut candidate.translation_mm);
+                egui::ComboBox::from_label("Pivote de la transformacion")
+                    .selected_text(match candidate.pivot {
+                        crate::project::model_transform::ModelPivot::StlOrigin => "Origen del STL",
+                        crate::project::model_transform::ModelPivot::BoundsCenter => {
+                            "Centro del modelo original"
+                        }
+                    })
+                    .show_ui(ui, |ui| {
+                        use crate::project::model_transform::ModelPivot;
+                        changed |= ui
+                            .selectable_value(
+                                &mut candidate.pivot,
+                                ModelPivot::StlOrigin,
+                                "Origen del STL",
+                            )
+                            .changed();
+                        changed |= ui
+                            .selectable_value(
+                                &mut candidate.pivot,
+                                ModelPivot::BoundsCenter,
+                                "Centro del modelo original",
+                            )
+                            .changed();
+                    });
+                if changed {
+                    ui.ctx().data_mut(|data| data.insert_temp(id, candidate));
+                }
+                if let Err(message) = candidate.validate() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, message);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Restablecer valores").clicked() {
+                        candidate = Default::default();
+                        ui.ctx().data_mut(|data| data.insert_temp(id, candidate));
+                    }
+                    if ui
+                        .add_enabled(
+                            candidate != project.model_transform,
+                            egui::Button::new("Aplicar transformacion al modelo"),
+                        )
+                        .clicked()
+                    {
+                        match project.set_model_transform(candidate) {
+                            Ok(()) => {
+                                error.clear();
+                                ui.ctx().data_mut(|data| data.insert_temp(id, candidate));
+                            }
+                            Err(message) => *error = message,
+                        }
+                    }
+                });
+                ui.small("Aplicar reajusta el bruto, elimina las areas XY antiguas e invalida CAM; revisa el cero CNC.");
+                ui.small("La unidad de trabajo de la interfaz se configurara independientemente en Opciones.");
             } else {
                 ui.label("Abre un modelo para iniciar el proyecto.");
                 if ui.button("Abrir modelo…").clicked() {

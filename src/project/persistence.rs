@@ -4,6 +4,7 @@ use crate::{
     project::{
         Project,
         display::{StockColor, StockDisplay, StockMode},
+        model_transform::ModelTransform,
         operations::{
             Operation, OperationKind, OperationStatus, Operations, ParallelTestParameters,
         },
@@ -54,6 +55,8 @@ pub struct StlReference {
 #[serde(deny_unknown_fields)]
 pub struct ProjectState {
     pub stock: Option<SavedStock>,
+    #[serde(default, skip_serializing_if = "ModelTransform::is_identity")]
+    pub model_transform: ModelTransform,
     pub stock_display: SavedDisplay,
     pub origin: SavedOrigin,
     pub model_color: [u8; 3],
@@ -130,6 +133,7 @@ impl ProjectState {
         let origin = &project.origin;
         Self {
             stock,
+            model_transform: project.model_transform,
             stock_display: SavedDisplay {
                 mode: match display.mode {
                     StockMode::Solid => "solid",
@@ -194,6 +198,8 @@ impl ProjectState {
     }
 
     pub fn validate(&self, model_bounds: Option<Bounds>) -> Result<(), String> {
+        self.model_transform.validate()?;
+        // P1-M2: el mismo contrato transforma geometria en visor y CAM.
         if self.stock_display.opacity_percent > 100 {
             return Err("Opacidad del bruto fuera del rango 0..100".into());
         }
@@ -216,11 +222,17 @@ impl ProjectState {
         if !origin.offset.iter().all(|v| v.is_finite()) {
             return Err("Offset CNC no finito".into());
         }
-        if let (Some(stock), Some(bounds)) = (&stock, model_bounds) {
+        if model_bounds.is_none() && !self.model_transform.is_identity() {
+            return Err("No puede aplicarse transformacion sin STL".into());
+        }
+        let physical_bounds = model_bounds
+            .map(|raw| self.model_transform.transformed_bounds(&raw))
+            .transpose()?;
+        if let (Some(stock), Some(bounds)) = (&stock, physical_bounds) {
             origin
                 .model_position(stock, &bounds)
                 .map_err(str::to_owned)?;
-        } else if stock.is_some() || model_bounds.is_some() {
+        } else if stock.is_some() || physical_bounds.is_some() {
             return Err("El bruto y el modelo deben existir juntos".into());
         }
         for op in &self.operations {
@@ -279,6 +291,10 @@ impl ProjectState {
         let mut project = Project::default();
         if let Some(info) = info {
             project.loaded(name, info);
+        }
+        project.model_transform = self.model_transform;
+        if let Some(model) = &mut project.model {
+            model.bounds = self.model_transform.transformed_bounds(&model.raw_bounds)?;
         }
         project.stock = self.stock.as_ref().map(|s| Stock {
             min: s.min,
@@ -377,8 +393,8 @@ impl ProjectDocument {
                     path: make_relative(path, project_file),
                     size_bytes: size,
                     triangles: count,
-                    bounds_min: model.bounds.min,
-                    bounds_max: model.bounds.max,
+                    bounds_min: model.raw_bounds.min,
+                    bounds_max: model.raw_bounds.max,
                     sample_fnv64: signature,
                     modified_unix_ms: modified,
                 })

@@ -13,7 +13,7 @@ use super::service::{
     BallContactEngine, BallContactQuery, ContactEngineError, ContactEngineLimits,
     ContactEngineOpenReport,
 };
-use super::stl::G16AccessMode;
+use super::stl::{G16AccessMode, GeometryAffine};
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -283,6 +283,17 @@ impl ContactSolver {
         cancelled: &AtomicBool,
     ) -> Result<(Self, ContactEngineOpenReport), ContactEngineError> {
         let (engine, report) = BallContactEngine::open_stl(path, limits, cancelled)?;
+        Ok((Self { engine }, report))
+    }
+
+    pub fn open_stl_transformed(
+        path: &Path,
+        limits: ContactEngineLimits,
+        cancelled: &AtomicBool,
+        affine: GeometryAffine,
+    ) -> Result<(Self, ContactEngineOpenReport), ContactEngineError> {
+        let (engine, report) =
+            BallContactEngine::open_stl_transformed(path, limits, cancelled, affine)?;
         Ok((Self { engine }, report))
     }
 

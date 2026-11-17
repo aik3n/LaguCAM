@@ -12,6 +12,41 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
+/// Transformacion afín de coordenadas del STL original a coordenadas de CAM (mm).
+/// Matriz por columnas; se aplica tanto al indice XY como a cada triangulo leido.
+/// La opcion None en FileBvh conserva la ruta original bit a bit.
+#[derive(Clone, Copy, Debug)]
+pub struct GeometryAffine {
+    pub columns: [[f64; 3]; 3],
+    pub offset: [f64; 3],
+}
+
+impl GeometryAffine {
+    pub fn is_finite(self) -> bool {
+        self.columns
+            .iter()
+            .flatten()
+            .chain(self.offset.iter())
+            .all(|x| x.is_finite())
+    }
+
+    pub fn transform_point(self, point: [f64; 3]) -> Result<[f64; 3], StlBvhError> {
+        if !self.is_finite() || !point.iter().all(|x| x.is_finite()) {
+            return Err(StlBvhError::ArithmeticRange);
+        }
+        let result: [f64; 3] = std::array::from_fn(|i| {
+            self.offset[i]
+                + self.columns[0][i] * point[0]
+                + self.columns[1][i] * point[1]
+                + self.columns[2][i] * point[2]
+        });
+        if !result.iter().all(|x| x.is_finite()) {
+            return Err(StlBvhError::ArithmeticRange);
+        }
+        Ok(result)
+    }
+}
+
 const BVH_LEAF_SIZE: usize = 8;
 const G15_RECORDS_PER_BLOCK: usize = 1024;
 const G15_BLOCK_BYTES: usize = G15_RECORDS_PER_BLOCK * 50;
@@ -91,6 +126,45 @@ impl PrimitiveRecord {
             id,
         }
     }
+    /// Indice conservador: redondea el AABB transformado hacia fuera en f32.
+    /// Nunca utiliza limites del STL original para descartar contactos transformados.
+    fn from_tri_affine(
+        tri: &[[f32; 3]; 3],
+        id: u32,
+        affine: GeometryAffine,
+    ) -> Result<Self, StlBvhError> {
+        let mut xmin = f64::INFINITY;
+        let mut xmax = f64::NEG_INFINITY;
+        let mut ymin = f64::INFINITY;
+        let mut ymax = f64::NEG_INFINITY;
+        for vertex in tri {
+            let point = [
+                f64::from(vertex[0]),
+                f64::from(vertex[1]),
+                f64::from(vertex[2]),
+            ];
+            let p = affine.transform_point(point)?;
+            xmin = xmin.min(p[0]);
+            xmax = xmax.max(p[0]);
+            ymin = ymin.min(p[1]);
+            ymax = ymax.max(p[1]);
+        }
+        let values = [xmin, xmax, ymin, ymax];
+        if values
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > f64::from(f32::MAX))
+        {
+            return Err(StlBvhError::ArithmeticRange);
+        }
+        Ok(Self {
+            xmin: (xmin as f32).next_down(),
+            xmax: (xmax as f32).next_up(),
+            ymin: (ymin as f32).next_down(),
+            ymax: (ymax as f32).next_up(),
+            id,
+        })
+    }
+
     fn centroid(self, axis: usize) -> f64 {
         if axis == 0 {
             (f64::from(self.xmin) + f64::from(self.xmax)) * 0.5
@@ -180,6 +254,26 @@ fn stl_triangle_f64(record: &[u8; 50]) -> Result<[Vec3; 3], StlBvhError> {
     }))
 }
 
+fn stl_triangle_affine(
+    record: &[u8; 50],
+    affine: Option<GeometryAffine>,
+) -> Result<[Vec3; 3], StlBvhError> {
+    let original = stl_triangle_f64(&*record)?;
+    let Some(affine) = affine else {
+        return Ok(original);
+    };
+    let mut transformed = original;
+    for v in &mut transformed {
+        let p = affine.transform_point([v.x, v.y, v.z])?;
+        *v = Vec3 {
+            x: p[0],
+            y: p[1],
+            z: p[2],
+        };
+    }
+    Ok(transformed)
+}
+
 fn source_stamp(metadata: &Metadata) -> (u64, Option<SystemTime>) {
     (metadata.len(), metadata.modified().ok())
 }
@@ -191,6 +285,7 @@ pub struct FileBvh {
     nodes: Vec<FileBvhNode>,
     block_cache: Option<G15BlockCache>,
     g16_budget: Option<usize>,
+    geometry_affine: Option<GeometryAffine>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -629,6 +724,7 @@ impl FileBvh {
                             x,
                             y,
                             radius,
+                            self.geometry_affine,
                             &mut best,
                             &mut stats,
                             &mut io,
@@ -648,6 +744,7 @@ impl FileBvh {
                 x,
                 y,
                 radius,
+                self.geometry_affine,
                 &mut best,
                 &mut stats,
                 &mut io,
@@ -724,9 +821,12 @@ impl FileBvh {
                     let record =
                         cache.record(&mut self.source, self.records.len(), p.id, &mut io)?;
                     stats.stl_records_read += 1;
-                    if let Some(z) =
-                        ball_tip_height_triangle(stl_triangle_f64(record)?, x, y, radius)?
-                    {
+                    if let Some(z) = ball_tip_height_triangle(
+                        stl_triangle_affine(record, self.geometry_affine)?,
+                        x,
+                        y,
+                        radius,
+                    )? {
                         best = Some(best.map_or(z, |v| v.max(z)));
                     }
                 }
@@ -752,6 +852,7 @@ fn g15_process_batch(
     x: f64,
     y: f64,
     radius: f64,
+    affine: Option<GeometryAffine>,
     best: &mut Option<f64>,
     stats: &mut FileQueryStats,
     io: &mut G15IoStats,
@@ -765,7 +866,7 @@ fn g15_process_batch(
             g17_check_cancel(cancel)?;
         }
         let record = cache.record(source, total_records, ids[i], io)?;
-        heights[i] = ball_tip_height_triangle(stl_triangle_f64(record)?, x, y, radius)?;
+        heights[i] = ball_tip_height_triangle(stl_triangle_affine(record, affine)?, x, y, radius)?;
         stats.stl_records_read += 1;
     }
     for z in heights.into_iter().flatten() {
@@ -894,7 +995,7 @@ impl FileBvh {
                         cache.record(&mut self.source, self.records.len(), p.id, &mut io)?;
                     stats.stl_records_read += 1;
                     if let Some(z) = bull_tip_height_triangle(
-                        stl_triangle_f64(record)?,
+                        stl_triangle_affine(record, self.geometry_affine)?,
                         x,
                         y,
                         outer_radius,
@@ -996,9 +1097,12 @@ impl FileBvh {
                     let record =
                         cache.record(&mut self.source, self.records.len(), p.id, &mut io)?;
                     stats.stl_records_read += 1;
-                    if let Some(z) =
-                        flat_tip_height_triangle(stl_triangle_f64(record)?, x, y, radius)?
-                    {
+                    if let Some(z) = flat_tip_height_triangle(
+                        stl_triangle_affine(record, self.geometry_affine)?,
+                        x,
+                        y,
+                        radius,
+                    )? {
                         best = Some(best.map_or(z, |previous| previous.max(z)));
                     }
                 }
@@ -1106,7 +1210,7 @@ impl FileBvh {
                         cache.record(&mut self.source, self.records.len(), p.id, &mut io)?;
                     stats.stl_records_read += 1;
                     if let Some(z) = flat_tip_height_triangle_allowance(
-                        stl_triangle_f64(record)?,
+                        stl_triangle_affine(record, self.geometry_affine)?,
                         x,
                         y,
                         radius,
@@ -1157,9 +1261,12 @@ impl FileBvh {
                         .seek(SeekFrom::Start(84 + u64::from(p.id) * 50))?;
                     self.source.read_exact(&mut record)?;
                     stats.stl_records_read += 1;
-                    if let Some(z) =
-                        ball_tip_height_triangle(stl_triangle_f64(&record)?, x, y, radius)?
-                    {
+                    if let Some(z) = ball_tip_height_triangle(
+                        stl_triangle_affine(&record, self.geometry_affine)?,
+                        x,
+                        y,
+                        radius,
+                    )? {
                         best = Some(best.map_or(z, |v| v.max(z)));
                     }
                 }
@@ -1245,7 +1352,7 @@ pub struct BuildStats {
 
 impl FileBvh {
     pub fn build(path: &Path, control: &BuildControl) -> Result<(Self, BuildStats), StlBvhError> {
-        Self::build_g17_impl(path, control, None)
+        Self::build_g17_impl(path, control, None, None)
     }
 
     /// Construcción con token atómico; comprueba durante el escaneo y el árbol.
@@ -1254,13 +1361,27 @@ impl FileBvh {
         control: &BuildControl,
         cancel: &AtomicBool,
     ) -> Result<(Self, BuildStats), StlBvhError> {
-        Self::build_g17_impl(path, control, Some(cancel))
+        Self::build_g17_impl(path, control, Some(cancel), None)
+    }
+
+    /// Construye un BVH sobre la geometria realmente transformada, sin duplicar STL.
+    pub fn build_g17_cancelable_transformed(
+        path: &Path,
+        control: &BuildControl,
+        cancel: &AtomicBool,
+        affine: GeometryAffine,
+    ) -> Result<(Self, BuildStats), StlBvhError> {
+        if !affine.is_finite() {
+            return Err(StlBvhError::ArithmeticRange);
+        }
+        Self::build_g17_impl(path, control, Some(cancel), Some(affine))
     }
 
     fn build_g17_impl(
         path: &Path,
         control: &BuildControl,
         cancel: Option<&AtomicBool>,
+        geometry_affine: Option<GeometryAffine>,
     ) -> Result<(Self, BuildStats), StlBvhError> {
         use std::time::Instant;
         control.check_g17(cancel)?;
@@ -1297,7 +1418,11 @@ impl FileBvh {
             }
             reader.read_exact(&mut record)?;
             let triangle = stl_triangle_f32(&record)?;
-            records.push(PrimitiveRecord::from_tri(&triangle, id as u32));
+            let primitive = match geometry_affine {
+                Some(affine) => PrimitiveRecord::from_tri_affine(&triangle, id as u32, affine)?,
+                None => PrimitiveRecord::from_tri(&triangle, id as u32),
+            };
+            records.push(primitive);
         }
         let source = reader.into_inner();
         if source_stamp(&source.metadata()?) != stamp {
@@ -1317,6 +1442,7 @@ impl FileBvh {
             nodes,
             block_cache: None,
             g16_budget: None,
+            geometry_affine,
         };
         let mut until_check = 0usize;
         let t_tree = Instant::now();
@@ -1597,6 +1723,32 @@ mod integration_tests {
                 .open(&file.0)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn transformed_bvh_uses_physical_coordinates_for_both_bounds_and_contacts() {
+        let triangle = [[[0.0, 0.0, 1.0], [2.0, 0.0, 1.0], [0.0, 2.0, 1.0]]];
+        let file = write_stl(&triangle);
+        let affine = GeometryAffine {
+            columns: [[25.4, 0.0, 0.0], [0.0, 25.4, 0.0], [0.0, 0.0, 25.4]],
+            offset: [0.0; 3],
+        };
+        let cancel = AtomicBool::new(false);
+        let (mut bvh, _) =
+            FileBvh::build_g17_cancelable_transformed(&file.0, &control(), &cancel, affine)
+                .unwrap();
+        let height = bvh.query(6.35, 6.35, 2.0).unwrap().0.unwrap();
+        assert!((height - 25.4).abs() < 1.0e-9);
+        bvh.configure_g16_auto_cache(16 * 1024, 1_000_000).unwrap();
+        let auto = bvh
+            .query_g17_auto_cancelable(6.35, 6.35, 2.0, &cancel)
+            .unwrap()
+            .0
+            .unwrap();
+        assert!((auto - height).abs() < 1.0e-9);
+        assert_eq!(bvh.query(60.0, 60.0, 2.0).unwrap().0, None);
+        let (mut original, _) = FileBvh::build(&file.0, &control()).unwrap();
+        assert_eq!(original.query(0.25, 0.25, 0.1).unwrap().0, Some(1.0));
     }
 
     #[test]
