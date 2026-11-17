@@ -4,6 +4,7 @@
 use crate::{
     project::{
         Project,
+        cam_coordinates::WorkFrame,
         model::ModelReference,
         operations::{OperationKind, OperationStatus, ParallelTestParameters},
     },
@@ -13,6 +14,7 @@ use crate::{
         model::ToolLibrary,
     },
 };
+use cam_libre_visor::cam_contract::{CamOperationView, CuttingConditions};
 use cam_libre_visor::cam_geometry::{
     contact_solver::{ContactQuery, ContactSolver, CutterGeometry},
     service::ContactEngineLimits,
@@ -176,6 +178,7 @@ struct Outcome {
     linked: PlannedToolpath,
     // G25.4b: informe de la MISMA secuencia calculada; no se persiste en .lagucam.
     validation: ValidationReport,
+    conditions: CuttingConditions,
     contacts: usize,
     lines_count: usize,
     samples_per_line: usize,
@@ -351,10 +354,16 @@ fn compute(
     .map_err(|e| format!("Error planificando movimientos propuestos: {e}"))?;
     // La validacion es inmutable y trabaja con la secuencia final de movimientos.
     let validation = validate_planned_toolpath(&linked);
+    let conditions = plan.params.cutting_conditions();
+    // La misma trayectoria validada y sus datos F/S forman la vista CAM comun.
+    // La vista NO cambia ni recalcula movimientos; la salida sigue en mm/modelo.
+    CamOperationView::new(&linked, &validation, conditions)
+        .map_err(|e| format!("Condiciones CAM invalidas: {e}"))?;
     Ok(Outcome {
         toolpath,
         linked,
         validation,
+        conditions,
         contacts,
         lines_count: plan.lines,
         samples_per_line: plan.samples,
@@ -723,6 +732,33 @@ impl TestParallelPanel {
                                                 .speed(0.1).range(0.0..=1_000_000.0).suffix(" mm"));
                                         });
                                         ui.small("Separacion uniforme respecto al modelo nominal; no se acumula entre operaciones.");
+                                        ui.separator();
+                                        ui.small("Condiciones de corte de esta estrategia (pendientes por defecto):");
+                                        ui.horizontal(|ui| {
+                                            ui.label("Avance F de corte:");
+                                            let mut defined = p.cutting_feed_mm_min.is_some();
+                                            if ui.checkbox(&mut defined, "Definir").changed() {
+                                                p.cutting_feed_mm_min = defined.then_some(0.0);
+                                            }
+                                            if let Some(feed) = p.cutting_feed_mm_min.as_mut() {
+                                                ui.add(egui::DragValue::new(feed)
+                                                    .speed(10.0).range(0.0..=1_000_000.0)
+                                                    .suffix(" mm/min"));
+                                            }
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Husillo S:");
+                                            let mut defined = p.spindle_rpm.is_some();
+                                            if ui.checkbox(&mut defined, "Definir").changed() {
+                                                p.spindle_rpm = defined.then_some(0.0);
+                                            }
+                                            if let Some(rpm) = p.spindle_rpm.as_mut() {
+                                                ui.add(egui::DragValue::new(rpm)
+                                                    .speed(100.0).range(0.0..=1_000_000.0)
+                                                    .suffix(" rpm"));
+                                            }
+                                        });
+                                        ui.small("F/S son datos de estrategia, no alteran el contacto STL ni autorizan G-code.");
                                         ui.horizontal(|ui| {
                                             ui.label("Direccion:");
                                             ui.radio_value(&mut p.along_x, true, "Eje X");
@@ -850,6 +886,18 @@ impl TestParallelPanel {
                 if !self.message.is_empty() {
                     ui.small(&self.message);
                 }
+                if let Some(result) = self.results.get(&index) {
+                    let f = result.conditions.feed_mm_min
+                        .map(|n| format!("{n:.3} mm/min"))
+                        .unwrap_or_else(|| "sin definir".into());
+                    let s = result.conditions.spindle_rpm
+                        .map(|n| format!("{n:.3} rpm"))
+                        .unwrap_or_else(|| "sin definir".into());
+                    ui.small(format!("Condiciones de la ultima generacion: F={f}; S={s}; unidades: mm"));
+                    if result.conditions.require_configured().is_err() {
+                        ui.small("F/S pendientes: la previsualizacion funciona, pero el futuro postprocesado necesitara ambos valores.");
+                    }
+                }
                 // No dependemos del mensaje global de la ultima operacion:
                 // cada resultado lleva su propio informe, invalidado con el resultado.
                 if let Some(result) = self.results.get(&index) {
@@ -896,6 +944,48 @@ impl TestParallelPanel {
                     ui.small(
                         "Solo integridad estructural: NO verifica colisiones, material restante, fijaciones ni seguridad CNC. Sin G-code.",
                     );
+                    // F1.2: las posiciones CNC se derivan del cero ACTUAL.
+                    // No se cachean: mover el origen no obliga a recalcular el contacto.
+                    // La trayectoria para OpenGL sigue en coordenadas STL/modelo.
+                    if let (Some(model), Some(stock)) = (&project.model, &project.stock) {
+                        match WorkFrame::new(&project.origin, stock, &model.bounds) {
+                            Ok(frame) => {
+                                if let (Some(first), Some(last)) =
+                                    (result.linked.moves.first(), result.linked.moves.last())
+                                {
+                                    match (
+                                        frame.model_to_work(first.from),
+                                        frame.model_to_work(last.to),
+                                    ) {
+                                        (Ok(start), Ok(end)) => {
+                                            ui.small(format!(
+                                                "F1.2 - Origen trabajo (mm): inicio X{:.3} Y{:.3} Z{:.3}",
+                                                start[0], start[1], start[2]
+                                            ));
+                                            ui.small(format!(
+                                                "F1.2 - Fin X{:.3} Y{:.3} Z{:.3} (solo referencia)",
+                                                end[0], end[1], end[2]
+                                            ));
+                                        }
+                                        _ => {
+                                            ui.colored_label(
+                                                egui::Color32::LIGHT_RED,
+                                                "F1.2 - Error al convertir los extremos al cero de trabajo",
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    ui.small("F1.2 - Sin movimientos que transformar al origen de trabajo");
+                                }
+                            }
+                            Err(error) => {
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    format!("F1.2 - Origen de trabajo: {error}"),
+                                );
+                            }
+                        }
+                    }
                 }
                 if has_result {
                     ui.checkbox(&mut draft.visible, "Mostrar resultado 3D");
@@ -1276,6 +1366,8 @@ mod tests {
                 pass_pattern: RasterPattern::Unidirectional,
                 clearance_mm: 10.0,
                 approach_mm: 2.0,
+                cutting_feed_mm_min: None,
+                spindle_rpm: None,
                 area_xy: None,
             },
         )
@@ -1299,6 +1391,8 @@ mod tests {
                 pass_pattern: RasterPattern::Unidirectional,
                 clearance_mm: 10.0,
                 approach_mm: 2.0,
+                cutting_feed_mm_min: None,
+                spindle_rpm: None,
                 area_xy: None,
             },
         )
@@ -1515,6 +1609,7 @@ mod g20_library_sync_tests {
                 toolpath: Toolpath::default(),
                 linked: PlannedToolpath::default(),
                 validation: ValidationReport::default(),
+                conditions: CuttingConditions::default(),
                 contacts: 0,
                 lines_count: 0,
                 samples_per_line: 0,
@@ -1835,6 +1930,7 @@ mod g25_4b_integration_tests {
             toolpath,
             linked,
             validation,
+            conditions: CuttingConditions::default(),
             contacts: if with_cuts { 2 } else { 0 },
             lines_count: 1,
             samples_per_line: 2,

@@ -1,5 +1,6 @@
 //! Operaciones CAM: definiciones persistentes, independientes del visor y de OpenGL.
 use crate::tools::model::ToolId;
+use cam_libre_visor::cam_contract::CuttingConditions;
 use cam_libre_visor::toolpath::RasterPattern;
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,12 @@ pub struct ParallelTestParameters {
     /// La estrategia TEST presupone que las coordenadas del STL son milimetros.
     #[serde(default, skip_serializing_if = "allowance_is_zero")]
     pub allowance_mm: f64,
+    /// Avance F propio de la estrategia. None = pendiente; nunca asumir uno.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cutting_feed_mm_min: Option<f64>,
+    /// Velocidad de husillo S propia de la estrategia. None = pendiente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spindle_rpm: Option<f64>,
     /// Orden de corte de las pasadas: el patrón predeterminado conserva G25.1.
     #[serde(default, skip_serializing_if = "RasterPattern::is_unidirectional")]
     pub pass_pattern: RasterPattern,
@@ -81,6 +88,8 @@ impl Default for ParallelTestParameters {
             longitudinal: 2.0,
             along_x: true,
             allowance_mm: 0.0,
+            cutting_feed_mm_min: None,
+            spindle_rpm: None,
             pass_pattern: RasterPattern::Unidirectional,
             clearance_mm: default_clearance_mm(),
             approach_mm: default_approach_mm(),
@@ -120,7 +129,17 @@ impl ParallelTestParameters {
         if let Some(area) = self.area_xy {
             area.validate()?;
         }
+        self.cutting_conditions()
+            .validate_optional()
+            .map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub fn cutting_conditions(self) -> CuttingConditions {
+        CuttingConditions {
+            feed_mm_min: self.cutting_feed_mm_min,
+            spindle_rpm: self.spindle_rpm,
+        }
     }
 }
 
@@ -385,6 +404,55 @@ mod g25_2_pass_pattern_tests {
         let mut json = serde_json::to_value(ParallelTestParameters::default()).unwrap();
         json["pass_pattern"] = serde_json::json!("unknown");
         assert!(serde_json::from_value::<ParallelTestParameters>(json).is_err());
+    }
+}
+
+#[cfg(test)]
+mod f1_1_cutting_conditions_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_json_does_not_gain_invented_feeds_or_spindle_values() {
+        let json = r#"{"diameter":4.0,"stepover":10.0,"longitudinal":2.0,"along_x":true}"#;
+        let restored: ParallelTestParameters = serde_json::from_str(json).unwrap();
+        assert_eq!(restored.cutting_feed_mm_min, None);
+        assert_eq!(restored.spindle_rpm, None);
+        assert_eq!(restored.validate(), Ok(()));
+        let value = serde_json::to_value(restored).unwrap();
+        assert!(value.get("cutting_feed_mm_min").is_none());
+        assert!(value.get("spindle_rpm").is_none());
+    }
+
+    #[test]
+    fn configured_feed_and_rpm_roundtrip_independently() {
+        let mut first = ParallelTestParameters::default();
+        let second = ParallelTestParameters::default();
+        first.cutting_feed_mm_min = Some(1200.25);
+        first.spindle_rpm = Some(14000.5);
+        let json = serde_json::to_string(&first).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ParallelTestParameters>(&json).unwrap(),
+            first
+        );
+        assert_eq!(second.cutting_feed_mm_min, None);
+        assert_eq!(second.spindle_rpm, None);
+        assert_ne!(
+            OperationKind::ParallelTest(first),
+            OperationKind::ParallelTest(second)
+        );
+        assert_eq!(first.validate(), Ok(()));
+    }
+
+    #[test]
+    fn configured_invalid_feed_and_spindle_are_rejected() {
+        for value in [0.0, -10.0, f64::NAN, f64::INFINITY, 1_000_001.0] {
+            let mut params = ParallelTestParameters::default();
+            params.cutting_feed_mm_min = Some(value);
+            assert!(params.validate().is_err());
+            params.cutting_feed_mm_min = None;
+            params.spindle_rpm = Some(value);
+            assert!(params.validate().is_err());
+        }
     }
 }
 
