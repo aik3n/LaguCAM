@@ -3,10 +3,12 @@
 mod cam_markers_3d;
 mod nav_cube;
 mod navigation;
+mod nc_export_ui;
 mod options;
 mod overlay;
 mod panel_layout;
 mod portable;
+mod post_ui;
 mod preview;
 mod project;
 mod project_ui;
@@ -154,6 +156,8 @@ struct App {
     tool_library: tools::model::ToolLibrary,
     tool_library_path: Option<PathBuf>,
     tool_ui: tools_ui::ToolUi,
+    post_ui: post_ui::PostUi,
+    nc_export_ui: nc_export_ui::NcExportUi,
     test_parallel: test_parallel::TestParallelPanel,
     project_path: Option<PathBuf>,
     recent_projects: recent_projects::RecentProjects,
@@ -224,6 +228,8 @@ impl App {
             tool_library,
             tool_library_path,
             tool_ui: tools_ui::ToolUi::new(tool_error),
+            post_ui: post_ui::PostUi::load(),
+            nc_export_ui: nc_export_ui::NcExportUi::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
             project_path: None,
             recent_projects: recent_projects::RecentProjects::load(),
@@ -890,6 +896,11 @@ impl App {
                     self.file_dialog(ui.ctx().clone());
                 }
                 ui.separator();
+                if ui.button("Postprocesar NC...").clicked() {
+                    self.nc_export_ui.open = true;
+                    ui.close();
+                }
+                ui.separator();
                 if ui.button("Salir").clicked() {
                     ui.close();
                     self.request_action(FileAction::Exit, ui.ctx().clone());
@@ -898,6 +909,10 @@ impl App {
             ui.menu_button("Herramientas", |ui| {
                 if ui.button("Biblioteca de herramientas...").clicked() {
                     self.tool_ui.open = true;
+                    ui.close();
+                }
+                if ui.button("Biblioteca de postprocesadores...").clicked() {
+                    self.post_ui.open = true;
                     ui.close();
                 }
                 ui.separator();
@@ -1505,6 +1520,9 @@ impl eframe::App for App {
         );
         self.test_parallel
             .sync_tools(&mut self.project, &self.tool_library);
+        self.nc_export_ui
+            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        self.post_ui.show(ui.ctx());
         self.options.show(ui.ctx());
     }
 

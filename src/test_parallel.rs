@@ -431,6 +431,15 @@ pub struct TestParallelPanel {
 }
 
 impl TestParallelPanel {
+    /// Solo resultados con corte y validez estructural; la firma de herramienta
+    /// y la procedencia CAM se invalidan por los sincronizadores existentes.
+    pub fn nc_result(&self, index: usize) -> Option<(&PlannedToolpath, CuttingConditions)> {
+        let outcome = self.results.get(&index)?;
+        if !outcome.validation.is_structurally_valid() || outcome.validation.cutting_moves == 0 {
+            return None;
+        }
+        Some((&outcome.linked, outcome.conditions))
+    }
     pub fn open_editor(&mut self, index: usize, project: &Project) {
         if let Some(op) = project.operations.items.get(index) {
             // Solo un editor: al editar otra operacion se descarta el borrador anterior.

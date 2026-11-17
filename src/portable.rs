@@ -9,7 +9,11 @@ use uuid::Uuid;
 fn path_for(executable: &Path, file: &str) -> Result<PathBuf, String> {
     if !matches!(
         file,
-        "settings.json" | "panels.json" | "tools.json" | "recent_projects.json"
+        "settings.json"
+            | "panels.json"
+            | "tools.json"
+            | "recent_projects.json"
+            | "postprocessors.json"
     ) {
         return Err("Nombre de configuración no permitido".into());
     }
@@ -105,6 +109,7 @@ mod tests {
             "panels.json",
             "tools.json",
             "recent_projects.json",
+            "postprocessors.json",
         ] {
             assert_eq!(
                 path_for(&executable, name).unwrap(),
