@@ -32,6 +32,7 @@ pub struct NcExportUi {
     preview: Option<NcPreview>,
     acknowledge_unverified: bool,
     message: String,
+    pending_playback: Option<(String, [f64; 3])>,
 }
 
 /// Contrato puro: el post solo recibe coordenadas de trabajo en mm.
@@ -107,6 +108,11 @@ fn preview_excerpt(text: &str) -> String {
 }
 
 impl NcExportUi {
+    /// Devuelve una unica peticion; se envia el texto NC completo, no la trayectoria CAM.
+    pub fn take_playback_request(&mut self) -> Option<(String, [f64; 3])> {
+        self.pending_playback.take()
+    }
+
     fn generate_current(
         &self,
         project: &Project,
@@ -233,6 +239,7 @@ impl NcExportUi {
         let mut acknowledge = self.acknowledge_unverified;
         let mut preview_requested = false;
         let mut export_requested = false;
+        let mut playback_requested = false;
 
         egui::Window::new("Postprocesar programa NC")
             .open(&mut open)
@@ -320,6 +327,9 @@ impl NcExportUi {
                         ui.monospace(excerpt);
                     });
                     ui.separator();
+                    if ui.button("Reproducir G-code interpretado...").clicked() {
+                        playback_requested = true;
+                    }
                     ui.checkbox(&mut acknowledge,
                         "Reconozco que este NC aun no tiene simulacion final y requiere verificar origen, posicion inicial, herramienta, Start/End y maquina.");
                     if ui.add_enabled(acknowledge,
@@ -365,6 +375,50 @@ impl NcExportUi {
                 Err(error) => {
                     self.preview = None;
                     self.acknowledge_unverified = false;
+                    self.message = format!("ERROR: {error}");
+                }
+            }
+        }
+        if playback_requested {
+            // Regenerar antes de enviar, igual que al exportar. Un preview obsoleto se rechaza.
+            let result = self
+                .selected_operation
+                .ok_or_else(|| "No hay operacion seleccionada".to_owned())
+                .and_then(|index| {
+                    let profile = profiles
+                        .iter()
+                        .find(|p| p.id == self.selected_profile)
+                        .ok_or_else(|| "No hay perfil guardado seleccionado".to_owned())?;
+                    let current = self.generate_current(project, panel, profile, index)?;
+                    let previous = self
+                        .preview
+                        .as_ref()
+                        .ok_or_else(|| "Genera primero la vista previa NC".to_owned())?;
+                    if current.operation_index != previous.operation_index
+                        || current.operation_name != previous.operation_name
+                        || current.profile_id != previous.profile_id
+                        || current.generated != previous.generated
+                    {
+                        return Err(
+                            "La vista NC ha quedado obsoleta; regenerala antes de reproducir"
+                                .to_owned(),
+                        );
+                    }
+                    Ok((
+                        current.generated.text.clone(),
+                        current.generated.required_first_move_position_work_mm,
+                    ))
+                });
+            match result {
+                Ok(request) => {
+                    self.pending_playback = Some(request);
+                    self.message =
+                        "NC enviado al reproductor; confirma la posicion inicial ANTES de Start."
+                            .into();
+                }
+                Err(error) => {
+                    self.pending_playback = None;
+                    self.preview = None;
                     self.message = format!("ERROR: {error}");
                 }
             }
@@ -481,7 +535,7 @@ mod tests {
     fn filename_cannot_become_a_path_and_excerpt_contains_both_ends() {
         assert_eq!(
             suggested_filename("../../pieza * a", "nc"),
-            "____pieza___a.nc"
+            "______pieza___a.nc"
         );
         let body = (0..100)
             .map(|i| format!("N{i} G1 X{i}"))

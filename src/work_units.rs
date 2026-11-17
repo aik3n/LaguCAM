@@ -73,12 +73,12 @@ impl WorkUnits {
 const SETTINGS_ID: &str = "lagucam_work_units_display_v1";
 
 pub fn publish(ctx: &egui::Context, units: WorkUnits) {
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_ID), units));
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(SETTINGS_ID), units));
     ctx.request_repaint();
 }
 
 pub fn current(ctx: &egui::Context) -> WorkUnits {
-    ctx.data(|data| data.get_temp::<WorkUnits>(egui::Id::new(SETTINGS_ID)))
+    ctx.data(|data| data.get_temp::<WorkUnits>(egui::Id::unique(SETTINGS_ID)))
         .unwrap_or_default()
 }
 

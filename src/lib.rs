@@ -2,7 +2,9 @@
 
 pub mod cam_contract;
 pub mod cam_geometry;
+pub mod material_sim;
 pub mod nc_contract;
+pub mod nc_interpreter;
 pub mod nc_post;
 pub mod toolpath;
 pub mod toolpath_links;

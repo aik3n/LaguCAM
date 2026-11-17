@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cam_markers_3d;
+mod material_ui;
 mod nav_cube;
 mod navigation;
 mod nc_export_ui;
+mod nc_playback_ui;
 mod options;
 mod overlay;
 mod panel_layout;
@@ -158,6 +160,7 @@ struct App {
     tool_ui: tools_ui::ToolUi,
     post_ui: post_ui::PostUi,
     nc_export_ui: nc_export_ui::NcExportUi,
+    nc_playback_ui: nc_playback_ui::NcPlaybackUi,
     test_parallel: test_parallel::TestParallelPanel,
     project_path: Option<PathBuf>,
     recent_projects: recent_projects::RecentProjects,
@@ -230,6 +233,7 @@ impl App {
             tool_ui: tools_ui::ToolUi::new(tool_error),
             post_ui: post_ui::PostUi::load(),
             nc_export_ui: nc_export_ui::NcExportUi::default(),
+            nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
             project_path: None,
             recent_projects: recent_projects::RecentProjects::load(),
@@ -896,6 +900,10 @@ impl App {
                     self.file_dialog(ui.ctx().clone());
                 }
                 ui.separator();
+                if ui.button("Reproducir programa NC...").clicked() {
+                    self.nc_playback_ui.open = true;
+                    ui.close();
+                }
                 if ui.button("Postprocesar NC...").clicked() {
                     self.nc_export_ui.open = true;
                     ui.close();
@@ -1301,6 +1309,16 @@ impl App {
             self.test_parallel
                 .paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
+        self.nc_playback_ui.paint(
+            ui,
+            rect,
+            &self.project,
+            yaw,
+            pitch,
+            distance,
+            pan,
+            projection,
+        );
         // Marcadores renderizados tras las lineas egui: sus fragmentos opacos
         // sustituyen visualmente las lineas que quedan por debajo del solido.
         // No se limpia profundidad: se conserva la del STL en este mismo viewport.
@@ -1522,6 +1540,11 @@ impl eframe::App for App {
             .sync_tools(&mut self.project, &self.tool_library);
         self.nc_export_ui
             .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        if let Some((text, xyz)) = self.nc_export_ui.take_playback_request() {
+            self.nc_playback_ui.load_generated(text, xyz);
+        }
+        self.nc_playback_ui
+            .show(ui.ctx(), &self.project, &self.tool_library);
         self.post_ui.show(ui.ctx());
         self.options.show(ui.ctx());
     }
