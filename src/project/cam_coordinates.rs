@@ -24,6 +24,7 @@ pub enum WorkCoordinateError {
     UnsupportedTilt,
     InvalidPoint,
     ArithmeticOverflow,
+    #[allow(dead_code, reason = "F1.2: reservado para conversion de trayectorias")]
     TooManyMoves,
 }
 
@@ -56,6 +57,7 @@ pub struct WorkFrame {
 
 /// El nombre de los campos evita confundir XYZ de modelo y XYZ de trabajo.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[allow(dead_code, reason = "F1.2: tipo previsto para postprocesado CNC")]
 pub struct WorkMove {
     pub kind: PlannedMoveKind,
     pub from_work_mm: [f64; 3],
@@ -64,6 +66,7 @@ pub struct WorkMove {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[allow(dead_code, reason = "F1.2: tipo previsto para postprocesado CNC")]
 pub struct WorkToolpath {
     pub units: CamUnits,
     pub moves: Vec<WorkMove>,
@@ -129,6 +132,10 @@ impl WorkFrame {
     }
 
     /// Devuelve una COPIA transformada y tipada; `path` nunca se modifica.
+    #[allow(
+        dead_code,
+        reason = "F1.2: conversion completa pendiente de integracion"
+    )]
     pub fn convert(&self, path: &PlannedToolpath) -> Result<WorkToolpath, WorkCoordinateError> {
         if path.moves.len() > MAX_VALIDATION_MOVES {
             return Err(WorkCoordinateError::TooManyMoves);
@@ -150,6 +157,7 @@ impl WorkFrame {
 
     /// Entrada directa desde F1.1: conserva el contrato de estrategia.
     /// F/S y el informe siguen disponibles en `operation` sin duplicarlos.
+    #[allow(dead_code, reason = "F1.2: entrada F1.1 pendiente de integracion")]
     pub fn convert_operation(
         &self,
         operation: &CamOperationView<'_>,
