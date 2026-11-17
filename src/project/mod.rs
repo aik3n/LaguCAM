@@ -1,4 +1,5 @@
 pub mod cam_coordinates;
+pub mod cam_provenance;
 pub mod display;
 pub mod model;
 pub mod operations;

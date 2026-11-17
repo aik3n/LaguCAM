@@ -5,12 +5,13 @@ use crate::{
     project::{
         Project,
         cam_coordinates::WorkFrame,
+        cam_provenance::CamProvenance,
         model::ModelReference,
         operations::{OperationKind, OperationStatus, ParallelTestParameters},
     },
     stl::Bounds,
     tools::{
-        cam_adapter::{ResolvedCutter, ToolSignature, resolve_cutter, signature_current},
+        cam_adapter::{ResolvedCutter, resolve_cutter},
         model::ToolLibrary,
     },
 };
@@ -213,7 +214,7 @@ struct Job {
     progress: Arc<AtomicUsize>,
     total: usize,
     receiver: Receiver<Result<Outcome, String>>,
-    signature: ToolSignature,
+    provenance: CamProvenance,
 }
 
 impl Drop for Job {
@@ -229,9 +230,9 @@ impl Job {
         expected_triangles: u32,
         plan: SamplingPlan,
         tool: ResolvedCutter,
+        provenance: CamProvenance,
         ctx: egui::Context,
     ) -> Result<Self, String> {
-        let signature = tool.signature;
         let cutter = tool.cutter;
         let cancel = Arc::new(AtomicBool::new(false));
         let token = Arc::clone(&cancel);
@@ -260,7 +261,7 @@ impl Job {
             progress,
             total,
             receiver,
-            signature,
+            provenance,
         })
     }
 
@@ -420,7 +421,7 @@ pub struct TestParallelPanel {
     active_job: Option<(usize, Job)>,
     cancelling: bool,
     results: HashMap<usize, Outcome>,
-    result_signatures: HashMap<usize, ToolSignature>,
+    result_provenances: HashMap<usize, CamProvenance>,
     hidden: HashSet<usize>,
     message: String,
 }
@@ -451,10 +452,10 @@ impl TestParallelPanel {
             .into_iter()
             .filter_map(|(index, result)| index_after_delete(index, deleted).map(|i| (i, result)))
             .collect();
-        self.result_signatures = std::mem::take(&mut self.result_signatures)
+        self.result_provenances = std::mem::take(&mut self.result_provenances)
             .into_iter()
-            .filter_map(|(index, signature)| {
-                index_after_delete(index, deleted).map(|i| (i, signature))
+            .filter_map(|(index, provenance)| {
+                index_after_delete(index, deleted).map(|i| (i, provenance))
             })
             .collect();
         self.hidden = std::mem::take(&mut self.hidden)
@@ -481,7 +482,7 @@ impl TestParallelPanel {
         self.active_job = None;
         self.cancelling = false;
         self.results.clear();
-        self.result_signatures.clear();
+        self.result_provenances.clear();
         self.hidden.clear();
         self.editing = None;
         self.editor_draft = None;
@@ -491,28 +492,27 @@ impl TestParallelPanel {
         self.message.clear();
     }
 
-    /// Cada resultado procede de una identidad y huella fisica concretas.
-    /// El cambio de herramienta o su eliminacion invalida la muestra.
+    /// Contrasta cada resultado (y el trabajo en curso) con sus entradas reales.
+    /// Los calculos sin procedencia nunca se conservan como vigentes.
     pub fn sync_tools(&mut self, project: &mut Project, library: &ToolLibrary) {
-        let current = |index: usize, signature: &ToolSignature| {
-            project
-                .operations
-                .items
-                .get(index)
-                .is_some_and(|op| signature_current(library, op.tool_id.as_deref(), signature))
-        };
         let stale: Vec<usize> = self
-            .result_signatures
-            .iter()
-            .filter_map(|(&i, signature)| (!current(i, signature)).then_some(i))
+            .results
+            .keys()
+            .copied()
+            .filter(|&i| {
+                self.result_provenances
+                    .get(&i)
+                    .is_none_or(|stamp| !stamp.is_current(project, i, library))
+            })
             .collect();
         let cancel_running = self
             .active_job
             .as_ref()
-            .is_some_and(|(i, job)| !current(*i, &job.signature));
+            .is_some_and(|(i, job)| !job.provenance.is_current(project, *i, library));
+        let had_stale = !stale.is_empty();
         for index in stale {
             self.results.remove(&index);
-            self.result_signatures.remove(&index);
+            self.result_provenances.remove(&index);
             if let Some(op) = project.operations.items.get_mut(index) {
                 op.status = OperationStatus::NotCalculated;
             }
@@ -521,11 +521,13 @@ impl TestParallelPanel {
             let (index, _) = self.active_job.take().expect("Trabajo activo invalidado");
             self.cancelling = false;
             self.results.remove(&index);
-            self.result_signatures.remove(&index);
+            self.result_provenances.remove(&index);
             if let Some(op) = project.operations.items.get_mut(index) {
                 op.status = OperationStatus::NotCalculated;
             }
-            self.message = "Herramienta modificada o eliminada: calculo invalidado".into();
+        }
+        if had_stale || cancel_running {
+            self.message = "Cambio de STL, bruto, fresa o estrategia: CAM invalidado".into();
         }
     }
 
@@ -544,6 +546,16 @@ impl TestParallelPanel {
             }
             match result {
                 Ok(outcome) => {
+                    if !job.provenance.source_samples_current() {
+                        self.results.remove(&index);
+                        self.result_provenances.remove(&index);
+                        if let Some(op) = project.operations.items.get_mut(index) {
+                            op.status = OperationStatus::NotCalculated;
+                        }
+                        self.message =
+                            "El STL cambio durante el calculo: resultado descartado".into();
+                        return;
+                    }
                     let status = validation_operation_status(&outcome.validation);
                     let first_issue = outcome
                         .validation
@@ -563,7 +575,8 @@ impl TestParallelPanel {
                         first_issue,
                     );
                     self.results.insert(index, outcome);
-                    self.result_signatures.insert(index, job.signature.clone());
+                    self.result_provenances
+                        .insert(index, job.provenance.clone());
                     self.hidden.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
                         op.status = status;
@@ -571,7 +584,7 @@ impl TestParallelPanel {
                 }
                 Err(error) => {
                     self.results.remove(&index);
-                    self.result_signatures.remove(&index);
+                    self.result_provenances.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
                         op.status = OperationStatus::Error;
                     }
@@ -1069,7 +1082,7 @@ impl TestParallelPanel {
                     op.tool_id = draft.tool_id.clone();
                     op.status = OperationStatus::NotCalculated;
                     self.results.remove(&index);
-                    self.result_signatures.remove(&index);
+                    self.result_provenances.remove(&index);
                     self.message = "Configuracion cambiada. Pendiente de recalcular.".into();
                 }
             }
@@ -1094,26 +1107,29 @@ impl TestParallelPanel {
                 )
                 .and_then(|tool| {
                     tool.ensure_supported()?;
+                    let provenance =
+                        CamProvenance::capture(project, index, path, tool.signature.clone())?;
                     let mut effective = params;
                     effective.diameter = tool.diameter_model();
                     SamplingPlan::new(model.bounds, effective)
                         .and_then(|plan| plan.with_stock(project.stock.as_ref()))
-                        .map(|plan| (plan, tool))
+                        .map(|plan| (plan, tool, provenance))
                 });
                 match prepared {
-                    Ok((plan, tool)) => match Job::start(
+                    Ok((plan, tool, provenance)) => match Job::start(
                         path.to_path_buf(),
                         model.size_bytes,
                         model.triangles,
                         plan,
                         tool,
+                        provenance,
                         ctx.clone(),
                     ) {
                         Ok(job) => {
                             self.active_job = Some((index, job));
                             self.cancelling = false;
                             self.results.remove(&index);
-                            self.result_signatures.remove(&index);
+                            self.result_provenances.remove(&index);
                             self.hidden.remove(&index);
                             self.message = "Preparando motor y calculando...".into();
                             if let Some(op) = project.operations.items.get_mut(index) {
@@ -1558,13 +1574,6 @@ mod deletion_index_tests {
         assert_eq!(index_after_delete(3, 1), Some(2));
         let mut panel = TestParallelPanel::default();
         panel.hidden.extend([0, 2, 3]);
-        panel.result_signatures.insert(
-            2,
-            ToolSignature {
-                tool_id: "fresa".to_owned(),
-                geometry_hash: [0; 32],
-            },
-        );
         panel.editing = Some(3);
         panel.operation_deleted(1);
         assert_eq!(panel.editing, Some(2));
@@ -1572,8 +1581,7 @@ mod deletion_index_tests {
         assert!(panel.hidden.contains(&0));
         assert!(panel.hidden.contains(&1));
         assert!(panel.hidden.contains(&2));
-        assert!(panel.result_signatures.contains_key(&1));
-        assert!(!panel.result_signatures.contains_key(&2));
+        assert!(panel.result_provenances.is_empty());
     }
 }
 
@@ -1599,9 +1607,26 @@ mod g20_library_sync_tests {
         let id = lib.add(tool).unwrap();
         let signature = resolve_cutter(&lib, Some(&id), 1.0).unwrap().signature;
         let mut project = Project::default();
+        let bounds = Bounds {
+            min: [0.0; 3],
+            max: [3.0; 3],
+        };
+        project.model = Some(crate::project::model::ModelReference {
+            name: "patron.stl".into(),
+            bounds,
+            triangles: 1,
+            size_bytes: 134,
+        });
+        project.stock = Some(crate::project::stock::Stock::from_bounds(&bounds));
         let index = project.operations.add_new().unwrap();
+        project.operations.items[index].kind = OperationKind::ParallelTest(Parameters::default());
         project.operations.items[index].tool_id = Some(id.clone());
         project.operations.items[index].status = OperationStatus::Ready;
+        let stl_path =
+            std::env::temp_dir().join(format!("lagucam_p1a_sync_{}.stl", std::process::id()));
+        let mut bytes = vec![0u8; 134];
+        bytes[80..84].copy_from_slice(&1u32.to_le_bytes());
+        fs::write(&stl_path, bytes).unwrap();
         let mut panel = TestParallelPanel::default();
         panel.results.insert(
             index,
@@ -1615,7 +1640,8 @@ mod g20_library_sync_tests {
                 samples_per_line: 0,
             },
         );
-        panel.result_signatures.insert(index, signature);
+        let provenance = CamProvenance::capture(&project, index, &stl_path, signature).unwrap();
+        panel.result_provenances.insert(index, provenance);
         panel.sync_tools(&mut project, &lib);
         assert!(panel.results.contains_key(&index));
 
@@ -1636,6 +1662,7 @@ mod g20_library_sync_tests {
             project.operations.items[index].status,
             OperationStatus::NotCalculated
         ));
+        fs::remove_file(stl_path).unwrap();
     }
 }
 
