@@ -22,6 +22,7 @@ mod test_parallel;
 mod tools;
 mod tools_profile;
 mod tools_ui;
+mod work_units;
 
 use eframe::{egui, egui_glow, glow};
 use egui::mutex::Mutex;

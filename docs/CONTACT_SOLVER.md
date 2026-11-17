@@ -1,6 +1,6 @@
 # ContactSolver — contrato y evolución G19–G24
 
-**Revisión técnica:** 2026-11-17 · **Base observada:** `main` en `5cd41c7` · **Evidencia:** revisión estática; no sustituye los tests ni la validación geométrica independiente.
+**Revisión técnica:** 2026-11-17 · **Base observada:** `main` en `a10e0c0` · **Evidencia:** revisión estática; no sustituye los tests ni la validación geométrica independiente.
 
 ## Contrato y responsabilidades
 
@@ -9,7 +9,7 @@
 - **Adaptador biblioteca–CAM (`tools/cam_adapter.rs`)**: resuelve UUID global a geometría matemática en unidades del modelo, captura SHA-256 de geometría y comprueba vigencia de previsualizaciones. No inventa diámetros de respaldo.
 - **Estrategia (`test_parallel.rs`)**: elige muestras XY, patrón de pasada y sobrematerial; el motor solo resuelve posiciones de contacto. Trayectorias y enlaces se construyen después en módulos separados.
 
-Las consultas actuales trabajan con eje de fresa paralelo a **+Z del STL/modelo**. La transformación al origen CNC se hace después, no dentro del solver. La hipótesis actual del TEST es **1 unidad STL = 1 mm**, no un dato embebido en el STL.
+Las consultas actuales trabajan con eje de fresa paralelo a **+Z del modelo físico**, en milímetros. Si hay transformación de entrada, `GeometryAffine` transforma los triángulos originales al construir el BVH y al resolver contactos, **sin reescribir el STL**; la definición de mm/pulgadas, escala, rotación, traslación y pivote reside en `project/model_transform.rs`. La conversión posterior al origen CNC pertenece a F1.2, no al solver. El archivo STL **no declara unidades**, por lo que la selección requiere confirmación del usuario.
 
 ## Geometrías implementadas
 
@@ -23,6 +23,8 @@ Las consultas actuales trabajan con eje de fresa paralelo a **+Z del STL/modelo*
 En el caso esférico el contacto en rampa de 45° con sobreespesor `a` aumenta aproximadamente `a·sqrt(2)`, no `a`. En plana y toroidal se conserva también la geometría de desplazamiento euclídeo respecto de las superficies evaluadas.
 
 **`tip_z_model = None` significa ausencia de contacto local, no altura de seguridad ni permiso de avance.** El resultado es una cota de herramienta en una posición fija XY. No garantiza ausencia de colisión con mango, pinza, portaherramientas, fijaciones, bruto remanente o durante un segmento entre consultas.
+
+**Verificación específica P1:** comparar contacto y altura obtenidos del BVH con la geometría físicamente transformada y con una referencia analítica independiente, incluyendo mm↔pulgadas, escala no uniforme y rotación; validar rendimiento antes de confiar en resultados de mallas grandes. Las pruebas existentes no acreditan todavía un flujo CNC exportable.
 
 ## Precisión, escalabilidad y limitaciones
 

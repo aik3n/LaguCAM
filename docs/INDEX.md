@@ -8,7 +8,9 @@ El documento principal del **último corte documentado** es [`STATUS.md`](STATUS
 2. [`DECISIONS.md`](DECISIONS.md) — Acuerdos aprobados y decisiones abiertas.
 3. [`ARCHITECTURE.md`](ARCHITECTURE.md) — Componentes, límites e invariantes técnicos.
 4. [`ROADMAP.md`](ROADMAP.md) — Hitos pendientes y criterios de salida.
-5. [`WORKFLOW.md`](WORKFLOW.md) — Ciclo de cinco fases, parche PowerShell desde Escritorio, tests Windows y Git exclusivo del usuario.
+5. [`WORKFLOW.md`](WORKFLOW.md) — Cinco fases, especificación de parches PowerShell, validación y recuperación.
+6. [`CHAT_ROLES.md`](CHAT_ROLES.md) — Responsables, fronteras de código y activación de especialistas.
+7. [`HANDOFF.md`](HANDOFF.md) — Traspaso operativo al siguiente Chat Master; no sustituye STATUS.
 
 ## Documentación de referencia
 
@@ -18,9 +20,11 @@ El documento principal del **último corte documentado** es [`STATUS.md`](STATUS
 | [`LIBRARIES.md`](LIBRARIES.md) | Bibliotecas de herramientas, máquinas y postprocesadores |
 | [`TESTING.md`](TESTING.md) | Pruebas, benchmarks y requisitos de seguridad CNC |
 | [`CHANGELOG.md`](CHANGELOG.md) | Historial de entregas y commits, no estado vivo |
+| [`CHAT_ROLES.md`](CHAT_ROLES.md) | Gobernanza, propiedad por contrato y revisión cruzada |
+| [`HANDOFF.md`](HANDOFF.md) | Estado de relevo Master, hito activo y decisiones pendientes |
 | [`VISION.md`](VISION.md) | Objetivo de largo plazo y alcance |
 | [`CAM_INTEGRACION_2026-11-15.md`](CAM_INTEGRACION_2026-11-15.md) | Informe histórico de integración experimental del motor; no sustituye STATUS |
-| [`../AGENTS.md`](../AGENTS.md) | Reglas para chats de dirección, programación y motor |
+| [`../AGENTS.md`](../AGENTS.md) | Contrato normativo para Master, Integrador y especialistas; parches y evidencia |
 | [`../README.md`](../README.md) | Introducción, compilación y enlaces |
 
 ## Interpretación del estado

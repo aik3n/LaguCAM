@@ -3,7 +3,7 @@
 > **Requisitos y criterios**, no estado vivo de implementación. Estado actualizado y SHA cubierto: [`STATUS.md`](STATUS.md).
 
 
-**Estado:** requisitos vigentes · **Revisión:** 2026-11-17. Los estados son observaciones estáticas del código público hasta `5cd41c7`; la evidencia de pruebas y la distinción local/remoto están en STATUS.
+**Estado:** requisitos vigentes · **Revisión:** 2026-11-17. Los estados son observaciones estáticas del código público hasta `a10e0c0`; la evidencia de pruebas y la distinción local/remoto están en STATUS.
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -19,8 +19,9 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | PRJ-01 | Crear, abrir, guardar y guardar como proyecto `.lagucam` | Implementado en código desde 6eb12e1; validación gráfica de versión actual pendiente |
 | PRJ-02 | Guardar referencia externa al modelo, bruto, origen, aspecto, operaciones, unidades y máquina seleccionada cuando exista | Acordado para persistencia; algunos campos aún no existen |
 | PRJ-03 | Esquema versionado, validación, STL ausente/modificado y preservación del proyecto anterior ante fallos | `.lagucam` v2 implementado en código; validación gráfica pendiente |
-| PRJ-04 | Declarar explícitamente unidades; STL no las incorpora | Acordado; milímetros como punto de partida, no deducir de STL |
+| PRJ-04 | Declarar explícitamente unidades; STL no las incorpora | Selección de unidad origen mm/pulgadas implementada en `ModelTransform`, con conversión física a mm; validación integral pendiente |
 | PRJ-05 | Trabajar sin copias gigantes de triángulos dentro del archivo de proyecto | Acordado |
+| PRJ-07 | Modelo STL no destructivo; escala, rotación, traslación, pivote y AABB físico persistentes | P1-M2 implementado en código; prueba Windows de visor, BVH y round-trip pendiente |
 
 ## 2. Geometría y estrategias
 
@@ -40,6 +41,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Validador estructural G25 implementado; tolerancias entre muestras y colisiones pendientes |
 | CAM-08 | Trayectoria neutral separada de estrategia y post | G25 implementado; enlaces propuestos y validación estructural, sin exportación CNC |
 | CAM-09 | Contrato F/S y conversión al origen de trabajo 3 ejes | F1.1–F1.2 implementados; comprobación de máquina y unidades pendiente |
+| CAM-10 | Invalidación de resultados cuando cambie cualquier entrada geométrica significativa | P1-A `CamProvenance` implementado para previews, con firma STL muestreada; contrato exportable pendiente |
 
 ## 3. Herramientas, máquinas y control
 
@@ -82,7 +84,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 ## 6. Decisiones abiertas que afectan a requisitos
 
-- Cinco geometrías ya implementadas con convenciones de ángulo total y radio de esfera; falta validación para cálculo CAM exacto.
+- Seis geometrías de biblioteca implementadas; contacto CAM para esférica/plana/toroidal, sin validación independiente completa ni soporte de las tres cónicas.
 - Grado de representación de mango, cuello y portaherramientas en la primera biblioteca.
 - Semántica de máquina por proyecto o por setup (una máquina por proyecto fue **recomendada, no confirmada**).
 - Tolerancias nominales y validación independiente del motor de contacto esférico ya implementado experimentalmente.
@@ -101,4 +103,4 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 - El contacto de la punta esférica deberá contrastarse con referencias analíticas independientes, incluidos casos degenerados; una prueba de compilación no certifica geometría.
 - Para una trayectoria CNC habrá que fijar tolerancia geométrica, error **entre** muestras, movimientos de entrada/retirada y prevención de colisiones de herramienta completa, bruto y utillaje.
 - El índice espacial del STL grande requiere medición de tiempo de construcción, consultas y memoria real en modelos crecientes; la navegación fluida del visor no demuestra ese rendimiento.
-- Las operaciones deberán resolver UUID de biblioteca, capturar herramienta durante el cálculo y verificar la huella antes de considerar un resultado vigente; el hash no autoriza por sí solo a exportar G-code.
+- Las operaciones resuelven UUID y capturan identidad geométrica para previews; `CamProvenance` añade STL/bruto/transformación/parámetros. La comprobación de vigencia exportable y de colisiones sigue pendiente; el hash de herramienta no autoriza por sí solo G-code.

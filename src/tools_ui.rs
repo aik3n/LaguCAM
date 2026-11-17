@@ -160,7 +160,7 @@ impl ToolUi {
                     self.profile_panel(&mut columns[2], lib);
                 });
                 ui.separator();
-                ui.small("Biblioteca de usuario independiente de proyectos y máquinas · sin T fijo · dimensiones en mm.");
+                                ui.small(format!("Biblioteca de usuario independiente de proyectos y máquinas · sin T fijo · vistas en {} (almacenamiento en mm).", crate::work_units::current(ui.ctx()).symbol()));
             });
         self.open = window_open;
     }
@@ -178,23 +178,28 @@ impl ToolUi {
                     ui.selectable_value(&mut self.query.kind, Some(kind), kind.label());
                 }
             });
-        ui.label("Diámetro de corte [mm]");
+        ui.label(format!(
+            "Diámetro de corte [{}]",
+            crate::work_units::current(ui.ctx()).symbol()
+        ));
         ui.horizontal(|ui| {
             ui.label("Mín.");
-            ui.add(
-                egui::DragValue::new(&mut self.query.min_diameter_mm)
-                    .range(0.0..=1.0e100)
-                    .speed(0.5),
+            crate::work_units::current(ui.ctx()).drag_mm(
+                ui,
+                &mut self.query.min_diameter_mm,
+                0.5,
+                Some((0.0, 1.0e100)),
             );
             let mut maximum_enabled = self.query.max_diameter_mm.is_some();
             if ui.checkbox(&mut maximum_enabled, "Máx.").changed() {
                 self.query.max_diameter_mm = maximum_enabled.then_some(10.0);
             }
             if let Some(maximum) = &mut self.query.max_diameter_mm {
-                ui.add(
-                    egui::DragValue::new(maximum)
-                        .range(0.0..=f64::MAX)
-                        .speed(0.5),
+                crate::work_units::current(ui.ctx()).drag_mm(
+                    ui,
+                    maximum,
+                    0.5,
+                    Some((0.0, f64::MAX)),
                 );
             }
         });
@@ -249,7 +254,11 @@ impl ToolUi {
                     if ui
                         .selectable_label(
                             selected,
-                            format!("{} · Ø{diameter:.3} · {name}", kind.label()),
+                            format!(
+                                "{} · Ø{} · {name}",
+                                kind.label(),
+                                crate::work_units::current(ui.ctx()).length(diameter, 3)
+                            ),
                         )
                         .clicked()
                     {
@@ -281,6 +290,7 @@ impl ToolUi {
     }
 
     fn editor_panel(&mut self, ui: &mut egui::Ui, lib: &mut ToolLibrary, path: Option<&Path>) {
+        let units = crate::work_units::current(ui.ctx());
         let mut save = false;
         let mut cancel = false;
         let Some(draft) = self.draft.as_mut() else {
@@ -332,7 +342,11 @@ impl ToolUi {
                 optional_u32(ui, "RPM recomendadas", &mut draft.recommended_rpm);
                 optional_f64(
                     ui,
-                    "Avance recomendado [mm/min]",
+                    if units == crate::work_units::WorkUnits::Mm {
+                        "Avance recomendado [mm/min]"
+                    } else {
+                        "Avance recomendado [in/min]"
+                    },
                     &mut draft.recommended_feed_mm_min,
                 );
                 ui.label("Material recomendado");
@@ -383,9 +397,21 @@ impl ToolUi {
 }
 
 fn number(ui: &mut egui::Ui, label: &str, value: &mut f64) {
+    let units = crate::work_units::current(ui.ctx());
+    let is_length = label.contains("[mm]");
+    let title = if is_length && units == crate::work_units::WorkUnits::Inch {
+        label.replace("[mm]", "[in]")
+    } else {
+        label.to_owned()
+    };
     ui.horizontal(|ui| {
-        ui.label(label);
-        ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(9));
+        ui.label(title);
+        if is_length {
+            units.drag_mm(ui, value, 0.1, None);
+        } else {
+            // Angulos de corte permanecen en grados, no se convierten.
+            ui.add(egui::DragValue::new(value).speed(0.1).max_decimals(9));
+        }
     });
 }
 
@@ -453,7 +479,9 @@ fn optional_f64(ui: &mut egui::Ui, label: &str, value: &mut Option<f64>) {
             *value = enabled.then_some(0.0);
         }
         if let Some(number) = value {
-            ui.add(egui::DragValue::new(number).speed(1.0));
+            let units = crate::work_units::current(ui.ctx());
+            units.drag_mm(ui, number, 1.0, None);
+            ui.label(format!("{}/min", units.symbol()));
         }
     });
 }

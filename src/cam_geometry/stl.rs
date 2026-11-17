@@ -1739,7 +1739,8 @@ mod integration_tests {
                 .unwrap();
         let height = bvh.query(6.35, 6.35, 2.0).unwrap().0.unwrap();
         assert!((height - 25.4).abs() < 1.0e-9);
-        bvh.configure_g16_auto_cache(64 * 1024, 2 * 1024 * 1024).unwrap();
+        bvh.configure_g16_auto_cache(64 * 1024, 2 * 1024 * 1024)
+            .unwrap();
         let auto = bvh
             .query_g17_auto_cancelable(6.35, 6.35, 2.0, &cancel)
             .unwrap()

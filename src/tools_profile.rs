@@ -217,19 +217,20 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
         );
     }
     // Cotas legibles, calculadas en el sistema de la herramienta, no sobre el STL.
+    let units = crate::work_units::current(ui.ctx());
     let color = egui::Color32::LIGHT_GRAY;
     let font = egui::FontId::monospace(11.0);
     painter.text(
         rect.left_top() + egui::vec2(10.0, 10.0),
         egui::Align2::LEFT_TOP,
-        format!("Corte Ø {:.4} mm", tool.geometry.diameter_mm()),
+        format!("Corte Ø {}", units.length(tool.geometry.diameter_mm(), 4)),
         font.clone(),
         color,
     );
     painter.text(
         rect.left_top() + egui::vec2(10.0, 26.0),
         egui::Align2::LEFT_TOP,
-        format!("Mango Ø {:.4} mm", tool.shank_diameter_mm),
+        format!("Mango Ø {}", units.length(tool.shank_diameter_mm, 4)),
         font.clone(),
         color,
     );
@@ -241,7 +242,7 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
     painter.text(
         egui::pos2(dims_x + 4.0, (bottom + end_cut.y) * 0.5),
         egui::Align2::LEFT_CENTER,
-        format!("Lc {:.3}", tool.cutting_length_mm),
+        format!("Lc {}", units.length(tool.cutting_length_mm, 3)),
         font.clone(),
         color,
     );
@@ -253,7 +254,7 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
     painter.text(
         egui::pos2(dims_x2 - 4.0, (bottom + end_free.y) * 0.5),
         egui::Align2::RIGHT_CENTER,
-        format!("L total {:.3}", tool.total_length_mm),
+        format!("L total {}", units.length(tool.total_length_mm, 3)),
         font.clone(),
         color,
     );
@@ -261,11 +262,11 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
         ToolGeometry::Flat { .. } => "Punta plana".into(),
         ToolGeometry::BallNose {
             cutting_diameter_mm,
-        } => format!("R esférico {:.4} mm", cutting_diameter_mm * 0.5),
+        } => format!("R esférico {}", units.length(cutting_diameter_mm * 0.5, 4)),
         ToolGeometry::BullNose {
             corner_radius_mm, ..
         } => {
-            format!("Radio de esquina R {:.4} mm", corner_radius_mm)
+            format!("Radio de esquina R {}", units.length(*corner_radius_mm, 4))
         }
         ToolGeometry::VBit {
             included_angle_deg, ..
@@ -275,16 +276,18 @@ pub fn draw(ui: &mut egui::Ui, tool: &Tool) {
             included_angle_deg,
             ..
         } => format!(
-            "Punta plana Ø {:.4} · ángulo TOTAL {:.3}°",
-            tip_diameter_mm, included_angle_deg
+            "Punta plana Ø {} · ángulo TOTAL {:.3}°",
+            units.length(*tip_diameter_mm, 4),
+            included_angle_deg
         ),
         ToolGeometry::ConicalBall {
             tip_sphere_radius_mm,
             included_angle_deg,
             ..
         } => format!(
-            "Punta esférica R {:.4} · ángulo TOTAL {:.3}°",
-            tip_sphere_radius_mm, included_angle_deg
+            "Punta esférica R {} · ángulo TOTAL {:.3}°",
+            units.length(*tip_sphere_radius_mm, 4),
+            included_angle_deg
         ),
     };
     painter.text(

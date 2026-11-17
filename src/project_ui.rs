@@ -232,6 +232,7 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
 }
 
 pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) -> bool {
+    let units = crate::work_units::current(ui.ctx());
     let mut open_model = false;
     match project.selection {
         Selection::Model => {
@@ -239,13 +240,17 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 ui.label(format!("Archivo: {}", model.name));
                 ui.label(format!("Triángulos: {}", model.triangles));
                 ui.label(format!("Tamaño STL: {} bytes", model.size_bytes));
-                ui.label("Dimensiones fisicas del modelo (mm):");
+                ui.label(format!(
+                    "Dimensiones fisicas del modelo ({}):",
+                    units.symbol()
+                ));
                 for (i, axis) in ["X", "Y", "Z"].iter().enumerate() {
                     ui.label(format!(
-                        "{axis}: {:.6} .. {:.6} ({} mm)",
-                        model.bounds.min[i],
-                        model.bounds.max[i],
-                        model.bounds.max[i] - model.bounds.min[i],
+                        "{axis}: {:.6} .. {:.6} ({:.6} {})",
+                        units.display(model.bounds.min[i]),
+                        units.display(model.bounds.max[i]),
+                        units.display(model.bounds.max[i] - model.bounds.min[i]),
+                        units.symbol(),
                     ));
                 }
                 ui.horizontal(|ui| {
@@ -331,8 +336,8 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 ui.separator();
                 ui.label("Rotacion XYZ (grados; Rz · Ry · Rx)");
                 changed |= vector(ui, &mut candidate.rotation_degrees);
-                ui.label("Desplazamiento XYZ (mm)");
-                changed |= vector(ui, &mut candidate.translation_mm);
+                ui.label(format!("Desplazamiento XYZ ({})", units.symbol()));
+                changed |= vector_length(ui, &mut candidate.translation_mm, units);
                 egui::ComboBox::from_label("Pivote de la transformacion")
                     .selected_text(match candidate.pivot {
                         crate::project::model_transform::ModelPivot::StlOrigin => "Origen del STL",
@@ -425,10 +430,13 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                         .text("Opacidad (%)"),
                 );
                 let mut candidate = stock.clone();
-                ui.label("Posición de esquina mínima (modelo)");
-                let pos_changed = vector(ui, &mut candidate.min);
-                ui.label("Dimensiones del bruto");
-                let size_changed = vector(ui, &mut candidate.size);
+                ui.label(format!(
+                    "Posición de esquina mínima (modelo, {})",
+                    units.symbol()
+                ));
+                let pos_changed = vector_length(ui, &mut candidate.min, units);
+                ui.label(format!("Dimensiones del bruto ({})", units.symbol()));
+                let size_changed = vector_length(ui, &mut candidate.size, units);
                 if pos_changed || size_changed {
                     match candidate.validate() {
                         Ok(()) => {
@@ -441,7 +449,10 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 if let Some(model) = &project.model {
                     ui.separator();
                     ui.label("Material extra respecto a cada cara del STL");
-                    ui.small("Orden: X-, X+, Y-, Y+, Z-, Z+. Unidades originales del STL.");
+                    ui.small(format!(
+                        "Orden: X-, X+, Y-, Y+, Z-, Z+. Unidades de trabajo: {}.",
+                        units.symbol()
+                    ));
                     match stock.extras_from_bounds(&model.bounds) {
                         Ok(mut extras) => {
                             if extras.iter().any(|extra| *extra < 0.0) {
@@ -454,21 +465,21 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                             for (axis, label) in ["X", "Y", "Z"].iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     ui.label(format!("{label}-"));
-                                    changed |= ui
-                                        .add(
-                                            egui::DragValue::new(&mut extras[2 * axis])
-                                                .speed(0.1)
-                                                .max_decimals(6)
-                                                .range(0.0..=f64::MAX),
+                                    changed |= units
+                                        .drag_mm(
+                                            ui,
+                                            &mut extras[2 * axis],
+                                            0.1,
+                                            Some((0.0, f64::MAX)),
                                         )
                                         .changed();
                                     ui.label(format!("{label}+"));
-                                    changed |= ui
-                                        .add(
-                                            egui::DragValue::new(&mut extras[2 * axis + 1])
-                                                .speed(0.1)
-                                                .max_decimals(6)
-                                                .range(0.0..=f64::MAX),
+                                    changed |= units
+                                        .drag_mm(
+                                            ui,
+                                            &mut extras[2 * axis + 1],
+                                            0.1,
+                                            Some((0.0, f64::MAX)),
                                         )
                                         .changed();
                                 });
@@ -532,8 +543,8 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 changed |= candidate.point != old_point;
                 ui.small("También puedes pulsar los puntos rojos del visor. Aparecen solo al configurar el origen.");
                 ui.separator();
-                ui.label("Offset XYZ (ejes originales del modelo)");
-                changed |= vector(ui, &mut candidate.offset);
+                ui.label(format!("Offset XYZ (ejes del modelo, {})", units.symbol()));
+                changed |= vector_length(ui, &mut candidate.offset, units);
                 if ui.button("Restablecer offset a cero").clicked() {
                     candidate.offset = [0.0; 3];
                     changed = true;
@@ -560,8 +571,11 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                 }
                 if let Ok(point) = project.origin.model_position(stock, &model.bounds) {
                     ui.label(format!(
-                        "Origen en modelo: X {:.6}, Y {:.6}, Z {:.6}",
-                        point[0], point[1], point[2]
+                        "Origen en modelo ({}): X {:.6}, Y {:.6}, Z {:.6}",
+                        units.symbol(),
+                        units.display(point[0]),
+                        units.display(point[1]),
+                        units.display(point[2])
                     ));
                 }
                 ui.small("Seleccionar un punto rojo restablece el offset a cero. La rotación solo orienta los ejes CNC.");
@@ -582,9 +596,9 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
                     }
                     OperationKind::ParallelTest(p) => {
                         ui.label("Estrategia: Acabado paralelo — TEST");
-                        ui.label(format!("Fresa esférica: Ø {:.3}", p.diameter));
-                        ui.label(format!("Paso lateral: {:.3}", p.stepover));
-                        ui.label(format!("Resolución: {:.3}", p.longitudinal));
+                        ui.label(format!("Fresa esférica: Ø {}", units.length(p.diameter, 3)));
+                        ui.label(format!("Paso lateral: {}", units.length(p.stepover, 3)));
+                        ui.label(format!("Resolución: {}", units.length(p.longitudinal, 3)));
                         ui.label(format!("Dirección: {}", if p.along_x { "X" } else { "Y" }));
                         match &op.status {
                             OperationStatus::NotCalculated => {
@@ -605,6 +619,21 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
         ui.colored_label(egui::Color32::RED, error.as_str());
     }
     open_model
+}
+
+fn vector_length(
+    ui: &mut egui::Ui,
+    values: &mut [f64; 3],
+    units: crate::work_units::WorkUnits,
+) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
+            ui.label(*label);
+            changed |= units.drag_mm(ui, &mut values[i], 0.1, None).changed();
+        }
+    });
+    changed
 }
 
 fn vector(ui: &mut egui::Ui, values: &mut [f64; 3]) -> bool {

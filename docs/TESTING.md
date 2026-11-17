@@ -19,6 +19,12 @@
 
 **Estado:** criterios para el prototipo en curso; **no** constituyen certificación del software.
 
+## Validación de parches y separación de evidencia
+
+Para **cada `.ps1`** verificar: precomprobación sin escribir (`-CheckOnly`), hashes de todos los archivos, rechazo de conflicto, ausencia de rutas externas y operaciones Git, staging en el mismo volumen, reejecución sin duplicados, notificación de errores y recuperación cuando falla un reemplazo. Antes de entregar, el chat debe ensayar en una **copia temporal** cuando haya entorno compatible; sin PowerShell/Windows accesible, marcar esa ejecución como **pendiente**. No aceptar un mensaje «aplicado» como prueba de compilación, ni un `cargo test` como prueba de GUI o de seguridad CNC.
+
+El usuario aporta salida de aplicación y de pruebas. **Un parche documental no requiere compilar Rust**. Los temporales de recuperación de código/documentación son transitorios; D-039 prohíbe los backups automáticos de proyectos `.lagucam`, no la recuperación controlada de una modificación del código. Ver [`WORKFLOW.md`](WORKFLOW.md) y roles de revisión en [`CHAT_ROLES.md`](CHAT_ROLES.md).
+
 ## 1. Comandos de calidad de Rust
 
 Comandos de referencia desde la raíz del repositorio:

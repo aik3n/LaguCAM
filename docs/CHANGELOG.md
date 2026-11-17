@@ -1,5 +1,14 @@
 # Historial de LaguCAM
 
+## 2026-11-17 — Organización de chats, sucesión Master y auditoría de P1 (solo documentación)
+
+- **Base inspeccionada en GitHub:** `a10e0c0` (`4a51d65` procedencia; `94b6d8c` transformaciones; `a10e0c0` mantenimiento); no constan tests ejecutados por este chat sobre esa versión ni acceso a archivos locales.
+- Se establece **Master sustituible**, **Integrador único responsable de P1–P4**, especialistas activados por contrato y desbaste pospuesto. Se crea `CHAT_ROLES.md` y `HANDOFF.md`.
+- `AGENTS.md` y `WORKFLOW.md` establecen conducta crítica/no complaciente, revisión independiente, aprobación humana, **un parche `.ps1` a la vez** y especificación técnica de preflight, firmas, idempotencia, staging, recuperación y validación.
+- Auditoría P1: posibles diferencias visor/CAM si falla `preview_matrix`; invalidación excesiva por F/S/nombre; necesidad de pruebas integradas y rendimiento medido. **No se modifica código ni se considera P1 validado.**
+- D-040–D-044 aceptadas; no se eliminan decisiones o informes históricos. **El parche documental solo produce cambios locales cuando el usuario lo ejecuta; el commit es exclusivamente suyo.**
+
+
 ## 2026-11-17 — Sincronización documental y procedimiento local por parches
 
 - **Base de código público inspeccionada:** `5cd41c7` (no es un SHA nuevo del parche documental). Inspección estática, **sin ejecución propia de Cargo, GUI o CNC**.

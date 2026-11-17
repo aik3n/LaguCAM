@@ -1,6 +1,6 @@
 # Registro de decisiones técnicas
 
-**Última revisión documental:** 2026-11-17 · **Código público inspeccionado:** `5cd41c7b394309ea672c43b6a1e6455369e7cf2f` · **Estado y pruebas:** [`STATUS.md`](STATUS.md)
+**Última revisión de gobierno:** 2026-11-17 · **Código público inspeccionado en el corte actual:** `a10e0c0d7c95db773417c2b190e7f4ff9005d8d4` · **Evidencia:** [`STATUS.md`](STATUS.md)
 
 Una decisión se cambia mediante una nueva entrada con justificación, no reescribiendo silenciosamente lo que se acordó. Las entradas **PROPUESTAS** no autorizan implementación.
 
@@ -45,12 +45,19 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-037 | **ACEPTADA (2026-11-17)** | Los chats no usan Git; trabajan sobre carpeta local `Escritorio/LaguCAM` | Único responsable de branches, commits, merges y push es el usuario. Un SHA remoto no sustituye el estado local sin comprobar |
 | D-038 | **ACEPTADA (2026-11-17)** | Todo avance se entrega como parche PowerShell `.ps1` situado junto a la carpeta de proyecto, con ejecución, compilación y tests | El script usa `$PSScriptRoot`, verifica la base y evita sobrescrituras inesperadas; lo aplica/prueba el usuario. Documentación solo en fase autorizada |
 | D-039 | **ACEPTADA (2026-11-17)** | Guardado de `.lagucam` por reemplazo sin copias `.recovery.*.bak` automáticas | No guardar backups de cada sobrescritura; mantener manejo explícito de errores y respeto a los archivos personales |
+| D-040 | **ACEPTADA (2026-11-17)** | Master sustituible, sin autoridad unilateral de implementación; `docs/HANDOFF.md` como relevo operativo | Usuario designa Master; se transmiten decisiones, evidencia y siguiente hito sin depender de memoria de chats |
+| D-041 | **ACEPTADA (2026-11-17)** | Integrador CAM único responsable del flujo completo; especialistas por contratos, desbaste posterior | Priorizar integración P1–P4, evitar dispersión y solapes entre chats; propiedad de archivos por hito en `CHAT_ROLES.md` |
+| D-042 | **ACEPTADA (2026-11-17)** | Parches `.ps1` autocontenidos, con preflight por hashes, modo `-CheckOnly`, idempotencia, staging y recuperación | Ningún chat ejecuta Git ni toca la carpeta local directamente; no afirmar atomicidad multarchivo; gestionar conflictos sin sobrescribir |
+| D-043 | **ACEPTADA (2026-11-17)** | Auditoría crítica e independiente, evidencias etiquetadas, un único parche en aplicación/validación | No aprobar por ausencia de avisos ni por compilar; priorizar riesgos y corrección geométrica frente a estética o refactorización masiva |
+| D-044 | **ACEPTADA (2026-11-17)** | Refactorización selectiva por problema demostrable y pruebas, no por longitud de archivo | Mantener contratos estables, limitar alcance y extraer responsabilidades solo cuando facilita el hito o reduce riesgo probado |
 
 ## Cómo registrar una nueva decisión
 
 Cada nueva entrada debe contener ID, fecha, estado (**PROPUESTA**, **ACEPTADA**, **SUSTITUIDA**, **DESCARTADA**), contexto del problema, alternativas consideradas, criterio elegido, impacto, pruebas necesarias y SHA si produjo código.
 
 No convertir automáticamente una recomendación de un asistente en **ACEPTADA** sin respuesta del usuario. Si se cambia una decisión, enlazar la entrada a la decisión anterior y explicar las migraciones/repercusiones.
+
+**Normativa de aplicación de D-040–D-044:** [`CHAT_ROLES.md`](CHAT_ROLES.md) define responsables y secuencia; [`WORKFLOW.md`](WORKFLOW.md) regula aceptación, scripts, pruebas y recuperación; [`HANDOFF.md`](HANDOFF.md) facilita la sustitución del Chat Master. Los cambios de gobernanza **no acreditan pruebas Rust**.
 
 ## Preguntas abiertas
 

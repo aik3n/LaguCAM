@@ -4,13 +4,13 @@
 
 Objetivo inicial: **acabado paralelo de tres ejes sobre STL**, con arquitectura extensible a otras estrategias, máquinas y formatos más adelante. Consultar siempre [`docs/STATUS.md`](docs/STATUS.md) para el SHA inspeccionado, evidencia y límites.
 
-## Capacidades observadas en el código (`5cd41c7`, 2026-11-17)
+## Capacidades observadas en código público (`a10e0c0`, 2026-11-17)
 
 - Visor STL binario de gran tamaño, navegación, selección de pivote, cubo de orientación y vista ortográfica/perspectiva. El usuario ha probado navegación fluida de un STL cercano a 1 GB; no es un benchmark CAM.
 - Proyectos `.lagucam` con referencia externa al STL, bruto, origen de trabajo, operaciones y guardado por reemplazo; recientes en configuración portable. **Sin backups automáticos de proyectos**, por decisión del usuario.
 - Biblioteca global de fresas con UUID, SHA-256 geométrico, editor y perfiles; ContactSolver para esférica, plana y toroidal, incluido sobrematerial geométrico.
 - Acabado paralelo **TEST**, patrones unidireccional/zigzag, trayectoria neutral y enlaces de aproximación/retirada propuestos, marcadores de inicio/fin y validación **estructural**.
-- Contrato CAM con condiciones F/S opcionales y transformación inicial de coordenadas modelo → trabajo para traslación y giro alrededor de Z.
+- Contrato CAM con F/S opcionales, procedencia e invalidación de previews; STL original intacto y transformación de entrada (mm/pulgadas, escalado, rotación, traslación y pivote), además de conversión inicial modelo → trabajo. **P1 sigue abierto**: no hay validación end-to-end acreditada.
 
 **No está terminado el flujo CNC:** faltan verificación continua de colisiones, perfiles de máquina, postprocesador FluidNC, exportación controlada y validación real. «Correcto estructuralmente» **no** significa seguro para fresar.
 
@@ -47,6 +47,8 @@ Configuración portable junto al ejecutable: `config/settings.json`, `config/pan
 - [Decisiones](docs/DECISIONS.md)
 - [Hoja de ruta hacia el prototipo](docs/ROADMAP.md)
 - [Pruebas y seguridad](docs/TESTING.md)
-- [Proceso por parches PS1](docs/WORKFLOW.md)
+- [Proceso de trabajo y parches PowerShell](docs/WORKFLOW.md)
+- [Roles de chats y responsabilidades](docs/CHAT_ROLES.md)
+- [Traspaso al siguiente Chat Master](docs/HANDOFF.md)
 
-El SHA de `STATUS.md` es el **último corte documentado**, no necesariamente el de los archivos locales aún no versionados. No atribuir pruebas realizadas sobre un SHA distinto.
+El Chat Master se puede sustituir: `docs/HANDOFF.md` contiene la continuación operativa sin reemplazar `STATUS.md`. Los chats no ejecutan Git ni editan directamente el proyecto local; entregan un único parche `.ps1` autocontenido por avance y el usuario lo ejecuta, valida y versiona. Si el SHA de GitHub difiere de `STATUS.md` o de los archivos locales, revisar la diferencia antes de decidir.

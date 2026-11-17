@@ -631,6 +631,7 @@ impl TestParallelPanel {
             .filter(|(i, _)| *i == index)
             .map(|(_, j)| (j.progress.load(Ordering::Relaxed), j.total));
         let has_result = self.results.contains_key(&index);
+        let units = crate::work_units::current(ctx);
         let mut accept = false;
         let mut generate = false;
         let mut cancel_edit = false;
@@ -685,17 +686,17 @@ impl TestParallelPanel {
                                                 ui.selectable_value(
                                                     &mut draft.tool_id,
                                                     Some(tool.id.clone()),
-                                                    format!("{} - {} Ø{:.3} mm", tool.name,
+                                                    format!(                                                "{} - {} Ø{}", tool.name,
                                                         tool.geometry.kind().label(),
-                                                        tool.geometry.diameter_mm()),
+                                                        units.length(tool.geometry.diameter_mm(), 3)),
                                                 );
                                             }
                                         });
                                 });
                                 if let Some(id) = draft.tool_id.as_deref() {
                                     if let Some(tool) = tool_library.get(id) {
-                                        ui.small(format!("{} · Diametro Ø{:.3} mm (biblioteca)",
-                                            tool.geometry.kind().label(), tool.geometry.diameter_mm()));
+                                                                                ui.small(format!("{} · Diametro Ø{} (biblioteca)",
+                                            tool.geometry.kind().label(), units.length(tool.geometry.diameter_mm(), 3)));
                                         if !matches!(&tool.geometry, crate::tools::model::ToolGeometry::BallNose { .. } | crate::tools::model::ToolGeometry::Flat { .. } | crate::tools::model::ToolGeometry::BullNose { .. }) {
                                             ui.small("Este tipo aun no dispone de solucion de contacto CAM.");
                                         }
@@ -734,19 +735,16 @@ impl TestParallelPanel {
                                     ui.add_enabled_ui(!running, |ui| {
                                         ui.small("Diametro de contacto: definido por la herramienta seleccionada en General.");
                                         ui.horizontal(|ui| {
-                                            ui.label("Paso entre pasadas:");
-                                            ui.add(egui::DragValue::new(&mut p.stepover)
-                                                .speed(0.5).range(0.01..=1000.0));
+                                                                                        ui.label(format!("Paso entre pasadas ({}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0)));
                                         });
                                         ui.horizontal(|ui| {
-                                            ui.label("Paso longitudinal:");
-                                            ui.add(egui::DragValue::new(&mut p.longitudinal)
-                                                .speed(0.1).range(0.01..=1000.0));
+                                                                                        ui.label(format!("Paso longitudinal ({}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.longitudinal, 0.1, Some((0.01, 1000.0)));
                                         });
                                         ui.horizontal(|ui| {
-                                            ui.label("Sobreespesor:");
-                                            ui.add(egui::DragValue::new(&mut p.allowance_mm)
-                                                .speed(0.1).range(0.0..=1_000_000.0).suffix(" mm"));
+                                                                                        ui.label(format!("Sobreespesor ({}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0)));
                                         });
                                         ui.small("Separacion uniforme respecto al modelo nominal; no se acumula entre operaciones.");
                                         ui.separator();
@@ -758,9 +756,8 @@ impl TestParallelPanel {
                                                 p.cutting_feed_mm_min = defined.then_some(0.0);
                                             }
                                             if let Some(feed) = p.cutting_feed_mm_min.as_mut() {
-                                                ui.add(egui::DragValue::new(feed)
-                                                    .speed(10.0).range(0.0..=1_000_000.0)
-                                                    .suffix(" mm/min"));
+                                                                                                units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0)));
+                                                ui.label(format!("{}/min", units.symbol()));
                                             }
                                         });
                                         ui.horizontal(|ui| {
@@ -797,14 +794,12 @@ impl TestParallelPanel {
                                             });
                                         ui.separator();
                                         ui.horizontal(|ui| {
-                                            ui.label("Despeje sobre bruto (+mm):");
-                                            ui.add(egui::DragValue::new(&mut p.clearance_mm)
-                                                .speed(0.5).range(0.1..=1_000_000.0));
+                                                                                        ui.label(format!("Despeje sobre bruto (+{}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0)));
                                         });
                                         ui.horizontal(|ui| {
-                                            ui.label("Aproximacion sobre bruto (+mm):");
-                                            ui.add(egui::DragValue::new(&mut p.approach_mm)
-                                                .speed(0.1).range(0.01..=1_000_000.0));
+                                                                                        ui.label(format!("Aproximacion sobre bruto (+{}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)));
                                         });
                                         ui.small("Referencia Z: max(cima STL, cima bruto y punta calculada). Despeje > aproximacion > 0.");
                                         ui.small("G25.3: trazados propuestos, NO verificados para ejecutar en una CNC.");
@@ -834,18 +829,18 @@ impl TestParallelPanel {
                                             };
                                         }
                                         if let Some(area) = p.area_xy.as_mut() {
-                                            ui.small("Limites del modelo transformado, en mm.");
+                                                                                        ui.small(format!("Limites del modelo transformado, en {}.", units.symbol()));
                                             ui.horizontal(|ui| {
                                                 ui.label("X min");
-                                                ui.add(egui::DragValue::new(&mut area.x_min).speed(0.1));
+                                                units.drag_mm(ui, &mut area.x_min, 0.1, None);
                                                 ui.label("X max");
-                                                ui.add(egui::DragValue::new(&mut area.x_max).speed(0.1));
+                                                units.drag_mm(ui, &mut area.x_max, 0.1, None);
                                             });
                                             ui.horizontal(|ui| {
                                                 ui.label("Y min");
-                                                ui.add(egui::DragValue::new(&mut area.y_min).speed(0.1));
+                                                units.drag_mm(ui, &mut area.y_min, 0.1, None);
                                                 ui.label("Y max");
-                                                ui.add(egui::DragValue::new(&mut area.y_max).speed(0.1));
+                                                units.drag_mm(ui, &mut area.y_max, 0.1, None);
                                             });
                                         } else {
                                             ui.small("Se utilizara el rectangulo completo del modelo STL.");
@@ -904,13 +899,13 @@ impl TestParallelPanel {
                     ui.small(&self.message);
                 }
                 if let Some(result) = self.results.get(&index) {
-                    let f = result.conditions.feed_mm_min
-                        .map(|n| format!("{n:.3} mm/min"))
+                                        let f = result.conditions.feed_mm_min
+                        .map(|n| units.feed(n, 3))
                         .unwrap_or_else(|| "sin definir".into());
                     let s = result.conditions.spindle_rpm
                         .map(|n| format!("{n:.3} rpm"))
                         .unwrap_or_else(|| "sin definir".into());
-                    ui.small(format!("Condiciones de la ultima generacion: F={f}; S={s}; unidades: mm"));
+                                        ui.small(format!("Condiciones de la ultima generacion: F={f}; S={s}; visualizacion: {}", units.symbol()));
                     if result.conditions.require_configured().is_err() {
                         ui.small("F/S pendientes: la previsualizacion funciona, pero el futuro postprocesado necesitara ambos valores.");
                     }
@@ -976,12 +971,12 @@ impl TestParallelPanel {
                                     ) {
                                         (Ok(start), Ok(end)) => {
                                             ui.small(format!(
-                                                "F1.2 - Origen trabajo (mm): inicio X{:.3} Y{:.3} Z{:.3}",
-                                                start[0], start[1], start[2]
+                                                                                                "F1.2 - Origen trabajo ({}): inicio X{:.3} Y{:.3} Z{:.3}",
+                                                units.symbol(), units.display(start[0]), units.display(start[1]), units.display(start[2])
                                             ));
                                             ui.small(format!(
-                                                "F1.2 - Fin X{:.3} Y{:.3} Z{:.3} (solo referencia)",
-                                                end[0], end[1], end[2]
+                                                                                                "F1.2 - Fin X{:.3} Y{:.3} Z{:.3} (solo referencia)",
+                                                units.display(end[0]), units.display(end[1]), units.display(end[2])
                                             ));
                                         }
                                         _ => {

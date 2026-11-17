@@ -16,6 +16,7 @@ enum Theme {
 struct Settings {
     version: u32,
     theme: Theme,
+    work_units: crate::work_units::WorkUnits,
 }
 
 impl Default for Settings {
@@ -23,6 +24,7 @@ impl Default for Settings {
         Self {
             version: 1,
             theme: Theme::Dark,
+            work_units: crate::work_units::WorkUnits::Mm,
         }
     }
 }
@@ -53,6 +55,7 @@ impl Options {
             }
         }
         apply_theme(ctx, settings.theme);
+        crate::work_units::publish(ctx, settings.work_units);
         Self {
             open: false,
             path,
@@ -95,8 +98,21 @@ impl Options {
                     apply_theme(ctx, theme);
                     self.save();
                 }
-                ui.add_space(8.0);
+                                ui.add_space(8.0);
                 ui.small("El cambio se aplica inmediatamente, sin reiniciar.");
+                ui.separator();
+                ui.heading("Unidades de trabajo");
+                ui.small("Afectan solo a la entrada y presentacion; STL, CAM y archivos guardados siguen en mm internos.");
+                let mut work_units = self.settings.work_units;
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut work_units, crate::work_units::WorkUnits::Mm, "Milimetros (mm)");
+                    ui.selectable_value(&mut work_units, crate::work_units::WorkUnits::Inch, "Pulgadas (in)");
+                });
+                if work_units != self.settings.work_units {
+                    self.settings.work_units = work_units;
+                    crate::work_units::publish(ctx, work_units);
+                    self.save();
+                }
                 ui.small("El visor 3D conserva su fondo azul.");
                 ui.separator();
                 ui.label("Configuración portable");
@@ -170,12 +186,31 @@ mod tests {
     #[test]
     fn settings_file_roundtrips_both_themes() {
         for theme in [Theme::Dark, Theme::Light] {
-            let settings = Settings { version: 1, theme };
+            let settings = Settings {
+                version: 1,
+                theme,
+                work_units: crate::work_units::WorkUnits::Mm,
+            };
             let json = serde_json::to_vec(&settings).unwrap();
             let restored: Settings = serde_json::from_slice(&json).unwrap();
             assert_eq!(restored.theme, theme);
             assert_eq!(restored.version, 1);
         }
+    }
+
+    #[test]
+    fn legacy_settings_without_work_units_default_to_mm() {
+        let settings: Settings = serde_json::from_str(r#"{"version":1,"theme":"dark"}"#).unwrap();
+        assert_eq!(settings.work_units, crate::work_units::WorkUnits::Mm);
+        assert_eq!(
+            serde_json::to_value(Settings {
+                work_units: crate::work_units::WorkUnits::Inch,
+                ..settings
+            })
+            .unwrap()["work_units"]
+                .as_str(),
+            Some("inch")
+        );
     }
 
     #[test]
@@ -199,7 +234,11 @@ mod tests {
     fn saved_preference_restores_real_theme() {
         let ctx = egui::Context::default();
         for theme in [Theme::Light, Theme::Dark] {
-            let settings = Settings { version: 1, theme };
+            let settings = Settings {
+                version: 1,
+                theme,
+                work_units: crate::work_units::WorkUnits::Mm,
+            };
             let json = serde_json::to_vec(&settings).unwrap();
             let restored: Settings = serde_json::from_slice(&json).unwrap();
             apply_theme(&ctx, restored.theme);

@@ -1,6 +1,6 @@
 # Arquitectura de LaguCAM
 
-**Arquitectura contrastada con código público:** `5cd41c7` (2026-11-17), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
+**Arquitectura contrastada con código público:** `a10e0c0` (2026-11-17), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
 
 ## 1. Stack y distribución [ACTUAL]
 
@@ -19,7 +19,9 @@ La distribución portable sitúa `settings.json`, `panels.json`, `tools.json` y 
 | `overlay.rs` | Marcadores y ejes CNC superpuestos |
 | `navigation.rs`, `nav_cube.rs`, `scene_pick.rs` | Cámara, cubo de orientación y picking sobre profundidad GPU; **no consultas CAM** |
 | `project/*` | Modelo, bruto, origen, operaciones parametrizables y persistencia del proyecto |
-| `project/persistence.rs` | Serialización `.lagucam` v2, validación y comprobación de STL externo |
+| `project/persistence.rs` | Serialización `.lagucam` v2, validación y comprobación económica del STL externo |
+| `project/model_transform.rs` | Origen mm/pulgadas, escala, rotación, traslación y pivote; transformación afín no destructiva compartida entre visor y CAM |
+| `project/cam_provenance.rs` | Dependencias geométricas de previews TEST; invalidación por STL, bruto, estrategia, transformación y fresa |
 | `project_ui.rs` | Árbol lateral y propiedades |
 | `tools/model.rs` | Definición y validación de seis familias de fresas, UUID y perfiles geométricos `f64` |
 | `tools/storage.rs` | Biblioteca global versionada y persistencia independiente |
@@ -48,9 +50,9 @@ STL binario externo → validar y obtener límites f64 → triángulos por bloqu
 
 La GPU conserva las caras renderizadas, pero su geometría normalizada en `f32` **no es la representación geométrica de autoridad para CAM**. La lectura del depth buffer sirve solo para navegación visual. El STL fuente se conserva sin modificaciones; el importador no verifica que sea cerrado, manifold o apto para mecanizado.
 
-El bruto es un prisma alineado con los ejes de modelo, con límites y extras por cara `f64`. El sistema de trabajo usa anclas en modelo/bruto, offsets y `R = Rz · Ry · Rx`, con `p_modelo = origen + R · p_CNC`. Una rotación matemática del marco no significa que `G54` rote ejes ni que una CNC de tres ejes pueda orientar el husillo.
+El bruto es un prisma alineado con los ejes físicos de modelo, con límites y extras por cara `f64`. El STL sigue inmutable: `raw_bounds` guarda límites originales, `bounds` refleja el modelo transformado a milímetros, y `ModelTransform` define la matriz compartida. El renderer aplica la transformación a la malla normalizada y el BVH transforma cada triángulo al calcular. **Riesgo observado:** `main.rs` usa `Mat4::IDENTITY` si no puede crear la matriz visual; P1 debe impedir una divergencia visual/CAM silenciosa. El sistema de trabajo usa anclas en modelo/bruto, offsets y `R = Rz · Ry · Rx`, con `p_modelo = origen + R · p_CNC`. Una rotación matemática del marco no significa que `G54` rote ejes ni que una CNC de tres ejes pueda orientar el husillo.
 
-`.lagucam` guarda referencia externa del STL y configuración de proyecto, no la malla ni una copia editable de la biblioteca global. Las operaciones usan `tool_id: Option<ToolId>`; el editor permite seleccionar la fresa y `cam_adapter.rs` la resuelve antes del cálculo. La vigencia actual depende de la huella de la herramienta; todavía faltan dependencias completas de modelo, bruto, setup y post. Los resultados de cálculo permanecen fuera del proyecto persistido.
+`.lagucam` guarda referencia externa del STL y configuración de proyecto, no la malla ni una copia editable de la biblioteca global. Las operaciones usan `tool_id: Option<ToolId>`; el editor permite seleccionar la fresa y `cam_adapter.rs` la resuelve antes del cálculo. Las previews usan `CamProvenance` para comprobar identidad muestreada/fecha/tamaño de STL, AABB físico, configuración de transformación, bruto, estrategia y firma UUID/hash de fresa. **No es una firma criptográfica del STL completo ni un contrato de exportación:** setup/origen y parámetros F/S requieren su propia validación previa al post. Los resultados de cálculo permanecen fuera del proyecto persistido.
 
 ## 4. Modelo de fresas [ACTUAL]
 
@@ -64,9 +66,9 @@ La biblioteca es la **única fuente editable**. Ninguna operación conserva una 
 
 `src/tools/hash.rs` implementa SHA-256 sobre representación **binaria canónica y versionada** de los parámetros geométricos efectivos: variante, diámetros, radios, ángulos, longitud de corte, diámetro de mango y longitud total, ampliables con otras cotas físicas que influyan en contacto o colisión. Excluir UUID, revisión, nombre, notas, RPM y avances recomendados. Normalizar valores equivalentes y rechazar no finitos.
 
-El cálculo resuelve la fresa por UUID y conserva una firma (UUID + SHA-256) para invalidar previews si cambia la geometría o desaparece el registro. Aún falta registrar y comprobar **todas** las dependencias de salida: modelo, bruto, setup, estrategia, tolerancias, algoritmo y post. Ø6 → Ø4 → Ø6 puede restaurar el hash anterior, pero **no** acredita la trayectoria completa ni ningún G-code.
+El cálculo resuelve la fresa por UUID y conserva una firma (UUID + SHA-256). Desde P1-A, `CamProvenance` invalida previews por fuente, bruto, modelo transformado, herramienta y parámetros geométricos; no almacena G-code. Aún falta definir y comprobar la **validez de exportación**: origen/setup de trabajo, tolerancias, verificación geométrica, máquina y post. Ø6 → Ø4 → Ø6 puede restaurar el hash anterior, pero **no** acredita la trayectoria completa ni ningún G-code.
 
-El hash ya se utiliza para vigencia de **previsualizaciones por herramienta**, pero no hay contrato completo de invalidación ni exportación. Hay trayectoria neutral y verificador estructural; **no** hay trayectoria segura para CNC. El contrato v1 utiliza el dominio `LaguCAM/tool-geometry/SHA-256\0`, versión `u32 LE=1`, discriminantes fijos `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5, toroidal=6), las dimensiones específicas de cada variante en el orden de su declaración, y finalmente longitud de corte, diámetro de mango y longitud total. Los `f64` se escriben mediante IEEE-754 little-endian, normalizando el cero con signo y rechazando geometría inválida. Un cambio del contrato requiere nueva versión y vectores de prueba.
+El hash y la procedencia se usan para vigencia de **previsualizaciones geométricas**, pero no hay contrato completo de invalidación de programa ni exportación. Hay trayectoria neutral y verificador estructural; **no** hay trayectoria segura para CNC. El contrato v1 utiliza el dominio `LaguCAM/tool-geometry/SHA-256\0`, versión `u32 LE=1`, discriminantes fijos `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5, toroidal=6), las dimensiones específicas de cada variante en el orden de su declaración, y finalmente longitud de corte, diámetro de mango y longitud total. Los `f64` se escriben mediante IEEE-754 little-endian, normalizando el cero con signo y rechazando geometría inválida. Un cambio del contrato requiere nueva versión y vectores de prueba.
 
 El contacto esférico con STL se calcula a partir de los valores `f32` originales convertidos a `f64`, nunca desde la normalización gráfica. El BVH usa límites XY y posiciones de registro para no guardar toda la malla dos veces; su presupuesto no incluye toda la RSS del proceso. La fachada del servicio de contacto tiene protección de inmutabilidad de archivo implementada en Windows; otras plataformas siguen pendientes.
 
@@ -77,6 +79,8 @@ El contacto esférico con STL se calcula a partir de los valores `f32` originale
 ```text
       Interfaz egui + Estado del proyecto
                      │
+   STL original → ModelTransform (mm físicos)
+                     │
       Operaciones → Resolver UUID en biblioteca (implementado)
                      │
       Estrategias CAM 3 ejes (TEST inicial)
@@ -86,6 +90,8 @@ El contacto esférico con STL se calcula a partir de los valores `f32` originale
            STL (inicio)  STEP/B-Rep (futuro)
                      │
        G25: trayectoria y enlaces propuestos
+                     │
+       P1-A: procedencia/invalidación de previews
                      │
        Validación estructural (implementada)
                      │
@@ -103,7 +109,7 @@ El fresado inicial tendrá tres ejes, herramienta paralela a Z del setup, avance
 ## 7. Riesgos e invariantes
 
 1. UUID con formato válido no equivale a herramienta existente; `cam_adapter` debe resolverlo o rechazar la operación.
-2. SHA-256 de fresa invalida previews, pero **sin comprobar todas las dependencias** no puede declararse válida una trayectoria.
+2. `CamProvenance` cubre procedencia geométrica para previews; **no equivale a verificación integral ni contrato exportable**. Su firma muestreada STL no verifica criptográficamente cada byte.
 3. El mango actual no determina salida de pinza; faltan cuello, portaherramientas, sujeciones y comprobación de colisión.
 4. `f32` normalizado y depth buffer son visuales, no precisión CAM.
 5. `.lagucam` v1 se rechaza: **durante desarrollo no se exige compatibilidad**, pero se documentan roturas y no se borran datos personales silenciosamente.

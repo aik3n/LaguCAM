@@ -1,13 +1,13 @@
 # Estado verificable de LaguCAM
 
-**Corte documental preparado:** 2026-11-17. **Código público inspeccionado:** `main` en [`5cd41c7b394309ea672c43b6a1e6455369e7cf2f`](https://github.com/aik3n/LaguCAM/commit/5cd41c7b394309ea672c43b6a1e6455369e7cf2f).
+**Corte documental de auditoría estática:** 2026-11-17. **Código público inspeccionado:** `main` en [`a10e0c0d7c95db773417c2b190e7f4ff9005d8d4`](https://github.com/aik3n/LaguCAM/commit/a10e0c0d7c95db773417c2b190e7f4ff9005d8d4). **Este corte no certifica la ejecución de pruebas ni el contenido del Escritorio.**
 
 | Referencia | Evidencia y alcance |
 | --- | --- |
-| SHA de código público cubierto por este corte | `5cd41c7b394309ea672c43b6a1e6455369e7cf2f` |
+| SHA de código público cubierto por esta **inspección estática** | `a10e0c0d7c95db773417c2b190e7f4ff9005d8d4` |
 | Método de revisión | Inspección estática de commits y archivos de GitHub, sin ejecución propia de Rust/GUI/CNC; no se ha inspeccionado la carpeta local del usuario |
 | Pruebas anteriores comunicadas | 130 tests Windows en `7de83c9` (históricas); validación funcional G19 comunicada por el usuario tras sus pruebas; 161/161 tests declarados en el mensaje de commit `d12ebcc` (G20–G22), **no reproducidos aquí** |
-| Comprobación de tests en `5cd41c7` | **No acreditada en esta revisión**. No hay resultado CI publicado observado; ejecutar en Windows antes de cerrar siguiente hito |
+| Comprobación de tests en `a10e0c0` | **No acreditada en esta revisión**. No hay resultado CI publicado observado; ejecutar en Windows antes de cerrar P1 |
 | STL real ~1 GB | Navegación del visor reportada por el usuario en fase anterior; **no** es benchmark del BVH ni del CAM |
 | Mecanizado real | **NO APTO PARA PRODUCCIÓN:** todavía no hay post FluidNC, perfil de máquina operativo ni verificación integral de colisiones |
 
@@ -18,21 +18,31 @@
 | Subsistema | Avance observado | Validación o dependencia pendiente |
 | --- | --- | --- |
 | **Visor STL** | Importación por bloques, renderer GPU, cámara, selección de pivote, zoom al cursor, cubo de orientación, control ortográfico/perspectiva | Regresión visual Windows y métricas reproducibles con STL cercano a 1 GB |
-| **Proyectos** | `.lagucam` versionado, modelo externo, bruto, origen, operaciones, guardado por reemplazo y lista portable de cinco proyectos recientes | Round-trip manual de casos reales y pruebas ante fallos/archivos faltantes; sin backups automáticos de proyecto por decisión del usuario |
+| **Proyectos y transformación de entrada** | `.lagucam` v2 con `model_transform` opcional, STL fuente intacto, selección mm/pulgadas, escala XYZ, rotación, traslación y pivote; bruto recalculado al aplicar | Integración/round-trip Windows aún no acreditados; comprobar matrices del visor y casos límite; sin backups automáticos de proyecto |
 | **Herramientas** | Biblioteca global por UUID, perfiles y validación; geometrías esférica, plana y toroidal enlazadas al ContactSolver mediante adaptador | Otras geometrías reconocidas aún no tienen solver; verificar montaje y colisiones; la huella geométrica no cubre todas las dependencias del cálculo |
-| **Contacto geométrico G19–G24** | Solver tipado, BVH sobre STL original, sobrematerial euclídeo esférico/plano/toroidal; límites, diagnósticos y cancelación | Referencias independientes, precisión en degeneraciones y rendimiento sobre malla de ~20 M de triángulos |
+| **Contacto geométrico G19–G24** | Solver tipado, BVH que indexa triángulos físicamente transformados cuando procede, sobrematerial esférico/plano/toroidal; límites, diagnósticos y cancelación | Pruebas analíticas independientes y rendimiento sobre malla ~20 M; comprobar equivalencia del visor y CAM tras transformación |
 | **Acabado paralelo experimental** | Pasadas X/Y, área, sobreespesor, patrón unidireccional/zigzag, elección de fresa, previews y cancelación | Error entre muestras, barrido continuo, colisiones y material remanente; aún experimental |
 | **Trayectorias G25** | Segmentos neutrales de corte, enlaces/descensos/retiradas propuestos, marcadores de inicio/fin y validación **estructural** con incidencias por movimiento | No comprueba volumen barrido ni obstáculos reales; no autoriza ejecutar G-code |
-| **Contrato CAM F1.1** | Vista inmutable de movimientos validados estructuralmente y condiciones F/S opcionales, sin postprocesador | Control completo de vigencia de resultados; no interpretar F/S presentes como autorización de máquina |
+| **Contrato CAM F1.1 y procedencia P1-A** | Vista inmutable con F/S opcionales y `CamProvenance` para invalidar previews por herramienta, STL, bruto, transformación o parámetros geométricos | El constructor de la vista no exige informe estructural apto; F/S no autorizan máquina; identidad STL por muestras FNV-64 no es hash criptográfico completo |
 | **Coordenadas F1.2** | Conversión modelo → coordenadas de trabajo en mm con traslación y giro alrededor de Z; rechaza inclinaciones Rx/Ry | Cierre de unidades y marco de máquina, integración con post y validación de setups reales |
 | **Máquinas y postprocesado** | FluidNC como primer objetivo de diseño | **No implementados** perfil operativo de máquina, post, simulación/verificación completa ni exportación de programa |
+
+## Auditoría de P1 respecto al corte previo
+
+- **`4a51d65`:** `CamProvenance` para invalidación cuando cambian entradas relevantes; separa identidad geométrica de avances/RPM, sin traza exportable todavía.
+- **`94b6d8c`:** `ModelTransform` y `GeometryAffine`; unidades, pivote, escala, rotación y traslación sin modificar el STL; se conectan renderer, BVH, operaciones y persistencia.
+- **`a10e0c0`:** ajustes de advertencias/caché en tests y tipos reservados para post; **no añade G-code**.
+- **Hallazgos a resolver antes de cerrar P1:** `main.rs` usa identidad de matriz visual como alternativa silenciosa si falla `preview_matrix()`; el editor desecha resultados geométricos incluso al cambiar nombre o F/S; falta evidencia de prueba extremo a extremo de importación/unidades/transformación/origen/trayectoria/round-trip.
+- **Calificación de evidencia:** hallazgos de inspección estática; **no** regresiones reproducidas en Windows. `src/test_parallel.rs` acumula UI/hilos/resultados; solo refactorizar con alcance y pruebas concretas, sin reestructuración general.
+
+**Gobierno de chats y sucesión:** `CHAT_ROLES.md`, `WORKFLOW.md`, `HANDOFF.md`; no forman parte del estado de validación geométrica.
 
 ## Seguridad: límites que no deben omitirse
 
 - `None` en ContactSolver significa falta de contacto, no permiso de desplazamiento.
 - `is_structurally_valid()` solo significa continuidad, orden y cotas coherentes según el contrato G25; **no** detecta colisiones con mango, portaherramientas, utillaje, stock remanente o máquina.
 - El estado UI «Ready» corresponde al cálculo experimental con movimientos de corte y validación estructural, no a una operación lista para producción.
-- STL no almacena unidades: el TEST actual parte de la hipótesis **1 unidad STL = 1 mm**. No exportar a máquina sin una definición explícita verificable.
+- STL no almacena unidades: el modelo permite configurar **mm o pulgadas de origen** y transformar a milímetros físicos; no inferir la unidad real del STL ni exportar sin verificarla. Si falta información, la opción inicial es mm, no un dato certificado por el archivo.
 - El frame F1.2 conserva el eje vertical de tres ejes; el control CNC no hereda automáticamente una rotación `Rz` por seleccionar `G54`.
 
 ## Próximo objetivo: prototipo 3 ejes de extremo a extremo
