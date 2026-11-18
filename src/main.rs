@@ -6,6 +6,8 @@ mod nav_cube;
 mod navigation;
 mod nc_export_ui;
 mod nc_playback_ui;
+mod nc_scene_gl;
+mod nc_tool_overlay;
 mod options;
 mod overlay;
 mod panel_layout;
@@ -1554,6 +1556,7 @@ impl eframe::App for App {
         self.cancel.store(true, Ordering::Relaxed);
         self.receiving = None;
         if let Some(gl) = gl {
+            self.nc_playback_ui.destroy_scene_gl(gl);
             self.cam_marker_renderer.lock().destroy(gl);
             self.stock_renderer.lock().destroy(gl);
             self.renderer.lock().destroy(gl);

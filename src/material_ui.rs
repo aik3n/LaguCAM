@@ -80,6 +80,21 @@ fn supported_spec(tool: &Tool) -> Option<CutterSpec> {
 
 impl MaterialUi {
     /// Vista aislada solo si existe material calculado y visible.
+    /// La herramienta tiene la misma identidad y geometria que la simulacion calculada.
+    /// Si el resultado se invalida, no se muestra una fresa obsoleta.
+    pub fn simulated_tool(&self) -> Option<&Tool> {
+        if !self.visible || self.job.is_some() || self.field.is_none() {
+            return None;
+        }
+        self.snapshot.as_ref().map(|snapshot| &snapshot.tool)
+    }
+    /// El material calculado ya sincronizado con el cursor NC; nunca devuelve un job parcial.
+    pub fn render_field(&self) -> Option<&MaterialHeightfield> {
+        if !self.visible || self.job.is_some() {
+            return None;
+        }
+        self.field.as_ref()
+    }
     pub fn isolated_view_active(&self) -> bool {
         self.isolated_view && self.visible && self.field.is_some() && self.job.is_none()
     }

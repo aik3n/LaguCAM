@@ -100,6 +100,9 @@ pub struct NcPlaybackUi {
     speed: f64,
     last_update: Option<Instant>,
     visible: bool,
+    show_cutter: bool,
+    scene_renderer:
+        std::sync::Arc<egui::mutex::Mutex<Option<Result<crate::nc_scene_gl::Renderer, String>>>>,
     material: MaterialUi,
     message: String,
 }
@@ -119,6 +122,8 @@ impl Default for NcPlaybackUi {
             speed: 5.0,
             last_update: None,
             visible: true,
+            show_cutter: true,
+            scene_renderer: std::sync::Arc::new(egui::mutex::Mutex::new(None)),
             material: MaterialUi::default(),
             message: String::new(),
         }
@@ -352,6 +357,8 @@ impl NcPlaybackUi {
                         ui.monospace(format!("Linea NC: {line}  ·  X{:.4} Y{:.4} Z{:.4} mm", xyz[0], xyz[1], xyz[2]));
                     }
                     ui.checkbox(&mut self.visible, "Mostrar trayectoria NC en visor 3D");
+                    ui.checkbox(&mut self.show_cutter, "Mostrar fresa 3D (herramienta de simulacion)");
+                    ui.small("La fresa se superpone al material: aun no hay ocultacion por profundidad ni control de colisiones.");
                     ui.small("G0 en cian; G1 en naranja. El marcador representa la punta, no la geometria completa de la fresa.");
                     if pb.moves.len() > MAX_VISIBLE_SEGMENTS {
                         ui.small("Vista de trazos simplificada por rendimiento; reproduccion y posicion conservan todos los movimientos.");
@@ -396,6 +403,13 @@ impl NcPlaybackUi {
         }
     }
 
+    /// Liberar los recursos GL en el hilo de la ventana, antes de cerrar contexto.
+    pub fn destroy_scene_gl(&mut self, gl: &eframe::glow::Context) {
+        let mut renderer = self.scene_renderer.lock();
+        if let Some(Ok(renderer)) = renderer.take() {
+            renderer.destroy(gl);
+        }
+    }
     /// Pinta un overlay de la traza NC. El modulo no consulta CAM ni ContactSolver.
     #[expect(
         clippy::too_many_arguments,
@@ -455,18 +469,96 @@ impl NcPlaybackUi {
                     + egui::vec2(ndc.x * rect.width() * 0.5, -ndc.y * rect.height() * 0.5),
             )
         };
-        self.material.paint(
-            ui,
-            rect,
-            project,
-            self.playhead,
-            yaw,
-            pitch,
-            distance,
-            pan,
-            projection,
-        );
-        if !self.visible && !self.material.isolated_view_active() {
+        // P2-D3: todos los solidos de la simulacion usan la MISMA profundidad GL.
+        // El modelo STL original queda fuera de la vista de simulacion. Nunca se
+        // triangula material en pantalla (Pos2) ni se ordenan las caras por Z media.
+        if let Some(field) = self.material.render_field()
+            && let Some(mut scene) = crate::nc_scene_gl::Scene::from_material(project, field)
+        {
+            let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
+            if self.show_cutter
+                && let Some(tool) = self.material.simulated_tool()
+            {
+                scene.append_tool(project, tool, tip);
+            }
+            if self.visible {
+                let stride = pb.moves.len().div_ceil(MAX_VISIBLE_SEGMENTS).max(1);
+                if let (Some(model), Some(stock)) = (&project.model, &project.stock) {
+                    for item in pb.moves.iter().step_by(stride) {
+                        let a = project.origin.work_to_model(
+                            stock,
+                            &model.bounds,
+                            item.motion.from_work_mm,
+                        );
+                        let b = project.origin.work_to_model(
+                            stock,
+                            &model.bounds,
+                            item.motion.to_work_mm,
+                        );
+                        if let (Ok(a), Ok(b)) = (a, b) {
+                            let color = match item.motion.kind {
+                                NcMotionKind::Rapid => [0.18, 0.80, 0.96],
+                                NcMotionKind::LinearFeed => [1.0, 0.58, 0.11],
+                            };
+                            scene.add_line(project, a, b, color);
+                        }
+                    }
+                }
+            }
+            let scene_renderer = std::sync::Arc::clone(&self.scene_renderer);
+            let camera = crate::stock_render::Camera {
+                yaw,
+                pitch,
+                zoom: distance,
+                aspect: rect.width() / rect.height().max(1.0),
+                pan,
+                projection,
+            };
+            ui.painter().with_clip_rect(rect).add(egui::PaintCallback {
+                rect,
+                callback: std::sync::Arc::new(eframe::egui_glow::CallbackFn::new(
+                    move |info, painter| {
+                        use eframe::glow::HasContext as _;
+                        let gl = painter.gl();
+                        let clip = egui::PaintCallbackInfo {
+                            clip_rect: info.clip_rect.intersect(info.viewport),
+                            ..info
+                        }
+                        .clip_rect_in_pixels();
+                        unsafe {
+                            gl.enable(eframe::glow::SCISSOR_TEST);
+                            gl.scissor(
+                                clip.left_px,
+                                clip.from_bottom_px,
+                                clip.width_px,
+                                clip.height_px,
+                            );
+                            // Apartar el STL y dibujar fondo+material en el mismo FBO.
+                            gl.clear_color(0.62, 0.81, 0.91, 1.0);
+                            gl.depth_mask(true);
+                            gl.clear(
+                                eframe::glow::COLOR_BUFFER_BIT | eframe::glow::DEPTH_BUFFER_BIT,
+                            );
+                        }
+                        let mut cache = scene_renderer.lock();
+                        if cache.is_none() {
+                            *cache = Some(crate::nc_scene_gl::Renderer::new(gl));
+                            if let Some(Err(error)) = cache.as_ref() {
+                                eprintln!("LaguCAM P2-D3: {}", error);
+                            }
+                        }
+                        if let Some(Ok(renderer)) = cache.as_mut() {
+                            renderer.paint(gl, &scene, camera);
+                        }
+                    },
+                )),
+            });
+            return;
+        }
+        if !self.visible
+            && !self.material.isolated_view_active()
+            && !(self.show_cutter && self.material.simulated_tool().is_some())
+        {
             return;
         }
         let painter = ui.painter().with_clip_rect(rect);
@@ -499,6 +591,24 @@ impl NcPlaybackUi {
             }
         }
         let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
+        if self.show_cutter
+            && let Some(tool) = self.material.simulated_tool()
+        {
+            crate::nc_tool_overlay::paint(
+                ui,
+                rect,
+                project,
+                tool,
+                tip,
+                crate::nc_tool_overlay::Camera {
+                    yaw,
+                    pitch,
+                    distance,
+                    pan,
+                    projection,
+                },
+            );
+        }
         if let Some(pos) = point(tip) {
             painter.circle_filled(pos, 6.0, egui::Color32::from_rgb(235, 55, 62));
             painter.circle_stroke(pos, 8.0, egui::Stroke::new(1.6, egui::Color32::WHITE));

@@ -356,7 +356,7 @@ impl MaterialHeightfield {
 
     fn apply_tip(
         heights: &mut [f32],
-        history: &mut Vec<HeightChange>,
+        history: &mut ChangeLog,
         stock: StockBox,
         cells: [usize; 2],
         cutter: CutterSpec,

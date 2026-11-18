@@ -70,7 +70,7 @@
         "toolpath_id": null,
         "parallel_test": {
           "diameter": 4.0,
-          "stepover": 10.0,
+          "stepover": 4.0,
           "longitudinal": 2.0,
           "along_x": true,
           "allowance_mm": 5.0,
@@ -80,14 +80,14 @@
         }
       },
       {
-        "name": "desb esf d2 s0",
+        "name": "desb esf d4 s0",
         "kind": "parallel_test",
         "status": "not_calculated",
-        "tool_id": "23367a56-bab4-42d1-bcbb-407d11fa670b",
+        "tool_id": "e1d9c575-af0a-4406-8df9-9569f2fe1a7b",
         "toolpath_id": null,
         "parallel_test": {
           "diameter": 4.0,
-          "stepover": 10.0,
+          "stepover": 3.0,
           "longitudinal": 3.0,
           "along_x": true,
           "allowance_mm": 1.0,
