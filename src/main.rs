@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod cam_batch;
 mod cam_markers_3d;
 mod material_ui;
 mod nav_cube;
@@ -166,6 +167,7 @@ struct App {
     nc_playback_ui: nc_playback_ui::NcPlaybackUi,
     test_parallel: test_parallel::TestParallelPanel,
     pending_cam_command: Option<project_ui::OperationCommand>,
+    batch_calculation: Option<cam_batch::BatchCalculation>,
     project_path: Option<PathBuf>,
     recent_projects: recent_projects::RecentProjects,
     current_stl_path: Option<PathBuf>,
@@ -240,6 +242,7 @@ impl App {
             nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
             pending_cam_command: None,
+            batch_calculation: None,
             project_path: None,
             recent_projects: recent_projects::RecentProjects::load(),
             current_stl_path: None,
@@ -302,6 +305,7 @@ impl App {
         self.opening_project = opening;
         self.test_parallel.clear_source();
         self.pending_cam_command = None;
+        self.batch_calculation = None;
         self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
         self.pending_filename = Some(
@@ -595,6 +599,7 @@ impl App {
             FileAction::New => {
                 self.test_parallel.clear_source();
                 self.pending_cam_command = None;
+                self.batch_calculation = None;
                 self.section_profiles = None;
                 self.sample_profile_job = None;
                 self.renderer.lock().clear_scene();
@@ -696,6 +701,7 @@ impl App {
                 let restored = doc.state.restore(String::new(), None)?;
                 self.test_parallel.clear_source();
                 self.pending_cam_command = None;
+                self.batch_calculation = None;
                 self.section_profiles = None;
                 self.renderer.lock().clear_scene();
                 self.sample_profile_job = None;
@@ -1059,7 +1065,9 @@ impl App {
         command: project_ui::OperationCommand,
     ) -> Result<(), String> {
         use project_ui::OperationCommand;
-        let index = command.index();
+        let Some(index) = command.index() else {
+            return Err("La accion conjunta no corresponde a una operacion individual".into());
+        };
         let op = self
             .project
             .operations
@@ -1073,6 +1081,9 @@ impl App {
         }
         match command {
             OperationCommand::Calculate(_) => Ok(()),
+            OperationCommand::CalculateAll => {
+                Err("El calculo conjunto requiere su propia cola".into())
+            }
             OperationCommand::GenerateNc(_) => {
                 self.nc_export_ui.open_for_operation(index);
                 Ok(())
@@ -1101,7 +1112,22 @@ impl App {
 
     fn request_cam_command(&mut self, command: project_ui::OperationCommand, ctx: &egui::Context) {
         use project_ui::OperationCommand;
-        let index = command.index();
+        if command == OperationCommand::CalculateAll {
+            if self.project.selection != project::selection::Selection::Operations {
+                self.message = "ERROR: Selecciona el nodo Operaciones".into();
+            } else {
+                self.start_batch_calculation(ctx);
+            }
+            return;
+        }
+        if self.batch_calculation.is_some() {
+            self.message =
+                "ERROR: Termina o cancela el calculo conjunto antes de iniciar otro".into();
+            return;
+        }
+        let Some(index) = command.index() else {
+            return;
+        };
         if !matches!(self.project.selection, project::selection::Selection::Operation(i) if i == index)
         {
             self.message = "ERROR: La seleccion de la operacion ha cambiado".into();
@@ -1165,7 +1191,9 @@ impl App {
             return;
         }
         self.pending_cam_command = None;
-        let index = command.index();
+        let Some(index) = command.index() else {
+            return;
+        };
         if self.project.operations.items.get(index).is_none() {
             self.message = "ERROR: La operacion desaparecio durante el calculo".into();
             return;
@@ -1175,6 +1203,116 @@ impl App {
         }
     }
 
+    fn start_batch_calculation(&mut self, ctx: &egui::Context) {
+        if self.busy()
+            || self.batch_calculation.is_some()
+            || self.test_parallel.calculation_running()
+            || self.pending_cam_command.is_some()
+        {
+            self.message = "ERROR: Ya existe otra tarea CAM en curso".into();
+            return;
+        }
+        if self.current_stl_path.is_none() || self.project.model.is_none() {
+            self.message = "ERROR: Abre primero un modelo STL para calcular las operaciones".into();
+            return;
+        }
+        let Some(batch) = cam_batch::BatchCalculation::from_project(&self.project) else {
+            self.message = "Calculo conjunto: no hay operaciones activas".into();
+            return;
+        };
+        self.batch_calculation = Some(batch);
+        self.continue_batch_calculation(ctx);
+    }
+
+    /// El solver solo acepta un trabajo: avanzar cuando el anterior termino.
+    fn continue_batch_calculation(&mut self, ctx: &egui::Context) {
+        let Some(mut batch) = self.batch_calculation.take() else {
+            return;
+        };
+        if self.test_parallel.calculation_running() {
+            self.batch_calculation = Some(batch);
+            return;
+        }
+        if let Some(index) = batch.current.take() {
+            if self
+                .project
+                .operations
+                .items
+                .get(index)
+                .is_some_and(|op| op.status == project::operations::OperationStatus::Ready)
+                && self.test_parallel.nc_result(index).is_some()
+            {
+                batch.calculated += 1;
+            } else {
+                let name = self
+                    .project
+                    .operations
+                    .items
+                    .get(index)
+                    .map_or_else(|| format!("Operacion {}", index + 1), |op| op.name.clone());
+                batch.errors.push(format!(
+                    "{name}: {}",
+                    self.test_parallel.calculation_message()
+                ));
+            }
+        }
+        while let Some(index) = batch.queued.pop_front() {
+            let Some(operation) = self.project.operations.items.get(index) else {
+                batch
+                    .errors
+                    .push(format!("La operacion {} desaparecio", index + 1));
+                continue;
+            };
+            let name = operation.name.clone();
+            if !operation.active {
+                batch.skipped += 1;
+                continue;
+            }
+            if operation.status == project::operations::OperationStatus::Ready
+                && self.test_parallel.nc_result(index).is_some()
+            {
+                batch.reused += 1;
+                continue;
+            }
+            match self.test_parallel.calculate_operation(
+                index,
+                &mut self.project,
+                self.current_stl_path.as_deref(),
+                &self.tool_library,
+                ctx,
+            ) {
+                Ok(()) => {
+                    batch.current = Some(index);
+                    self.message = format!(
+                        "Calculo conjunto: {} / {} completadas. Calculando {name}",
+                        batch.completed(),
+                        batch.total
+                    );
+                    self.batch_calculation = Some(batch);
+                    ctx.request_repaint();
+                    return;
+                }
+                Err(error) => batch.errors.push(format!("{name}: {error}")),
+            }
+        }
+        let ready = batch.calculated + batch.reused;
+        if let Some(first) = batch.errors.first() {
+            self.message = format!(
+                "ERROR: Calculo conjunto: {ready}/{} listas ({} nuevas, {} reutilizadas); {} errores, {} desactivadas. Primera: {first}",
+                batch.total,
+                batch.calculated,
+                batch.reused,
+                batch.errors.len(),
+                batch.skipped
+            );
+        } else {
+            self.message = format!(
+                "Calculo conjunto terminado: {ready}/{} listas ({} nuevas, {} reutilizadas, {} desactivadas)",
+                batch.total, batch.calculated, batch.reused, batch.skipped
+            );
+        }
+        ctx.request_repaint();
+    }
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             if let Some(path) = &self.project_path {
@@ -1201,8 +1339,21 @@ impl App {
                         self.message = "Cancelando importación...".into();
                     }
                 }
+            } else if let Some(batch) = &self.batch_calculation {
+                ui.label(format!(
+                    "Calculo conjunto: {} / {} operaciones",
+                    batch.completed(),
+                    batch.total
+                ));
+                if ui.button("Cancelar conjunto").clicked() {
+                    self.test_parallel.cancel_current_calculation();
+                    self.batch_calculation = None;
+                    self.message = "Calculo conjunto cancelado".into();
+                }
             } else if self.message.starts_with("ERROR") {
                 ui.colored_label(egui::Color32::RED, &self.message);
+            } else if self.message.starts_with("Calculo conjunto") {
+                ui.small(&self.message);
             }
         });
     }
@@ -1621,6 +1772,7 @@ impl eframe::App for App {
             .sync_tools(&mut self.project, &self.tool_library);
         self.test_parallel.poll(ui.ctx(), &mut self.project);
         self.resume_pending_cam_command();
+        self.continue_batch_calculation(ui.ctx());
         self.nc_playback_ui.sync_session(
             &self.project,
             &self.tool_library,
@@ -1632,6 +1784,8 @@ impl eframe::App for App {
             || self.is_dirty()
             || self.project_path.is_some()
             || self.message.starts_with("ERROR")
+            || self.message.starts_with("Calculo conjunto")
+            || self.batch_calculation.is_some()
         {
             egui::Panel::top("lagucam_status").show(ui, |ui| self.status_bar(ui));
         }
@@ -1662,6 +1816,9 @@ impl eframe::App for App {
         {
             use project::operations::remap_index_after_move;
             self.test_parallel.operation_moved(from, to);
+            if let Some(batch) = self.batch_calculation.as_mut() {
+                batch.remap_after_move(from, to);
+            }
             self.project.operations.move_item(from, to);
             if let project::selection::Selection::Operation(index) = self.project.selection {
                 self.project.selection = project::selection::Selection::Operation(
@@ -1670,8 +1827,9 @@ impl eframe::App for App {
             }
             self.nc_export_ui.operation_reordered();
             if let Some(command) = self.pending_cam_command {
-                self.pending_cam_command =
-                    Some(command.with_index(remap_index_after_move(command.index(), from, to)));
+                self.pending_cam_command = command
+                    .index()
+                    .map(|index| command.with_index(remap_index_after_move(index, from, to)));
             }
         }
         if self.project.model_transform != before_transform {

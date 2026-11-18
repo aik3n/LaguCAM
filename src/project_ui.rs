@@ -128,20 +128,23 @@ struct OperationDrag(usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OperationCommand {
     Calculate(usize),
+    CalculateAll,
     GenerateNc(usize),
     Simulate(usize),
 }
 
 impl OperationCommand {
-    pub fn index(self) -> usize {
+    pub fn index(self) -> Option<usize> {
         match self {
-            Self::Calculate(index) | Self::GenerateNc(index) | Self::Simulate(index) => index,
+            Self::Calculate(index) | Self::GenerateNc(index) | Self::Simulate(index) => Some(index),
+            Self::CalculateAll => None,
         }
     }
 
     pub fn with_index(self, index: usize) -> Self {
         match self {
             Self::Calculate(_) => Self::Calculate(index),
+            Self::CalculateAll => Self::CalculateAll,
             Self::GenerateNc(_) => Self::GenerateNc(index),
             Self::Simulate(_) => Self::Simulate(index),
         }
@@ -154,11 +157,36 @@ pub fn operation_commands(
     project: &Project,
     simulation_open: bool,
 ) -> Option<OperationCommand> {
-    let Selection::Operation(index) = project.selection else {
-        if project.selection == Selection::Operations {
-            ui.separator();
-            ui.small("El mecanizado conjunto se incorporara en UX-01C.2.");
+    if project.selection == Selection::Operations {
+        let active = project
+            .operations
+            .items
+            .iter()
+            .filter(|op| op.active)
+            .count();
+        let mut command = None;
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(active > 0, egui::Button::new("Calcular"))
+                .on_hover_text("Calcular operaciones activas en el orden del arbol")
+                .clicked()
+            {
+                command = Some(OperationCommand::CalculateAll);
+            }
+            ui.add_enabled(false, egui::Button::new("Generar NC"))
+                .on_hover_text("Disponible en UX-01E.2");
+            ui.add_enabled(false, egui::Button::new("Simular"))
+                .on_hover_text("Disponible tras generar el NC conjunto");
+        });
+        if active == 0 {
+            ui.small("No hay operaciones activas.");
+        } else {
+            ui.small("Se reutilizan trayectorias vigentes. Las pendientes se calculan una a una; los errores no impiden continuar con las siguientes.");
         }
+        return command;
+    }
+    let Selection::Operation(index) = project.selection else {
         return None;
     };
     let op = project.operations.items.get(index)?;

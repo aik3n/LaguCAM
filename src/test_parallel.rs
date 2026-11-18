@@ -511,6 +511,18 @@ impl TestParallelPanel {
         self.active_job.is_some()
     }
 
+    pub fn calculation_message(&self) -> &str {
+        &self.message
+    }
+
+    /// Detiene el trabajo actual sin borrar resultados validos anteriores.
+    pub fn cancel_current_calculation(&mut self) {
+        if let Some((_, job)) = &self.active_job {
+            job.cancel.store(true, Ordering::Relaxed);
+            self.cancelling = true;
+        }
+    }
+
     /// Reutilizado por el editor y por las acciones directas del arbol.
     pub fn calculate_operation(
         &mut self,
