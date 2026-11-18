@@ -258,7 +258,7 @@ fn stl_triangle_affine(
     record: &[u8; 50],
     affine: Option<GeometryAffine>,
 ) -> Result<[Vec3; 3], StlBvhError> {
-    let original = stl_triangle_f64(&*record)?;
+    let original = stl_triangle_f64(record)?;
     let Some(affine) = affine else {
         return Ok(original);
     };

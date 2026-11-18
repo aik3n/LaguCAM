@@ -173,7 +173,7 @@ impl ChangeLog {
                 "Presupuesto RAM del historial agotado. Aumenta el limite o baja resolucion".into(),
             );
         }
-        if self.len % HISTORY_CHUNK_SIZE == 0 {
+        if self.len.is_multiple_of(HISTORY_CHUNK_SIZE) {
             self.blocks
                 .try_reserve(1)
                 .map_err(|_| "No se pudo ampliar el indice del historial")?;

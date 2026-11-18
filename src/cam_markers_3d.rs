@@ -312,9 +312,9 @@ mod tests {
         let data = cone_mesh(32);
         assert_eq!(data.len(), 32 * 6 * 6);
         assert!(data.iter().all(|value| value.is_finite()));
-        let heights: Vec<f32> = data.chunks_exact(6).map(|v| v[2]).collect();
-        assert!(heights.iter().any(|&z| z == 0.0));
-        assert!(heights.iter().any(|&z| z == 2.0));
+        let heights: Vec<f32> = data.as_chunks::<6>().0.iter().map(|v| v[2]).collect();
+        assert!(heights.contains(&0.0));
+        assert!(heights.contains(&2.0));
         let first = Vec3::new(data[0], data[1], data[2]);
         let normal = Vec3::new(data[3], data[4], data[5]);
         assert!(first.dot(normal) > 0.0);
@@ -325,7 +325,7 @@ mod tests {
         let data = sphere_mesh(24, 16);
         assert_eq!(data.len(), 24 * 16 * 6 * 6);
         assert!(data.iter().all(|value| value.is_finite()));
-        for vertex in data.chunks_exact(6) {
+        for vertex in data.as_chunks::<6>().0 {
             let position = Vec3::from_slice(&vertex[0..3]);
             let normal = Vec3::from_slice(&vertex[3..6]);
             assert!((position.length() - 1.0).abs() < 1.0e-5);

@@ -446,8 +446,10 @@ mod f1_1_cutting_conditions_tests {
     #[test]
     fn configured_invalid_feed_and_spindle_are_rejected() {
         for value in [0.0, -10.0, f64::NAN, f64::INFINITY, 1_000_001.0] {
-            let mut params = ParallelTestParameters::default();
-            params.cutting_feed_mm_min = Some(value);
+            let mut params = ParallelTestParameters {
+                cutting_feed_mm_min: Some(value),
+                ..Default::default()
+            };
             assert!(params.validate().is_err());
             params.cutting_feed_mm_min = None;
             params.spindle_rpm = Some(value);
@@ -473,9 +475,11 @@ mod g25_3_heights_tests {
 
     #[test]
     fn serializes_independent_heights_and_rejects_invalid_levels() {
-        let mut params = ParallelTestParameters::default();
-        params.clearance_mm = 17.0;
-        params.approach_mm = 3.5;
+        let params = ParallelTestParameters {
+            clearance_mm: 17.0,
+            approach_mm: 3.5,
+            ..Default::default()
+        };
         let json = serde_json::to_value(params).unwrap();
         assert_eq!(json["clearance_mm"].as_f64(), Some(17.0));
         assert_eq!(json["approach_mm"].as_f64(), Some(3.5));

@@ -66,6 +66,10 @@ impl Scene {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Primitiva grafica interna: cuatro vertices y atributos explicitos"
+    )]
     fn quad(
         &mut self,
         project: &Project,
@@ -262,10 +266,6 @@ impl Scene {
             self.lines.extend_from_slice(&color);
         }
     }
-
-    pub fn triangles(&self) -> usize {
-        (self.solid.len() + self.tool.len()) / (STRIDE * 3)
-    }
 }
 
 pub struct Renderer {
@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn nodes_and_triangle_budget_are_bounded() {
         assert_eq!(MAX_RENDER_NODES, 192);
-        assert!(MAX_RENDER_NODES * MAX_RENDER_NODES * 6 * STRIDE < 1_400_000);
+        const { assert!(MAX_RENDER_NODES * MAX_RENDER_NODES * 6 * STRIDE < 1_400_000) };
     }
     #[test]
     fn flat_normal_has_finite_shading() {

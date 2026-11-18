@@ -336,7 +336,7 @@ pub fn interpret_program(text: &str, initial: NcInitialState) -> Result<NcTrace,
                     }
                 },
                 'M' => match code_as_u32(value, line)? {
-                    3 | 4 | 5 => {
+                    3..=5 => {
                         let mode = match value as u32 {
                             3 => NcSpindleMode::Clockwise,
                             4 => NcSpindleMode::CounterClockwise,

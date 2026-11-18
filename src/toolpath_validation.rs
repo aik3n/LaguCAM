@@ -173,14 +173,14 @@ pub fn validate_planned_toolpath(path: &PlannedToolpath) -> ValidationReport {
             last_end = None;
             continue;
         }
-        if let Some(last) = last_end {
-            if last != m.from {
-                report.error(
-                    IssueCode::Discontinuity,
-                    at,
-                    format!("Salto: fin anterior {:?}, inicio actual {:?}", last, m.from),
-                );
-            }
+        if let Some(last) = last_end
+            && last != m.from
+        {
+            report.error(
+                IssueCode::Discontinuity,
+                at,
+                format!("Salto: fin anterior {:?}, inicio actual {:?}", last, m.from),
+            );
         }
         last_end = Some(m.to);
         if m.from == m.to {
@@ -243,23 +243,23 @@ pub fn validate_planned_toolpath(path: &PlannedToolpath) -> ValidationReport {
                                 "Primera aproximacion: Zdespeje -> Zapróximacion",
                             );
                         }
-                        if let Some(pass) = completed_pass {
-                            if m.pass_index < pass {
-                                report.error(
-                                    IssueCode::BackwardPass,
-                                    at,
-                                    "El indice de pasada retrocede",
-                                );
-                            }
+                        if let Some(pass) = completed_pass
+                            && m.pass_index < pass
+                        {
+                            report.error(
+                                IssueCode::BackwardPass,
+                                at,
+                                "El indice de pasada retrocede",
+                            );
                         }
-                        if let Some(pass) = pending_rapid {
-                            if m.pass_index != pass {
-                                report.error(
-                                    IssueCode::WrongPass,
-                                    at,
-                                    "El enlace G0 apunta a otra pasada",
-                                );
-                            }
+                        if let Some(pass) = pending_rapid
+                            && m.pass_index != pass
+                        {
+                            report.error(
+                                IssueCode::WrongPass,
+                                at,
+                                "El enlace G0 apunta a otra pasada",
+                            );
                         }
                         current_pass = Some(m.pass_index);
                         pending_rapid = None;

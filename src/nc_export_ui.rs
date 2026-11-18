@@ -200,6 +200,7 @@ impl NcExportUi {
         Ok(())
     }
 
+    /// Ventana flotante de compatibilidad; comparte exactamente la misma UI.
     pub fn show(
         &mut self,
         ctx: &egui::Context,
@@ -210,6 +211,24 @@ impl NcExportUi {
         if !self.open {
             return;
         }
+        let mut open = self.open;
+        egui::Window::new("Postprocesar programa NC")
+            .open(&mut open)
+            .default_size([870.0, 680.0])
+            .min_width(570.0)
+            .resizable(true)
+            .show(ctx, |ui| self.show_embedded(ui, project, panel, post_ui));
+        self.open = open;
+    }
+
+    /// Contenido compartido por ventana y panel de mecanizado.
+    pub fn show_embedded(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        panel: &TestParallelPanel,
+        post_ui: &PostUi,
+    ) {
         let available: Vec<(usize, String)> = project
             .operations
             .items
@@ -233,7 +252,6 @@ impl NcExportUi {
             self.acknowledge_unverified = false;
         }
 
-        let mut open = self.open;
         let mut operation = self.selected_operation;
         let mut profile_id = self.selected_profile.clone();
         let mut acknowledge = self.acknowledge_unverified;
@@ -241,109 +259,114 @@ impl NcExportUi {
         let mut export_requested = false;
         let mut playback_requested = false;
 
-        egui::Window::new("Postprocesar programa NC")
-            .open(&mut open)
-            .default_size([870.0, 680.0])
-            .min_width(570.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.heading("Vista previa y exportacion G-code");
-                ui.small("Solo operaciones CAM calculadas, con cortes y validadas estructuralmente.");
-                if available.is_empty() {
-                    ui.colored_label(egui::Color32::YELLOW,
+        ui.heading("Vista previa y exportacion G-code");
+        ui.small("Solo operaciones CAM calculadas, con cortes y validadas estructuralmente.");
+        if available.is_empty() {
+            ui.colored_label(egui::Color32::YELLOW,
                         "No hay una operacion CAM lista. Calcula primero un acabado paralelo con contactos y cortes.");
-                }
-                ui.horizontal(|ui| {
-                    ui.label("Operacion");
-                    let selected_name = available.iter()
-                        .find(|(i, _)| Some(*i) == operation)
-                        .map_or("Sin operacion", |(_, name)| name.as_str());
-                    egui::ComboBox::from_id_salt("p2b3_operation")
-                        .selected_text(selected_name)
-                        .show_ui(ui, |ui| {
-                            for (i, name) in &available {
-                                ui.selectable_value(&mut operation, Some(*i), name.as_str());
-                            }
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Postprocesador");
-                    let selected_name = profiles.iter()
-                        .find(|p| p.id == profile_id)
-                        .map_or("Sin perfil", |p| p.name.as_str());
-                    egui::ComboBox::from_id_salt("p2b3_profile")
-                        .selected_text(selected_name)
-                        .show_ui(ui, |ui| {
-                            for p in &profiles {
-                                ui.selectable_value(&mut profile_id, p.id.clone(), p.name.as_str());
-                            }
-                        });
-                });
-                ui.small("Solo se utilizan perfiles guardados en la biblioteca de postprocesadores.");
-                if profiles.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED,
-                        "No hay perfiles disponibles. Revisa la biblioteca de postprocesadores.");
-                }
-                if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
-                    ui.label(format!("Controlador: {} · NC: {} · extension: .{} · XYZ: {} decimales",
-                        profile.controller,
-                        profile.units.code(),
-                        profile.extension,
-                        profile.xyz_decimals
-                    ));
-                    if !profile.start_commands.is_empty() || !profile.end_commands.is_empty() {
-                        ui.colored_label(egui::Color32::YELLOW,
-                            "Este perfil contiene Start/End personalizados: pueden introducir movimientos adicionales.");
+        }
+        ui.horizontal(|ui| {
+            ui.label("Operacion");
+            let selected_name = available
+                .iter()
+                .find(|(i, _)| Some(*i) == operation)
+                .map_or("Sin operacion", |(_, name)| name.as_str());
+            egui::ComboBox::from_id_salt("p2b3_operation")
+                .selected_text(selected_name)
+                .show_ui(ui, |ui| {
+                    for (i, name) in &available {
+                        ui.selectable_value(&mut operation, Some(*i), name.as_str());
                     }
-                }
-                ui.separator();
-                let selected_matches_preview = self.preview.as_ref().is_some_and(|p| {
-                    Some(p.operation_index) == operation && p.profile_id == profile_id
                 });
-                if ui.add_enabled(operation.is_some() && !profiles.is_empty(),
-                    egui::Button::new("Generar vista previa NC")).clicked()
-                {
-                    preview_requested = true;
-                }
-                if selected_matches_preview && let Some(preview) = self.preview.as_ref() {
-                    let generated = &preview.generated;
-                    ui.label(format!(
-                        "{} movimientos CAM · {} lineas NC · {} bytes",
-                        generated.cam_move_count,
-                        generated.text.lines().count(),
-                        generated.text.len()
-                    ));
-                    let xyz = generated.required_first_move_position_work_mm;
-                    ui.colored_label(egui::Color32::YELLOW, format!(
+        });
+        ui.horizontal(|ui| {
+            ui.label("Postprocesador");
+            let selected_name = profiles
+                .iter()
+                .find(|p| p.id == profile_id)
+                .map_or("Sin perfil", |p| p.name.as_str());
+            egui::ComboBox::from_id_salt("p2b3_profile")
+                .selected_text(selected_name)
+                .show_ui(ui, |ui| {
+                    for p in &profiles {
+                        ui.selectable_value(&mut profile_id, p.id.clone(), p.name.as_str());
+                    }
+                });
+        });
+        ui.small("Solo se utilizan perfiles guardados en la biblioteca de postprocesadores.");
+        if profiles.is_empty() {
+            ui.colored_label(
+                egui::Color32::LIGHT_RED,
+                "No hay perfiles disponibles. Revisa la biblioteca de postprocesadores.",
+            );
+        }
+        if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
+            ui.label(format!(
+                "Controlador: {} · NC: {} · extension: .{} · XYZ: {} decimales",
+                profile.controller,
+                profile.units.code(),
+                profile.extension,
+                profile.xyz_decimals
+            ));
+            if !profile.start_commands.is_empty() || !profile.end_commands.is_empty() {
+                ui.colored_label(egui::Color32::YELLOW,
+                            "Este perfil contiene Start/End personalizados: pueden introducir movimientos adicionales.");
+            }
+        }
+        ui.separator();
+        let selected_matches_preview = self
+            .preview
+            .as_ref()
+            .is_some_and(|p| Some(p.operation_index) == operation && p.profile_id == profile_id);
+        if ui
+            .add_enabled(
+                operation.is_some() && !profiles.is_empty(),
+                egui::Button::new("Generar vista previa NC"),
+            )
+            .clicked()
+        {
+            preview_requested = true;
+        }
+        if selected_matches_preview && let Some(preview) = self.preview.as_ref() {
+            let generated = &preview.generated;
+            ui.label(format!(
+                "{} movimientos CAM · {} lineas NC · {} bytes",
+                generated.cam_move_count,
+                generated.text.lines().count(),
+                generated.text.len()
+            ));
+            let xyz = generated.required_first_move_position_work_mm;
+            ui.colored_label(egui::Color32::YELLOW, format!(
                         "PRECONDICION: antes del primer movimiento CAM, herramienta en coordenadas de trabajo X{:.6} Y{:.6} Z{:.6} mm.",
                         xyz[0], xyz[1], xyz[2]
                     ));
-                    ui.colored_label(egui::Color32::YELLOW,
+            ui.colored_label(egui::Color32::YELLOW,
                         "NO interpretado ni simulado: Start/End, origen fisico, colisiones y estado inicial no verificados.");
-                    ui.separator();
-                    ui.label("Vista textual: primeras 65 y ultimas 22 lineas si el NC es grande.");
-                    let excerpt = preview_excerpt(&generated.text);
-                    egui::ScrollArea::vertical().max_height(270.0).show(ui, |ui| {
-                        ui.monospace(excerpt);
-                    });
-                    ui.separator();
-                    if ui.button("Reproducir G-code interpretado...").clicked() {
-                        playback_requested = true;
-                    }
-                    ui.checkbox(&mut acknowledge,
+            ui.separator();
+            ui.label("Vista textual: primeras 65 y ultimas 22 lineas si el NC es grande.");
+            let excerpt = preview_excerpt(&generated.text);
+            egui::ScrollArea::vertical()
+                .max_height(270.0)
+                .show(ui, |ui| {
+                    ui.monospace(excerpt);
+                });
+            ui.separator();
+            if ui.button("Reproducir G-code interpretado...").clicked() {
+                playback_requested = true;
+            }
+            ui.checkbox(&mut acknowledge,
                         "Reconozco que este NC aun no tiene simulacion final y requiere verificar origen, posicion inicial, herramienta, Start/End y maquina.");
-                    if ui.add_enabled(acknowledge,
-                        egui::Button::new("Exportar archivo NC..." )).clicked()
-                    {
-                        export_requested = true;
-                    }
-                }
-                if !self.message.is_empty() {
-                    ui.separator();
-                    ui.label(&self.message);
-                }
-            });
-
+            if ui
+                .add_enabled(acknowledge, egui::Button::new("Exportar archivo NC..."))
+                .clicked()
+            {
+                export_requested = true;
+            }
+        }
+        if !self.message.is_empty() {
+            ui.separator();
+            ui.label(&self.message);
+        }
         if operation != self.selected_operation || profile_id != self.selected_profile {
             self.preview = None;
             self.acknowledge_unverified = false;
@@ -353,7 +376,6 @@ impl NcExportUi {
         }
         self.selected_operation = operation;
         self.selected_profile = profile_id;
-        self.open = open;
 
         if preview_requested {
             let result = self

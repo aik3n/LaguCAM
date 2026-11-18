@@ -6,6 +6,7 @@ pub mod material_sim;
 pub mod nc_contract;
 pub mod nc_interpreter;
 pub mod nc_post;
+pub mod nc_verify;
 pub mod toolpath;
 pub mod toolpath_links;
 pub mod toolpath_validation;

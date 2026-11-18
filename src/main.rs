@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cam_markers_3d;
+mod cam_workspace;
 mod material_ui;
 mod nav_cube;
 mod navigation;
@@ -163,6 +164,7 @@ struct App {
     post_ui: post_ui::PostUi,
     nc_export_ui: nc_export_ui::NcExportUi,
     nc_playback_ui: nc_playback_ui::NcPlaybackUi,
+    cam_workspace: cam_workspace::CamWorkspace,
     test_parallel: test_parallel::TestParallelPanel,
     project_path: Option<PathBuf>,
     recent_projects: recent_projects::RecentProjects,
@@ -236,6 +238,7 @@ impl App {
             post_ui: post_ui::PostUi::load(),
             nc_export_ui: nc_export_ui::NcExportUi::default(),
             nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
+            cam_workspace: cam_workspace::CamWorkspace::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
             project_path: None,
             recent_projects: recent_projects::RecentProjects::load(),
@@ -902,21 +905,26 @@ impl App {
                     self.file_dialog(ui.ctx().clone());
                 }
                 ui.separator();
-                if ui.button("Reproducir programa NC...").clicked() {
-                    self.nc_playback_ui.open = true;
-                    ui.close();
-                }
-                if ui.button("Postprocesar NC...").clicked() {
-                    self.nc_export_ui.open = true;
-                    ui.close();
-                }
-                ui.separator();
+
                 if ui.button("Salir").clicked() {
                     ui.close();
                     self.request_action(FileAction::Exit, ui.ctx().clone());
                 }
             });
-            ui.menu_button("Herramientas", |ui| {
+            ui.menu_button("Mecanizado", |ui| {
+                for tab in cam_workspace::Tab::ALL {
+                    if ui.button(tab.label()).clicked() {
+                        self.cam_workspace.open = true;
+                        self.cam_workspace.tab = tab;
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui.button("Ocultar panel de mecanizado").clicked() {
+                    self.cam_workspace.open = false;
+                    ui.close();
+                }
+            });            ui.menu_button("Herramientas", |ui| {
                 if ui.button("Biblioteca de herramientas...").clicked() {
                     self.tool_ui.open = true;
                     ui.close();
@@ -932,6 +940,8 @@ impl App {
                 }
             });
             ui.menu_button("Vista", |ui| {
+                ui.checkbox(&mut self.cam_workspace.open, "Panel de mecanizado");
+                ui.separator();
                 ui.menu_button("Diagnóstico geométrico (experimental)", |ui| {
                 if ui
                     .add_enabled(
@@ -1083,6 +1093,66 @@ impl App {
                 }
             } else if self.message.starts_with("ERROR") {
                 ui.colored_label(egui::Color32::RED, &self.message);
+            }
+        });
+    }
+    fn show_cam_workspace(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Mecanizado");
+            ui.separator();
+            for tab in cam_workspace::Tab::ALL {
+                ui.selectable_value(&mut self.cam_workspace.tab, tab, tab.label());
+            }
+            if ui.button("Ocultar").clicked() {
+                self.cam_workspace.open = false;
+                self.nc_playback_ui.open = false;
+            }
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            match self.cam_workspace.tab {
+                cam_workspace::Tab::Operation => {
+                    ui.heading("Operaciones CAM");
+                    ui.small("Las operaciones siguen en el arbol del proyecto. El editor detallado se conserva sin cambios.");
+                    if self.project.operations.items.is_empty() {
+                        ui.label("No hay operaciones. Crea una desde el arbol del proyecto.");
+                    }
+                    let mut edit = None;
+                    for (index, operation) in self.project.operations.items.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let state = match operation.status {
+                                project::operations::OperationStatus::NotCalculated => "Sin calcular",
+                                project::operations::OperationStatus::Ready => "Calculada",
+                                project::operations::OperationStatus::Error => "Error",
+                            };
+                            ui.label(format!("{} · {}", operation.name, state));
+                            if ui.button("Editar operación").clicked() { edit = Some(index); }
+                        });
+                    }
+                    if let Some(index) = edit {
+                        self.test_parallel.open_editor(index, &self.project);
+                    }
+                    ui.separator();
+                    if ui.button("Ir a G-code").clicked() {
+                        self.cam_workspace.tab = cam_workspace::Tab::Gcode;
+                    }
+                }
+                cam_workspace::Tab::Gcode => {
+                    self.nc_export_ui.show_embedded(ui, &self.project, &self.test_parallel, &self.post_ui);
+                }
+                cam_workspace::Tab::Simulation => {
+                    self.nc_playback_ui.show_embedded(
+                        ui, &self.project, &self.tool_library,
+                        nc_playback_ui::NcWorkspaceView::Simulation,
+                    );
+                }
+                cam_workspace::Tab::Verification => {
+                    ui.small("Verificacion conservadora del NC interpretado; no sustituye la comprobacion en maquina.");
+                    self.nc_playback_ui.show_embedded(
+                        ui, &self.project, &self.tool_library,
+                        nc_playback_ui::NcWorkspaceView::Verification,
+                    );
+                }
             }
         });
     }
@@ -1492,6 +1562,17 @@ impl eframe::App for App {
         let open_docked =
             self.panels
                 .show_docked(ui, &mut self.project, &mut self.property_error, enabled);
+        if self.cam_workspace.open {
+            self.nc_playback_ui.open = true;
+            egui::Panel::bottom("lagucam_cam_workspace")
+                .resizable(true)
+                .default_size(280.0)
+                .min_size(130.0)
+                .show(ui, |ui| self.show_cam_workspace(ui));
+        } else {
+            self.nc_playback_ui.open = false;
+            self.nc_export_ui.open = false;
+        }
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui));
         let open_floating = self.panels.show_floating(
             ui.ctx(),
@@ -1540,13 +1621,19 @@ impl eframe::App for App {
         );
         self.test_parallel
             .sync_tools(&mut self.project, &self.tool_library);
-        self.nc_export_ui
-            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        if !self.cam_workspace.open {
+            self.nc_export_ui
+                .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        }
         if let Some((text, xyz)) = self.nc_export_ui.take_playback_request() {
             self.nc_playback_ui.load_generated(text, xyz);
+            self.cam_workspace.open = true;
+            self.cam_workspace.tab = cam_workspace::Tab::Simulation;
         }
-        self.nc_playback_ui
-            .show(ui.ctx(), &self.project, &self.tool_library);
+        if !self.cam_workspace.open {
+            self.nc_playback_ui
+                .show(ui.ctx(), &self.project, &self.tool_library);
+        }
         self.post_ui.show(ui.ctx());
         self.options.show(ui.ctx());
     }

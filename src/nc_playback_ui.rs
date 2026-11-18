@@ -8,6 +8,9 @@ use crate::{
     navigation::Projection,
     project::{Project, cam_coordinates::WorkFrame},
 };
+use cam_libre_visor::nc_verify::{
+    CutterEnvelope, StockEnvelope, VerificationReport, VerificationSeverity, verify_trace,
+};
 use cam_libre_visor::{
     nc_contract::{
         NcDistanceMode, NcEventKind, NcInitialState, NcMotion, NcMotionKind, NcSpindleMode,
@@ -77,6 +80,13 @@ fn validate_source_file(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "El archivo NC no esta codificado como UTF-8".into())
 }
 
+/// Solo controla la presentacion; todos los modos comparten el mismo estado NC.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NcWorkspaceView {
+    All,
+    Simulation,
+    Verification,
+}
 struct Playback {
     trace: NcTrace,
     moves: Vec<DisplayMotion>,
@@ -86,6 +96,8 @@ struct Playback {
     model_size_bytes: u64,
     model_bounds: crate::stl::Bounds,
 }
+
+type VerificationSnapshot = (VerificationReport, String, u64, [f64; 3], [f64; 3]);
 
 pub struct NcPlaybackUi {
     pub open: bool,
@@ -104,6 +116,9 @@ pub struct NcPlaybackUi {
     scene_renderer:
         std::sync::Arc<egui::mutex::Mutex<Option<Result<crate::nc_scene_gl::Renderer, String>>>>,
     material: MaterialUi,
+    verify_tool_id: Option<String>,
+    verification: Option<VerificationSnapshot>,
+    verify_message: String,
     message: String,
 }
 
@@ -125,6 +140,9 @@ impl Default for NcPlaybackUi {
             show_cutter: true,
             scene_renderer: std::sync::Arc::new(egui::mutex::Mutex::new(None)),
             material: MaterialUi::default(),
+            verify_tool_id: None,
+            verification: None,
+            verify_message: String::new(),
             message: String::new(),
         }
     }
@@ -132,6 +150,8 @@ impl Default for NcPlaybackUi {
 
 impl NcPlaybackUi {
     pub fn clear(&mut self) {
+        self.verification = None;
+        self.verify_message.clear();
         self.material.clear();
         self.playback = None;
         self.playing = false;
@@ -203,6 +223,8 @@ impl NcPlaybackUi {
     }
 
     fn interpret(&mut self, project: &Project) -> Result<(), String> {
+        self.verification = None;
+        self.verify_message.clear();
         self.material.clear();
         if self.nc_text.is_empty() {
             return Err("Selecciona un archivo NC o abrelo desde Postprocesar NC".into());
@@ -245,6 +267,7 @@ impl NcPlaybackUi {
             && Self::frame(project).is_ok_and(|frame| frame == playback.frame)
     }
 
+    /// Ventana flotante anterior, preservada y apoyada en el contenido compartido.
     pub fn show(
         &mut self,
         ctx: &egui::Context,
@@ -256,7 +279,29 @@ impl NcPlaybackUi {
             self.last_update = None;
             return;
         }
+        let mut open = self.open;
+        egui::Window::new("Reproduccion NC (G-code interpretado)")
+            .open(&mut open)
+            .default_size([570.0, 510.0])
+            .min_width(460.0)
+            .resizable(true)
+            .show(ctx, |ui| {
+                self.show_embedded(ui, project, tool_library, NcWorkspaceView::All)
+            });
+        self.open = open;
+    }
+
+    /// Una sola implementacion del reproductor y del verificador P2-E1.
+    pub fn show_embedded(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        tool_library: &crate::tools::model::ToolLibrary,
+        mode: NcWorkspaceView,
+    ) {
+        let ctx = ui.ctx().clone();
         if self.playback.is_some() && !self.projection_current(project) {
+            self.verification = None;
             self.material.clear();
             self.playback = None;
             self.playing = false;
@@ -264,132 +309,229 @@ impl NcPlaybackUi {
             self.message = "Modelo, bruto u origen modificados: vuelve a interpretar el NC".into();
         }
         let now = Instant::now();
-        if self.playing {
-            if let Some(pb) = &self.playback {
-                let secs = self.last_update.map_or(0.0, |last| {
-                    now.saturating_duration_since(last).as_secs_f64()
-                });
-                self.playhead = next_tick(self.playhead, secs, self.speed, pb.moves.len());
-                if self.playhead >= pb.moves.len() as f64 {
-                    self.playing = false;
-                } else {
-                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                }
+        if self.playing
+            && let Some(pb) = &self.playback
+        {
+            let secs = self.last_update.map_or(0.0, |last| {
+                now.saturating_duration_since(last).as_secs_f64()
+            });
+            self.playhead = next_tick(self.playhead, secs, self.speed, pb.moves.len());
+            if self.playhead >= pb.moves.len() as f64 {
+                self.playing = false;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
             }
         }
         self.last_update = Some(now);
-        let mut open = self.open;
         let mut load_file = false;
         let mut interpret = false;
         let mut copy_proposal = false;
         let mut change_initial = false;
-        egui::Window::new("Reproduccion NC (G-code interpretado)")
-            .open(&mut open)
-            .default_size([570.0, 510.0])
-            .min_width(460.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Abrir archivo NC...").clicked() { load_file = true; }
-                    ui.label(&self.source_name);
-                });
-                ui.colored_label(egui::Color32::YELLOW,
+        let mut verify_requested = false;
+
+        if mode != NcWorkspaceView::Verification {
+            ui.horizontal(|ui| {
+                if ui.button("Abrir archivo NC...").clicked() {
+                    load_file = true;
+                }
+                ui.label(&self.source_name);
+            });
+            ui.colored_label(egui::Color32::YELLOW,
                     "Reproduccion geometrica; NO verifica colisiones, aceleraciones ni seguridad de maquina.");
-                ui.separator();
-                ui.label("Posicion inicial de la punta de herramienta, en coordenadas de trabajo (mm), ANTES de Start:");
-                ui.horizontal(|ui| {
-                    for axis in 0..3 {
-                        ui.label(["X", "Y", "Z"][axis]);
-                        if ui.add(egui::DragValue::new(&mut self.initial_xyz[axis]).speed(0.1).max_decimals(6)).changed() {
-                            change_initial = true;
-                        }
+            ui.separator();
+            ui.label("Posicion inicial de la punta de herramienta, en coordenadas de trabajo (mm), ANTES de Start:");
+            ui.horizontal(|ui| {
+                for axis in 0..3 {
+                    ui.label(["X", "Y", "Z"][axis]);
+                    if ui
+                        .add(
+                            egui::DragValue::new(&mut self.initial_xyz[axis])
+                                .speed(0.1)
+                                .max_decimals(6),
+                        )
+                        .changed()
+                    {
+                        change_initial = true;
                     }
-                });
-                if let Some(suggested) = self.proposed_start {
-                    ui.horizontal_wrapped(|ui| {
+                }
+            });
+            if let Some(suggested) = self.proposed_start {
+                ui.horizontal_wrapped(|ui| {
                         if ui.button("Copiar posicion inicial CAM propuesta").clicked() {
                             copy_proposal = true;
                         }
                         ui.small(format!("X{:.3} Y{:.3} Z{:.3} mm; puede ser incorrecta si Start contiene movimientos.",
                             suggested[0], suggested[1], suggested[2]));
                     });
-                }
-                if ui.checkbox(&mut self.initial_confirmed,
-                    "He comprobado la posicion inicial y entiendo que no se deduce del G-code").changed() {
-                    change_initial = true;
-                }
-                if ui.button("Interpretar NC y preparar trayectoria").clicked() {
-                    interpret = true;
-                }
-                if let Some(pb) = &self.playback {
-                    ui.separator();
-                    ui.label(format!("{} movimientos NC · {} eventos interpretados · {} lineas NC",
-                        pb.moves.len(), pb.trace.events.len(), self.nc_text.lines().count()));
-                    if pb.moves.is_empty() {
-                        ui.label("El archivo no contiene desplazamientos XYZ.");
-                    } else {
-                        ui.horizontal(|ui| {
-                            if ui.button(if self.playing { "Pausar" } else { "Reproducir" }).clicked() {
-                                self.playing = !self.playing;
-                                self.last_update = None;
-                                ctx.request_repaint();
-                            }
-                            if ui.button("Reiniciar").clicked() {
-                                self.playhead = 0.0;
-                                self.playing = false;
-                            }
-                            if ui.button("Anterior").clicked() {
-                                self.playing = false;
-                                self.playhead = (self.playhead.ceil() - 1.0).max(0.0);
-                            }
-                            if ui.button("Siguiente").clicked() {
-                                self.playing = false;
-                                self.playhead = (self.playhead.floor() + 1.0).min(pb.moves.len() as f64);
-                            }
-                        });
-                        ui.add(egui::Slider::new(&mut self.playhead, 0.0..=pb.moves.len() as f64)
-                            .text("Movimiento NC"));
-                        ui.add(egui::Slider::new(&mut self.speed, 0.25..=60.0)
-                            .logarithmic(true).text("Movimientos/s (visual)"));
-                        let i = self.playhead.floor() as usize;
-                        let line = pb.moves.get(i).or_else(|| pb.moves.last()).map_or(0, |m| m.line);
-                        let xyz = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
-                        ui.monospace(format!("Linea NC: {line}  ·  X{:.4} Y{:.4} Z{:.4} mm", xyz[0], xyz[1], xyz[2]));
-                    }
-                    ui.checkbox(&mut self.visible, "Mostrar trayectoria NC en visor 3D");
-                    ui.checkbox(&mut self.show_cutter, "Mostrar fresa 3D (herramienta de simulacion)");
-                    ui.small("La fresa se superpone al material: aun no hay ocultacion por profundidad ni control de colisiones.");
-                    ui.small("G0 en cian; G1 en naranja. El marcador representa la punta, no la geometria completa de la fresa.");
-                    if pb.moves.len() > MAX_VISIBLE_SEGMENTS {
-                        ui.small("Vista de trazos simplificada por rendimiento; reproduccion y posicion conservan todos los movimientos.");
-                    }
-                }
-                if let Some(pb) = &self.playback {
-                    self.material.show(ui, project, tool_library, &pb.trace, self.playhead);
-                }
-                if !self.message.is_empty() {
-                    ui.separator();
-                    ui.label(&self.message);
-                }
-            });
-        self.open = open;
-        if copy_proposal {
-            if let Some(suggested) = self.proposed_start {
-                self.initial_xyz = suggested;
-                self.initial_confirmed = false;
+            }
+            if ui
+                .checkbox(
+                    &mut self.initial_confirmed,
+                    "He comprobado la posicion inicial y entiendo que no se deduce del G-code",
+                )
+                .changed()
+            {
                 change_initial = true;
             }
+            if ui.button("Interpretar NC y preparar trayectoria").clicked() {
+                interpret = true;
+            }
+            if let Some(pb) = &self.playback {
+                ui.separator();
+                ui.label(format!(
+                    "{} movimientos NC · {} eventos interpretados · {} lineas NC",
+                    pb.moves.len(),
+                    pb.trace.events.len(),
+                    self.nc_text.lines().count()
+                ));
+                if pb.moves.is_empty() {
+                    ui.label("El archivo no contiene desplazamientos XYZ.");
+                } else {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button(if self.playing { "Pausar" } else { "Reproducir" })
+                            .clicked()
+                        {
+                            self.playing = !self.playing;
+                            self.last_update = None;
+                            ctx.request_repaint();
+                        }
+                        if ui.button("Reiniciar").clicked() {
+                            self.playhead = 0.0;
+                            self.playing = false;
+                        }
+                        if ui.button("Anterior").clicked() {
+                            self.playing = false;
+                            self.playhead = (self.playhead.ceil() - 1.0).max(0.0);
+                        }
+                        if ui.button("Siguiente").clicked() {
+                            self.playing = false;
+                            self.playhead =
+                                (self.playhead.floor() + 1.0).min(pb.moves.len() as f64);
+                        }
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut self.playhead, 0.0..=pb.moves.len() as f64)
+                            .text("Movimiento NC"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.speed, 0.25..=60.0)
+                            .logarithmic(true)
+                            .text("Movimientos/s (visual)"),
+                    );
+                    let i = self.playhead.floor() as usize;
+                    let line = pb
+                        .moves
+                        .get(i)
+                        .or_else(|| pb.moves.last())
+                        .map_or(0, |m| m.line);
+                    let xyz =
+                        position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
+                    ui.monospace(format!(
+                        "Linea NC: {line}  ·  X{:.4} Y{:.4} Z{:.4} mm",
+                        xyz[0], xyz[1], xyz[2]
+                    ));
+                }
+                ui.checkbox(&mut self.visible, "Mostrar trayectoria NC en visor 3D");
+                ui.checkbox(
+                    &mut self.show_cutter,
+                    "Mostrar fresa 3D (herramienta de simulacion)",
+                );
+                ui.small("La fresa se superpone al material: aun no hay ocultacion por profundidad ni control de colisiones.");
+                ui.small("G0 en cian; G1 en naranja. El marcador representa la punta, no la geometria completa de la fresa.");
+                if pb.moves.len() > MAX_VISIBLE_SEGMENTS {
+                    ui.small("Vista de trazos simplificada por rendimiento; reproduccion y posicion conservan todos los movimientos.");
+                }
+            }
+            if let Some(pb) = &self.playback {
+                self.material
+                    .show(ui, project, tool_library, &pb.trace, self.playhead);
+            }
+        }
+        if mode != NcWorkspaceView::Simulation && self.playback.is_some() {
+            ui.separator();
+            egui::CollapsingHeader::new("Verificacion preliminar del programa NC")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                        ui.small("Comprueba el G-code interpretado frente al bruto ORIGINAL. G0 = posible contacto; no confirma colision ni material remanente.");
+                        let simulated_id = self.material.simulated_tool().map(|tool| tool.id.clone());
+                        let mut chosen = self.verify_tool_id.clone().or(simulated_id);
+                        let tool_name = chosen.as_deref().and_then(|id| tool_library.get(id))
+                            .map_or("Seleccionar fresa plana o esferica".to_owned(), |tool| tool.name.clone());
+                        egui::ComboBox::from_label("Fresa para verificacion")
+                            .selected_text(tool_name)
+                            .show_ui(ui, |ui| {
+                                for tool in &tool_library.tools {
+                                    if matches!(&tool.geometry,
+                                        crate::tools::model::ToolGeometry::Flat { .. }
+                                            | crate::tools::model::ToolGeometry::BallNose { .. }) {
+                                        ui.selectable_value(&mut chosen, Some(tool.id.clone()), &tool.name);
+                                    }
+                                }
+                            });
+                        if chosen != self.verify_tool_id {
+                            self.verify_tool_id = chosen;
+                            self.verification = None;
+                        }
+                        if ui.button("Verificar movimientos del G-code").clicked() {
+                            verify_requested = true;
+                        }
+                        if let Some((report, tool_id, tool_revision, stock_min, stock_max)) = &self.verification
+                            && tool_library.get(tool_id).is_some_and(|tool| tool.revision == *tool_revision)
+                            && project.stock.as_ref().and_then(|stock| stock.max().map(|max| (stock.min, max)))
+                                .is_some_and(|(min, max)| min == *stock_min && max == *stock_max)
+                        {
+                            ui.label(format!("{} movimientos examinados · {} avisos ({} mostrados)",
+                                report.checked_moves, report.total_issues(), report.issues.len()));
+                            ui.label(format!("G0 con posible contacto: {} · G1 bajo la base: {} · G1 fuera de XY: {}",
+                                report.rapid_stock_candidates, report.feed_below_base, report.feed_outside_xy));
+                            ui.label(format!("G1 con husillo parado: {} · comandos T no asociados: {}",
+                                report.feed_spindle_stopped, report.unverified_tool_commands));
+                            if report.omitted_issues > 0 {
+                                ui.colored_label(egui::Color32::YELLOW,
+                                    format!("{} avisos adicionales no mostrados; recuentos completos conservados", report.omitted_issues));
+                            }
+                            egui::ScrollArea::vertical().max_height(185.0).show(ui, |ui| {
+                                for issue in &report.issues {
+                                    let caption = format!("L{} · {}", issue.source_line, issue.code.label());
+                                    let color = if issue.severity == VerificationSeverity::Warning {
+                                        egui::Color32::YELLOW
+                                    } else {
+                                        ui.visuals().text_color()
+                                    };
+                                    if ui.add(egui::Button::new(egui::RichText::new(caption).color(color))).clicked() {
+                                        let Some(index) = issue.move_index else { continue; };
+                                            self.playhead = index as f64;
+                                            self.playing = false;
+                                            self.last_update = None;
+                                            ui.ctx().request_repaint();
+                                    }
+                                }
+                            });
+                        }
+                        if !self.verify_message.is_empty() {
+                            ui.colored_label(egui::Color32::YELLOW, &self.verify_message);
+                        }
+                    });
+        }
+        if !self.message.is_empty() {
+            ui.separator();
+            ui.label(&self.message);
+        }
+        if copy_proposal && let Some(suggested) = self.proposed_start {
+            self.initial_xyz = suggested;
+            self.initial_confirmed = false;
+            change_initial = true;
         }
         if change_initial {
+            self.verification = None;
             self.playing = false;
             self.last_update = None;
             self.playback = None;
             self.material.clear();
         }
-        if load_file {
-            if let Err(e) = self.load_file() {
-                self.message = format!("ERROR: {e}");
-            }
+        if load_file && let Err(e) = self.load_file() {
+            self.message = format!("ERROR: {e}");
         }
         if interpret {
             match self.interpret(project) {
@@ -398,6 +540,62 @@ impl NcPlaybackUi {
                     self.playback = None;
                     self.playing = false;
                     self.message = format!("ERROR: {e}");
+                }
+            }
+        }
+        if verify_requested {
+            let result = (|| -> Result<VerificationSnapshot, String> {
+                let playback = self
+                    .playback
+                    .as_ref()
+                    .ok_or("Interpreta primero el programa NC")?;
+                let model = project.model.as_ref().ok_or("No hay STL abierto")?;
+                let stock = project.stock.as_ref().ok_or("No hay bruto definido")?;
+                let tool_id = self
+                    .verify_tool_id
+                    .as_deref()
+                    .ok_or("Selecciona una fresa plana o esferica de la biblioteca")?;
+                let tool = tool_library
+                    .get(tool_id)
+                    .ok_or("La fresa seleccionada ya no existe")?;
+                tool.validate()?;
+                if !matches!(
+                    &tool.geometry,
+                    crate::tools::model::ToolGeometry::Flat { .. }
+                        | crate::tools::model::ToolGeometry::BallNose { .. }
+                ) {
+                    return Err(
+                        "La verificacion admite por ahora solo fresas planas y esfericas".into(),
+                    );
+                }
+                let max = stock.max().ok_or("Limites del bruto invalidos")?;
+                let report = verify_trace(
+                    &playback.trace,
+                    StockEnvelope {
+                        min_mm: stock.min,
+                        max_mm: max,
+                    },
+                    CutterEnvelope {
+                        radius_mm: tool.geometry.diameter_mm() * 0.5,
+                        cutting_length_mm: tool.cutting_length_mm,
+                    },
+                    |point| {
+                        project
+                            .origin
+                            .work_to_model(stock, &model.bounds, point)
+                            .map_err(str::to_owned)
+                    },
+                )?;
+                Ok((report, tool.id.clone(), tool.revision, stock.min, max))
+            })();
+            match result {
+                Ok(report) => {
+                    self.verification = Some(report);
+                    self.verify_message = "Analisis conservador completado. No es una certificacion de seguridad CNC.".into();
+                }
+                Err(error) => {
+                    self.verification = None;
+                    self.verify_message = format!("ERROR verificando NC: {error}");
                 }
             }
         }
@@ -581,13 +779,13 @@ impl NcPlaybackUi {
                 painter.line_segment([a, b], egui::Stroke::new(1.2, color));
             }
             let index = self.playhead.floor() as usize;
-            if let Some(current) = pb.moves.get(index) {
-                if let (Some(a), Some(b)) = (
+            if let Some(current) = pb.moves.get(index)
+                && let (Some(a), Some(b)) = (
                     point(current.motion.from_work_mm),
                     point(current.motion.to_work_mm),
-                ) {
-                    painter.line_segment([a, b], egui::Stroke::new(2.8, egui::Color32::WHITE));
-                }
+                )
+            {
+                painter.line_segment([a, b], egui::Stroke::new(2.8, egui::Color32::WHITE));
             }
         }
         let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);

@@ -210,15 +210,17 @@ mod tests {
             min: [0.0; 3],
             max: [3.0; 3],
         };
-        let mut project = Project::default();
-        project.model = Some(ModelReference {
-            name: "patron.stl".into(),
-            bounds,
-            raw_bounds: bounds,
-            triangles: 1,
-            size_bytes: 134,
-        });
-        project.stock = Some(Stock::from_bounds(&bounds));
+        let mut project = Project {
+            model: Some(ModelReference {
+                name: "patron.stl".into(),
+                bounds,
+                raw_bounds: bounds,
+                triangles: 1,
+                size_bytes: 134,
+            }),
+            stock: Some(Stock::from_bounds(&bounds)),
+            ..Default::default()
+        };
         let index = project.operations.add_parallel_test().unwrap();
         let mut library = ToolLibrary::default();
         let mut cutter = Tool::blank(ToolKind::BallNose);

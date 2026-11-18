@@ -225,6 +225,10 @@ impl Drop for Job {
 }
 
 impl Job {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Contrato existente del trabajo CAM; refactorizacion fuera del alcance UI"
+    )]
     fn start(
         path: PathBuf,
         expected_size: u64,
@@ -279,6 +283,10 @@ impl Job {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Contrato existente del nucleo CAM; no alterar calculo en una limpieza UI"
+)]
 fn compute(
     path: &Path,
     expected_size: u64,

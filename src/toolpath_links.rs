@@ -108,15 +108,15 @@ impl PlannedToolpath {
             let approach_end = [last[0], last[1], approach_z];
             let safe_end = [last[0], last[1], clearance_z];
             // Nunca hay G0 por debajo de clearance_z, ni un corte sobre un hueco.
-            if let Some(safe) = previous_safe {
-                if safe != safe_start {
-                    moves.push(PlannedMove {
-                        kind: PlannedMoveKind::RapidTraverse,
-                        from: safe,
-                        to: safe_start,
-                        pass_index: segment.pass_index,
-                    });
-                }
+            if let Some(safe) = previous_safe
+                && safe != safe_start
+            {
+                moves.push(PlannedMove {
+                    kind: PlannedMoveKind::RapidTraverse,
+                    from: safe,
+                    to: safe_start,
+                    pass_index: segment.pass_index,
+                });
             }
             for (from, to) in [(safe_start, approach_start), (approach_start, first)] {
                 moves.push(PlannedMove {

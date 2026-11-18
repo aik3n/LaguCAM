@@ -3,7 +3,6 @@
 //! simplificado para no crear cientos de miles de triangulos egui por frame.
 
 use crate::{
-    navigation::Projection,
     project::{Project, cam_coordinates::WorkFrame},
     tools::model::{Tool, ToolGeometry, ToolLibrary},
 };
@@ -20,8 +19,6 @@ use std::{
     },
     time::Duration,
 };
-
-const MAX_RENDER_NODES: usize = 192;
 
 struct MaterialJob {
     rx: Receiver<Result<MaterialHeightfield, String>>,
@@ -270,10 +267,10 @@ impl MaterialUi {
                     self.clear();
                     self.message = "Simulacion cancelada".into();
                 }
-            } else if ui.button("Calcular eliminacion de material").clicked() {
-                if let Err(error) = self.start(project, library, trace) {
-                    self.message = format!("ERROR: {error}");
-                }
+            } else if ui.button("Calcular eliminacion de material").clicked()
+                && let Err(error) = self.start(project, library, trace)
+            {
+                self.message = format!("ERROR: {error}");
             }
             if let Some(field) = &self.field {
                 ui.checkbox(&mut self.visible, "Mostrar material restante en visor 3D");
@@ -300,165 +297,5 @@ impl MaterialUi {
             }
             if !self.message.is_empty() { ui.label(&self.message); }
         });
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "Contrato existente de proyeccion del visor"
-    )]
-    pub fn paint(
-        &self,
-        ui: &egui::Ui,
-        rect: egui::Rect,
-        project: &Project,
-        _playhead: f64,
-        yaw: f32,
-        pitch: f32,
-        distance: f32,
-        pan: glam::Vec3,
-        projection: Projection,
-    ) {
-        if !self.visible || self.job.is_some() {
-            return;
-        }
-        let Some(field) = &self.field else {
-            return;
-        };
-        let Some(model) = &project.model else {
-            return;
-        };
-        // El mesh de egui es 2D (sin depth test frente a GL).
-        // Un fondo opaco evita mezclar el STL antiguo y sus trazas con el material.
-        if self.isolated_view_active() {
-            ui.painter().with_clip_rect(rect).rect_filled(
-                rect,
-                0.0,
-                egui::Color32::from_rgb(159, 207, 232),
-            );
-        }
-        let mvp = crate::navigation::view_projection_mode(
-            yaw,
-            pitch,
-            distance,
-            rect.width() / rect.height().max(1.0),
-            pan,
-            projection,
-        );
-        let project_xyz = |xyz: [f64; 3]| -> Option<egui::Pos2> {
-            let normal = model.visual_point(xyz)?;
-            let clip = mvp * normal.extend(1.0);
-            if !clip.is_finite() || clip.w <= 0.0 {
-                return None;
-            }
-            let ndc = clip.truncate() / clip.w;
-            if !ndc.is_finite() || ndc.z < -1.0 || ndc.z > 1.0 {
-                return None;
-            }
-            Some(
-                rect.center()
-                    + egui::vec2(ndc.x * rect.width() * 0.5, -ndc.y * rect.height() * 0.5),
-            )
-        };
-
-        let [nx, ny] = field.cells;
-        let rx = nx.min(MAX_RENDER_NODES);
-        let ry = ny.min(MAX_RENDER_NODES);
-        let xindex = |i: usize| -> usize { i * (nx - 1) / (rx - 1) };
-        let yindex = |j: usize| -> usize { j * (ny - 1) / (ry - 1) };
-        let xcoord = |ix: usize| {
-            field.stock.min_mm[0] + field.stock.size_mm[0] * ix as f64 / (nx - 1) as f64
-        };
-        let ycoord = |iy: usize| {
-            field.stock.min_mm[1] + field.stock.size_mm[1] * iy as f64 / (ny - 1) as f64
-        };
-        let mut points = Vec::with_capacity(rx * ry);
-        let mut colors = Vec::with_capacity(rx * ry);
-        for j in 0..ry {
-            let iy = yindex(j);
-            for i in 0..rx {
-                let ix = xindex(i);
-                let z = field.height_at(ix, iy);
-                points.push(project_xyz([xcoord(ix), ycoord(iy), z]));
-                let ix0 = ix.saturating_sub(1);
-                let iy0 = iy.saturating_sub(1);
-                let ix1 = (ix + 1).min(nx - 1);
-                let iy1 = (iy + 1).min(ny - 1);
-                let dzdx = (field.height_at(ix1, iy) - field.height_at(ix0, iy))
-                    / (xcoord(ix1) - xcoord(ix0)).max(1.0e-9);
-                let dzdy = (field.height_at(ix, iy1) - field.height_at(ix, iy0))
-                    / (ycoord(iy1) - ycoord(iy0)).max(1.0e-9);
-                let shade = ((0.95 - 0.30 * dzdx + 0.23 * dzdy)
-                    / (1.0 + dzdx * dzdx + dzdy * dzdy).sqrt())
-                .clamp(0.40, 1.15);
-                let base = if field.is_cut(ix, iy) {
-                    [49.0, 164.0, 202.0]
-                } else {
-                    [173.0, 134.0, 90.0]
-                };
-                colors.push(egui::Color32::from_rgb(
-                    (base[0] * shade).min(255.0) as u8,
-                    (base[1] * shade).min(255.0) as u8,
-                    (base[2] * shade).min(255.0) as u8,
-                ));
-            }
-        }
-        let mut mesh = egui::Mesh::default();
-        // Paredes exteriores con cuatro faldones hasta el fondo real del bruto.
-        // Primero se dibujan las paredes; la superficie queda por encima.
-        let zbottom = field.stock.min_mm[2];
-        let wall_color = egui::Color32::from_rgb(73, 87, 91);
-        let mut skirt = |a: (usize, usize), b: (usize, usize)| {
-            let a_top = [xcoord(a.0), ycoord(a.1), field.height_at(a.0, a.1)];
-            let b_top = [xcoord(b.0), ycoord(b.1), field.height_at(b.0, b.1)];
-            let quad = [
-                project_xyz(a_top),
-                project_xyz(b_top),
-                project_xyz([b_top[0], b_top[1], zbottom]),
-                project_xyz([a_top[0], a_top[1], zbottom]),
-            ];
-            if quad.iter().all(Option::is_some) {
-                let base = mesh.vertices.len() as u32;
-                for point in quad {
-                    mesh.colored_vertex(point.expect("Proyeccion verificada"), wall_color);
-                }
-                mesh.add_triangle(base, base + 1, base + 2);
-                mesh.add_triangle(base, base + 2, base + 3);
-            }
-        };
-        for i in 0..rx - 1 {
-            skirt((xindex(i), 0), (xindex(i + 1), 0));
-            skirt((xindex(i + 1), ny - 1), (xindex(i), ny - 1));
-        }
-        for j in 0..ry - 1 {
-            skirt((0, yindex(j + 1)), (0, yindex(j)));
-            skirt((nx - 1, yindex(j)), (nx - 1, yindex(j + 1)));
-        }
-        let base = mesh.vertices.len() as u32;
-        for (point, color) in points.iter().zip(colors.iter()) {
-            mesh.colored_vertex(point.unwrap_or(egui::Pos2::ZERO), *color);
-        }
-        for j in 0..ry - 1 {
-            for i in 0..rx - 1 {
-                let k = j * rx + i;
-                if points[k].is_none()
-                    || points[k + 1].is_none()
-                    || points[k + rx].is_none()
-                    || points[k + rx + 1].is_none()
-                {
-                    continue;
-                }
-                let a = base + k as u32;
-                let b = a + 1;
-                let c = a + rx as u32;
-                let d = c + 1;
-                mesh.add_triangle(a, b, d);
-                mesh.add_triangle(a, d, c);
-            }
-        }
-        if !mesh.indices.is_empty() {
-            ui.painter()
-                .with_clip_rect(rect)
-                .add(egui::Shape::mesh(mesh));
-        }
     }
 }
