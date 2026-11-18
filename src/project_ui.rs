@@ -121,9 +121,80 @@ fn tree_header_label(ui: &mut egui::Ui, icon: TreeIcon, title: &str) -> bool {
     icon_response.clicked() || title_response.clicked()
 }
 
+/// Solo la lista de operaciones acepta este tipo de arrastre.
+#[derive(Clone, Copy)]
+struct OperationDrag(usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OperationCommand {
+    Calculate(usize),
+    GenerateNc(usize),
+    Simulate(usize),
+}
+
+impl OperationCommand {
+    pub fn index(self) -> usize {
+        match self {
+            Self::Calculate(index) | Self::GenerateNc(index) | Self::Simulate(index) => index,
+        }
+    }
+
+    pub fn with_index(self, index: usize) -> Self {
+        match self {
+            Self::Calculate(_) => Self::Calculate(index),
+            Self::GenerateNc(_) => Self::GenerateNc(index),
+            Self::Simulate(_) => Self::Simulate(index),
+        }
+    }
+}
+
+/// Acciones del arbol. No se vuelve a pedir la operacion al generar NC.
+pub fn operation_commands(
+    ui: &mut egui::Ui,
+    project: &Project,
+    simulation_open: bool,
+) -> Option<OperationCommand> {
+    let Selection::Operation(index) = project.selection else {
+        if project.selection == Selection::Operations {
+            ui.separator();
+            ui.small("El mecanizado conjunto se incorporara en UX-01C.2.");
+        }
+        return None;
+    };
+    let op = project.operations.items.get(index)?;
+    let configured = matches!(op.kind, OperationKind::ParallelTest(_));
+    let mut command = None;
+    ui.separator();
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(configured, egui::Button::new("Calcular"))
+            .clicked()
+        {
+            command = Some(OperationCommand::Calculate(index));
+        }
+        if ui
+            .add_enabled(configured, egui::Button::new("Generar NC"))
+            .clicked()
+        {
+            command = Some(OperationCommand::GenerateNc(index));
+        }
+        if ui
+            .add_enabled(configured && !simulation_open, egui::Button::new("Simular"))
+            .clicked()
+        {
+            command = Some(OperationCommand::Simulate(index));
+        }
+    });
+    if !configured {
+        ui.small("Define primero una estrategia en el editor de la operacion.");
+    }
+    command
+}
+
 #[derive(Default)]
 pub struct OperationTreeActions {
     pub edit: Option<usize>,
+    pub move_operation: Option<(usize, usize)>,
 }
 
 pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
@@ -181,35 +252,85 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
             }
             ui.vertical(|ui| {
                 let group_id = ui.make_persistent_id("       Operaciones");
-                let mut group_clicked = false;
-                let mut group_header =
+                let mut group_selected = false;
+                let group_header =
                     egui::collapsing_header::CollapsingState::load_with_default_open(
                         ui.ctx(),
                         group_id,
                         false,
                     )
                     .show_header(ui, |ui| {
-                        group_clicked = tree_header_label(ui, TreeIcon::Operations, "Operaciones");
+                        group_selected = icon_selectable_label(
+                            ui,
+                            project.selection == Selection::Operations,
+                            "Operaciones",
+                            TreeIcon::Operations,
+                        )
+                        .clicked();
                     });
-                if group_clicked {
-                    group_header.toggle();
+                if group_selected {
+                    project.selection = Selection::Operations;
                 }
                 group_header.body(|ui| {
                     if project.operations.items.is_empty() {
                         ui.label("(vacía)");
                     }
-                    for (i, op) in project.operations.items.iter().enumerate() {
-                        let response = icon_selectable_label(
-                            ui,
-                            project.selection == Selection::Operation(i),
-                            &op.name,
-                            TreeIcon::Operation,
-                        );
-                        if response.clicked() {
-                            project.selection = Selection::Operation(i);
+                    for (i, op) in project.operations.items.iter_mut().enumerate() {
+                        let row = egui::Frame::NONE.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let tip = if op.active {
+                                    "Desactivar operacion en el mecanizado conjunto"
+                                } else {
+                                    "Activar operacion en el mecanizado conjunto"
+                                };
+                                ui.checkbox(&mut op.active, "").on_hover_text(tip);
+                                ui.dnd_drag_source(
+                                    ui.make_persistent_id(("operation_reorder", i)),
+                                    OperationDrag(i),
+                                    |ui| {
+                                        ui.add_sized(
+                                            [22.0, ui.spacing().interact_size.y],
+                                            egui::Label::new("\u{22EE}\u{22EE}"),
+                                        )
+                                        .on_hover_text("Arrastrar para reordenar");
+                                    },
+                                );
+                                let response = icon_selectable_label(
+                                    ui,
+                                    project.selection == Selection::Operation(i),
+                                    &op.name,
+                                    TreeIcon::Operation,
+                                );
+                                if response.clicked() {
+                                    project.selection = Selection::Operation(i);
+                                }
+                                if response.double_clicked() {
+                                    actions.edit = Some(i);
+                                }
+                            });
+                        });
+                        if let Some(source) = row.response.dnd_hover_payload::<OperationDrag>()
+                            && source.0 != i
+                        {
+                            let rect = row.response.rect;
+                            let gap = ui.spacing().item_spacing.y;
+                            let y = if source.0 < i {
+                                rect.bottom() + gap * 0.5
+                            } else {
+                                rect.top() - gap * 0.5
+                            };
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(rect.left() + 3.0, y),
+                                    egui::pos2(ui.max_rect().right() - 3.0, y),
+                                ],
+                                egui::Stroke::new(2.0, ui.visuals().selection.stroke.color),
+                            );
                         }
-                        if response.double_clicked() {
-                            actions.edit = Some(i);
+                        if let Some(source) = row.response.dnd_release_payload::<OperationDrag>()
+                            && source.0 != i
+                        {
+                            actions.move_operation = Some((source.0, i));
                         }
                     }
                     // La accion de crear siempre queda debajo de las operaciones existentes.
@@ -223,6 +344,7 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
                         && let Ok(index) = project.operations.add_new()
                     {
                         project.selection = Selection::Operation(index);
+                        actions.edit = Some(index);
                     }
                 });
             });
@@ -586,6 +708,15 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
 
         Selection::Operations => {
             ui.label(format!("Operaciones: {}", project.operations.items.len()));
+            ui.label(format!(
+                "Activas: {}",
+                project
+                    .operations
+                    .items
+                    .iter()
+                    .filter(|op| op.active)
+                    .count()
+            ));
         }
         Selection::Operation(i) => {
             if let Some(op) = project.operations.items.get(i) {

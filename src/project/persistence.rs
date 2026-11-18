@@ -97,10 +97,23 @@ pub enum SavedPoint {
     Center,
 }
 
+fn operation_active_default() -> bool {
+    true
+}
+
+fn operation_active_is_default(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedOperation {
     pub name: String,
+    #[serde(
+        default = "operation_active_default",
+        skip_serializing_if = "operation_active_is_default"
+    )]
+    pub active: bool,
     pub kind: String,
     pub status: String,
     pub tool_id: Option<ToolId>,
@@ -172,6 +185,7 @@ impl ProjectState {
                 .iter()
                 .map(|op| SavedOperation {
                     name: op.name.clone(),
+                    active: op.active,
                     kind: match &op.kind {
                         OperationKind::Placeholder => "placeholder",
                         OperationKind::ParallelTest(_) => "parallel_test",
@@ -323,6 +337,7 @@ impl ProjectState {
                 .iter()
                 .map(|op| Operation {
                     name: op.name.clone(),
+                    active: op.active,
                     kind: match op.parallel_test {
                         Some(params) => OperationKind::ParallelTest(params),
                         None => OperationKind::Placeholder,
@@ -716,6 +731,7 @@ mod tests {
         project.operations.items = vec![
             Operation {
                 name: "Primera".into(),
+                active: true,
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Ready,
                 tool_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
@@ -723,6 +739,7 @@ mod tests {
             },
             Operation {
                 name: "Segunda".into(),
+                active: true,
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Error,
                 tool_id: None,
@@ -767,11 +784,33 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    fn operation_active_roundtrips_and_legacy_defaults_to_active() {
+        let mut project = Project::default();
+        let index = project.operations.add_new().unwrap();
+        project.operations.items[index].active = false;
+        let saved = ProjectState::capture(&project);
+        let mut json = serde_json::to_value(&saved).unwrap();
+        assert_eq!(json["operations"][0]["active"], false);
+        let restored: ProjectState = serde_json::from_value(json.clone()).unwrap();
+        let restored = restored.restore(String::new(), None).unwrap();
+        assert!(!restored.operations.items[0].active);
+
+        json["operations"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("active");
+        let legacy: ProjectState = serde_json::from_value(json).unwrap();
+        let legacy = legacy.restore(String::new(), None).unwrap();
+        assert!(legacy.operations.items[0].active);
+    }
+
+    #[test]
     fn operation_tool_id_is_uuid_in_json_and_restores_without_conversion() {
         const UUID: &str = "550e8400-e29b-41d4-a716-446655440000";
         let mut project = Project::default();
         project.operations.items.push(Operation {
             name: "Acabado".into(),
+            active: true,
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: Some(UUID.into()),

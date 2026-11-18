@@ -76,6 +76,33 @@ fn supported_spec(tool: &Tool) -> Option<CutterSpec> {
 }
 
 impl MaterialUi {
+    /// Preparar el material desde el mismo NC interpretado que se reproduce.
+    /// Si la geometria de la fresa no es compatible, el reproductor continua
+    /// mostrando la trayectoria sin inventar una fresa equivalente.
+    pub fn prepare_compact(
+        &mut self,
+        project: &Project,
+        library: &ToolLibrary,
+        trace: &NcTrace,
+    ) -> Result<(), String> {
+        self.start(project, library, trace)
+    }
+
+    /// El visor compacto mantiene al dia el material incluso sin panel inferior.
+    pub fn tick_compact(
+        &mut self,
+        ctx: &egui::Context,
+        project: &Project,
+        library: &ToolLibrary,
+        playhead: f64,
+    ) {
+        self.refresh(project, library);
+        self.poll(ctx);
+        if let Some(field) = &mut self.field {
+            field.seek(playhead);
+        }
+    }
+
     /// Al cambiar de programa, no reutilizar una seleccion de su programa anterior.
     /// Para NC generado se propone la fresa de su operacion; se puede cambiar a mano.
     pub fn select_source_tool(&mut self, tool_id: Option<&str>) {

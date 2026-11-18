@@ -478,6 +478,101 @@ impl TestParallelPanel {
     /// que olvidar su vista previa y desplazar los indices de las posteriores.
     /// Cualquier calculo en curso se cancela para evitar asociar su resultado
     /// a otra operacion despues del cambio de indices.
+    /// Cambia solo las claves de los resultados por indice, sin recalcular CAM.
+    /// Un trabajo en curso mantiene su operacion despues de la reordenacion.
+    pub fn operation_moved(&mut self, from: usize, to: usize) {
+        use crate::project::operations::remap_index_after_move as remap;
+        if from == to {
+            return;
+        }
+        self.results = std::mem::take(&mut self.results)
+            .into_iter()
+            .map(|(index, result)| (remap(index, from, to), result))
+            .collect();
+        self.result_provenances = std::mem::take(&mut self.result_provenances)
+            .into_iter()
+            .map(|(index, stamp)| (remap(index, from, to), stamp))
+            .collect();
+        self.hidden = std::mem::take(&mut self.hidden)
+            .into_iter()
+            .map(|index| remap(index, from, to))
+            .collect();
+        self.editing = self.editing.map(|index| remap(index, from, to));
+        if let Some((index, _)) = self.active_job.as_mut() {
+            *index = remap(*index, from, to);
+        }
+    }
+
+    pub fn is_calculating(&self, index: usize) -> bool {
+        self.active_job.as_ref().is_some_and(|(i, _)| *i == index)
+    }
+
+    pub fn calculation_running(&self) -> bool {
+        self.active_job.is_some()
+    }
+
+    /// Reutilizado por el editor y por las acciones directas del arbol.
+    pub fn calculate_operation(
+        &mut self,
+        index: usize,
+        project: &mut Project,
+        stl_path: Option<&Path>,
+        tool_library: &ToolLibrary,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        if self.active_job.is_some() {
+            return Err("Ya hay un calculo CAM en curso".into());
+        }
+        let operation = project
+            .operations
+            .items
+            .get(index)
+            .ok_or("La operacion ya no existe")?;
+        let params = match &operation.kind {
+            OperationKind::ParallelTest(params) => *params,
+            OperationKind::Placeholder => return Err("Selecciona primero una estrategia".into()),
+        };
+        params.validate()?;
+        let model = project
+            .model
+            .as_ref()
+            .ok_or("No hay un modelo STL cargado")?;
+        let path = stl_path.ok_or("No hay un STL de origen disponible")?;
+        let tool = resolve_cutter(tool_library, operation.tool_id.as_deref(), 1.0)?;
+        tool.ensure_supported()?;
+        let provenance = CamProvenance::capture(project, index, path, tool.signature.clone())?;
+        let affine = if project.model_transform.is_identity() {
+            None
+        } else {
+            Some(project.model_transform.affine(&model.raw_bounds)?)
+        };
+        let mut effective = params;
+        effective.diameter = tool.diameter_model();
+        let plan =
+            SamplingPlan::new(model.bounds, effective)?.with_stock(project.stock.as_ref())?;
+        let job = Job::start(
+            path.to_path_buf(),
+            model.size_bytes,
+            model.triangles,
+            plan,
+            tool,
+            provenance,
+            affine,
+            ctx.clone(),
+        )?;
+        self.active_job = Some((index, job));
+        self.cancelling = false;
+        self.results.remove(&index);
+        self.result_provenances.remove(&index);
+        self.hidden.remove(&index);
+        self.message = "Preparando motor y calculando...".into();
+        if let Some(operation) = project.operations.items.get_mut(index) {
+            operation.status = OperationStatus::NotCalculated;
+        }
+        ctx.request_repaint();
+        Ok(())
+    }
+
     pub fn operation_deleted(&mut self, deleted: usize) {
         self.active_job = None;
         self.cancelling = false;
@@ -1118,62 +1213,10 @@ impl TestParallelPanel {
         }
         if generate {
             confirm_delete = false;
-            let params = project.operations.items.get(index).and_then(|op| {
-                if let OperationKind::ParallelTest(p) = &op.kind {
-                    Some(*p)
-                } else {
-                    None
-                }
-            });
-            if let (Some(model), Some(path), Some(params)) =
-                (project.model.as_ref(), stl_path, params)
+            if let Err(error) =
+                self.calculate_operation(index, project, stl_path, tool_library, ctx)
             {
-                let prepared = resolve_cutter(
-                    tool_library,
-                    project.operations.items[index].tool_id.as_deref(),
-                    1.0,
-                )
-                .and_then(|tool| {
-                    tool.ensure_supported()?;
-                    let provenance =
-                        CamProvenance::capture(project, index, path, tool.signature.clone())?;
-                    let affine = if project.model_transform.is_identity() {
-                        None
-                    } else {
-                        Some(project.model_transform.affine(&model.raw_bounds)?)
-                    };
-                    let mut effective = params;
-                    effective.diameter = tool.diameter_model();
-                    SamplingPlan::new(model.bounds, effective)
-                        .and_then(|plan| plan.with_stock(project.stock.as_ref()))
-                        .map(|plan| (plan, tool, provenance, affine))
-                });
-                match prepared {
-                    Ok((plan, tool, provenance, affine)) => match Job::start(
-                        path.to_path_buf(),
-                        model.size_bytes,
-                        model.triangles,
-                        plan,
-                        tool,
-                        provenance,
-                        affine,
-                        ctx.clone(),
-                    ) {
-                        Ok(job) => {
-                            self.active_job = Some((index, job));
-                            self.cancelling = false;
-                            self.results.remove(&index);
-                            self.result_provenances.remove(&index);
-                            self.hidden.remove(&index);
-                            self.message = "Preparando motor y calculando...".into();
-                            if let Some(op) = project.operations.items.get_mut(index) {
-                                op.status = OperationStatus::NotCalculated;
-                            }
-                        }
-                        Err(error) => self.editor_error = format!("ERROR: {error}"),
-                    },
-                    Err(error) => self.editor_error = format!("ERROR: {error}"),
-                }
+                self.editor_error = format!("ERROR: {error}");
             }
         }
         if !window_open || cancel_edit || accept {
@@ -1556,6 +1599,24 @@ mod operation_editor_tabs_tests {
     use super::*;
 
     #[test]
+    fn calculate_without_strategy_refuses_to_start() {
+        let mut project = Project::default();
+        let index = project.operations.add_new().unwrap();
+        let mut panel = TestParallelPanel::default();
+        let error = panel
+            .calculate_operation(
+                index,
+                &mut project,
+                None,
+                &ToolLibrary::default(),
+                &egui::Context::default(),
+            )
+            .unwrap_err();
+        assert!(error.contains("estrategia"));
+        assert!(!panel.calculation_running());
+    }
+
+    #[test]
     fn opening_an_empty_operation_preserves_it_until_commit() {
         let mut project = Project::default();
         let index = project.operations.add_new().unwrap();
@@ -1604,6 +1665,19 @@ fn index_after_delete(index: usize, deleted: usize) -> Option<usize> {
 #[cfg(test)]
 mod deletion_index_tests {
     use super::*;
+
+    #[test]
+    fn moving_operations_preserves_editor_and_hidden_state() {
+        let mut panel = TestParallelPanel::default();
+        panel.hidden.extend([0, 2]);
+        panel.editing = Some(2);
+        panel.operation_moved(2, 0);
+        assert_eq!(panel.editing, Some(0));
+        assert_eq!(panel.hidden, HashSet::from([0, 1]));
+        panel.operation_moved(0, 2);
+        assert_eq!(panel.editing, Some(2));
+        assert_eq!(panel.hidden, HashSet::from([0, 2]));
+    }
 
     #[test]
     fn deletion_removes_the_entry_and_reindexes_later_operations() {

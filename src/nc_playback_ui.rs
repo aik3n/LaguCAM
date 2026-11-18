@@ -90,13 +90,6 @@ fn validate_source_file(path: &Path) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|_| "El archivo NC no esta codificado como UTF-8".into())
 }
 
-/// Solo controla la presentacion; todos los modos comparten el mismo estado NC.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum NcWorkspaceView {
-    All,
-    Simulation,
-    Verification,
-}
 /// Identidad de archivo de origen: ruta, metadatos y firma muestreada como CamProvenance.
 /// La firma se repite cada 5 segundos, no una vez por frame con STL gigantes.
 #[derive(Clone, Debug)]
@@ -229,6 +222,7 @@ type VerificationSnapshot = (VerificationReport, Tool, [f64; 3], [f64; 3]);
 
 pub struct NcPlaybackUi {
     pub open: bool,
+    compact_generated: bool,
     /// Se incrementa en cada carga de texto NC; el texto no es editable directamente.
     nc_text_version: u64,
     source_path: Option<PathBuf>,
@@ -259,6 +253,7 @@ impl Default for NcPlaybackUi {
     fn default() -> Self {
         Self {
             open: false,
+            compact_generated: false,
             nc_text_version: 0,
             source_path: None,
             last_source_check: None,
@@ -286,7 +281,14 @@ impl Default for NcPlaybackUi {
 }
 
 impl NcPlaybackUi {
+    /// Solo una sesion compacta realmente preparada bloquea Simular.
+    /// La ventana tecnica con texto NC cargado puede ser reemplazada.
+    pub fn simulation_open(&self) -> bool {
+        self.compact_active()
+    }
+
     pub fn clear(&mut self) {
+        self.compact_generated = false;
         self.nc_text_version = self.nc_text_version.wrapping_add(1);
         self.last_source_check = None;
         self.verification = None;
@@ -386,6 +388,156 @@ impl NcPlaybackUi {
         self.open = true;
         self.message =
             "Indica y confirma la posicion real de la herramienta ANTES de Start.".into();
+    }
+
+    /// Interpreta el NC generado sin dialogos intermedios. El arranque es
+    /// TEORICO: coincide con el inicio geometrico de CAM; NO es un homing
+    /// ni confirma la posicion fisica en la maquina.
+    pub fn load_generated_compact(
+        &mut self,
+        text: String,
+        first_cam_position: [f64; 3],
+        tool_signature: ToolSignature,
+        project: &Project,
+        library: &ToolLibrary,
+    ) -> Result<(), String> {
+        if !first_cam_position.iter().all(|v| v.is_finite()) {
+            return Err("La posicion inicial CAM contiene valores invalidos".into());
+        }
+        self.load_generated(text, first_cam_position, tool_signature);
+        self.initial_xyz = first_cam_position;
+        self.initial_confirmed = true;
+        if let Err(error) = self.interpret(project) {
+            self.clear();
+            self.open = false;
+            return Err(format!("No se pudo interpretar el NC generado: {error}"));
+        }
+        self.compact_generated = true;
+        self.visible = true;
+        self.show_cutter = true;
+        self.message =
+            "Simulacion geometrica: posicion inicial teorica CAM; no verifica la maquina".into();
+        if let Some(pb) = &self.playback
+            && let Err(error) = self.material.prepare_compact(project, library, &pb.trace)
+        {
+            self.message = format!(
+                "NC interpretado. Material 2.5D no disponible: {error}; trayectoria visible"
+            );
+        }
+        Ok(())
+    }
+
+    pub fn compact_active(&self) -> bool {
+        self.compact_generated && self.open && self.playback.is_some()
+    }
+
+    pub fn close_compact(&mut self) {
+        self.clear();
+        self.open = false;
+    }
+
+    /// Controles de reproduccion superpuestos al visor, sin ventana de NC.
+    /// Devuelve true cuando el usuario solicita cerrar la simulacion.
+    pub fn compact_controls(
+        &mut self,
+        ctx: &egui::Context,
+        viewport: egui::Rect,
+        project: &Project,
+        library: &ToolLibrary,
+    ) -> bool {
+        if !self.compact_active() {
+            return false;
+        }
+        let total = self.playback.as_ref().map_or(0, |pb| pb.moves.len());
+        let now = Instant::now();
+        if self.playing {
+            let elapsed = self.last_update.map_or(0.0, |last| {
+                now.saturating_duration_since(last).as_secs_f64()
+            });
+            self.playhead = next_tick(self.playhead, elapsed, self.speed, total);
+            if self.playhead >= total as f64 {
+                self.playing = false;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
+        self.last_update = Some(now);
+        self.material
+            .tick_compact(ctx, project, library, self.playhead);
+
+        let mut close = false;
+        let left = (viewport.center().x - 164.0).max(viewport.left() + 8.0);
+        let top = (viewport.bottom() - 108.0).max(viewport.top() + 8.0);
+        egui::Area::new(egui::Id::unique("lagucam_simulation_controls"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(egui::pos2(left, top))
+            .show(ctx, |ui| {
+                egui::Frame::default()
+                    .fill(ui.visuals().window_fill())
+                    .stroke(ui.visuals().window_stroke())
+                    .corner_radius(8)
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("⏮").on_hover_text("Ir al inicio").clicked() {
+                                self.playhead = 0.0;
+                                self.playing = false;
+                            }
+                            if ui
+                                .add_enabled(self.playhead > 0.0, egui::Button::new("⏴"))
+                                .on_hover_text("Movimiento anterior")
+                                .clicked()
+                            {
+                                self.playhead = (self.playhead.ceil() - 1.0).max(0.0);
+                                self.playing = false;
+                            }
+                            let can_play =
+                                total > 0 && (self.playing || self.playhead < total as f64);
+                            if ui
+                                .add_enabled(
+                                    can_play,
+                                    egui::Button::new(if self.playing { "⏸" } else { "▶" }),
+                                )
+                                .on_hover_text(if self.playing { "Pausar" } else { "Reproducir" })
+                                .clicked()
+                            {
+                                self.playing = !self.playing;
+                                self.last_update = None;
+                                ctx.request_repaint();
+                            }
+                            if ui
+                                .add_enabled(self.playhead < total as f64, egui::Button::new("⏭"))
+                                .on_hover_text("Movimiento siguiente")
+                                .clicked()
+                            {
+                                self.playhead = (self.playhead.floor() + 1.0).min(total as f64);
+                                self.playing = false;
+                            }
+                            if ui.button("↺").on_hover_text("Reiniciar").clicked() {
+                                self.playhead = 0.0;
+                                self.playing = false;
+                            }
+                            if ui.button("⏹").on_hover_text("Cerrar simulacion").clicked() {
+                                close = true;
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add_sized(
+                                    [220.0, 18.0],
+                                    egui::Slider::new(&mut self.playhead, 0.0..=total as f64)
+                                        .show_value(false),
+                                )
+                                .changed()
+                            {
+                                self.playing = false;
+                            }
+                            ui.small(format!("{} / {}", self.playhead.floor() as usize, total));
+                        });
+                        ui.small("NC generado · Inicio teorico CAM · No verifica colisiones");
+                    });
+            });
+        close
     }
 
     fn load_file(&mut self) -> Result<(), String> {
@@ -491,19 +643,16 @@ impl NcPlaybackUi {
             .default_size([570.0, 510.0])
             .min_width(460.0)
             .resizable(true)
-            .show(ctx, |ui| {
-                self.show_embedded(ui, project, tool_library, NcWorkspaceView::All)
-            });
+            .show(ctx, |ui| self.show_embedded(ui, project, tool_library));
         self.open = open;
     }
 
     /// Una sola implementacion del reproductor y del verificador P2-E1.
-    pub fn show_embedded(
+    fn show_embedded(
         &mut self,
         ui: &mut egui::Ui,
         project: &Project,
         tool_library: &crate::tools::model::ToolLibrary,
-        mode: NcWorkspaceView,
     ) {
         let ctx = ui.ctx().clone();
         if self.playback.is_some() && !self.projection_current(project) {
@@ -532,7 +681,7 @@ impl NcPlaybackUi {
         let mut change_initial = false;
         let mut verify_requested = false;
 
-        if mode != NcWorkspaceView::Verification {
+        {
             ui.horizontal(|ui| {
                 if ui.button("Abrir archivo NC...").clicked() {
                     load_file = true;
@@ -664,7 +813,7 @@ impl NcPlaybackUi {
                 );
             }
         }
-        if mode != NcWorkspaceView::Simulation && self.playback.is_some() {
+        if self.playback.is_some() {
             ui.separator();
             egui::CollapsingHeader::new("Verificacion preliminar del programa NC")
                         .default_open(true)
@@ -1049,6 +1198,30 @@ mod tests {
     static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
 
     #[test]
+    fn technical_nc_preview_does_not_block_compact_simulation() {
+        let mut playback = NcPlaybackUi {
+            open: true,
+            nc_text: "G21\nM30\n".into(),
+            ..Default::default()
+        };
+        assert!(!playback.simulation_open());
+        // Sin interpretar el NC, tampoco hay sesion compacta reproducible.
+        playback.compact_generated = true;
+        assert!(!playback.simulation_open());
+        playback.close_compact();
+        assert!(!playback.simulation_open());
+    }
+
+    #[test]
+    fn compact_without_program_is_closed() {
+        let mut playback = NcPlaybackUi::default();
+        assert!(!playback.compact_active());
+        playback.close_compact();
+        assert!(!playback.open);
+        assert!(!playback.compact_active());
+    }
+
+    #[test]
     fn rotation_with_identical_bounds_invalidates_nc_and_material() {
         let path = std::env::temp_dir().join(format!(
             "lagucam_nc_session_{}_{}.stl",
@@ -1082,6 +1255,11 @@ mod tests {
             ..NcPlaybackUi::default()
         };
         player.interpret(&project).unwrap();
+        player.open = true;
+        assert!(!player.simulation_open());
+        player.compact_generated = true;
+        assert!(player.simulation_open());
+        player.compact_generated = false;
         assert!(player.projection_current(&project));
 
         let initial_bounds = project.model.as_ref().unwrap().bounds;

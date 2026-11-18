@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cam_markers_3d;
-mod cam_workspace;
 mod material_ui;
 mod nav_cube;
 mod navigation;
@@ -165,8 +164,8 @@ struct App {
     post_ui: post_ui::PostUi,
     nc_export_ui: nc_export_ui::NcExportUi,
     nc_playback_ui: nc_playback_ui::NcPlaybackUi,
-    cam_workspace: cam_workspace::CamWorkspace,
     test_parallel: test_parallel::TestParallelPanel,
+    pending_cam_command: Option<project_ui::OperationCommand>,
     project_path: Option<PathBuf>,
     recent_projects: recent_projects::RecentProjects,
     current_stl_path: Option<PathBuf>,
@@ -239,8 +238,8 @@ impl App {
             post_ui: post_ui::PostUi::load(),
             nc_export_ui: nc_export_ui::NcExportUi::default(),
             nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
-            cam_workspace: cam_workspace::CamWorkspace::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
+            pending_cam_command: None,
             project_path: None,
             recent_projects: recent_projects::RecentProjects::load(),
             current_stl_path: None,
@@ -302,6 +301,7 @@ impl App {
         self.pivot_press = PivotPress::default();
         self.opening_project = opening;
         self.test_parallel.clear_source();
+        self.pending_cam_command = None;
         self.pending_stl_path = Some(path.clone());
         self.renderer.lock().begin_upload();
         self.pending_filename = Some(
@@ -594,6 +594,7 @@ impl App {
         match action {
             FileAction::New => {
                 self.test_parallel.clear_source();
+                self.pending_cam_command = None;
                 self.section_profiles = None;
                 self.sample_profile_job = None;
                 self.renderer.lock().clear_scene();
@@ -694,6 +695,7 @@ impl App {
             let Some(mut stl_path) = doc.resolve_stl(&path) else {
                 let restored = doc.state.restore(String::new(), None)?;
                 self.test_parallel.clear_source();
+                self.pending_cam_command = None;
                 self.section_profiles = None;
                 self.renderer.lock().clear_scene();
                 self.sample_profile_job = None;
@@ -912,20 +914,7 @@ impl App {
                     self.request_action(FileAction::Exit, ui.ctx().clone());
                 }
             });
-            ui.menu_button("Mecanizado", |ui| {
-                for tab in cam_workspace::Tab::ALL {
-                    if ui.button(tab.label()).clicked() {
-                        self.cam_workspace.open = true;
-                        self.cam_workspace.tab = tab;
-                        ui.close();
-                    }
-                }
-                ui.separator();
-                if ui.button("Ocultar panel de mecanizado").clicked() {
-                    self.cam_workspace.open = false;
-                    ui.close();
-                }
-            });            ui.menu_button("Herramientas", |ui| {
+            ui.menu_button("Herramientas", |ui| {
                 if ui.button("Biblioteca de herramientas...").clicked() {
                     self.tool_ui.open = true;
                     ui.close();
@@ -941,8 +930,6 @@ impl App {
                 }
             });
             ui.menu_button("Vista", |ui| {
-                ui.checkbox(&mut self.cam_workspace.open, "Panel de mecanizado");
-                ui.separator();
                 ui.menu_button("Diagnóstico geométrico (experimental)", |ui| {
                 if ui
                     .add_enabled(
@@ -1066,6 +1053,128 @@ impl App {
             });
         });
     }
+    /// Una sola operacion; el conjunto se integrara sin simular concatenaciones.
+    fn execute_ready_cam_command(
+        &mut self,
+        command: project_ui::OperationCommand,
+    ) -> Result<(), String> {
+        use project_ui::OperationCommand;
+        let index = command.index();
+        let op = self
+            .project
+            .operations
+            .items
+            .get(index)
+            .ok_or("La operacion solicitada ya no existe")?;
+        if op.status != project::operations::OperationStatus::Ready
+            || self.test_parallel.nc_result(index).is_none()
+        {
+            return Err("La operacion no dispone de una trayectoria CAM valida".into());
+        }
+        match command {
+            OperationCommand::Calculate(_) => Ok(()),
+            OperationCommand::GenerateNc(_) => {
+                self.nc_export_ui.open_for_operation(index);
+                Ok(())
+            }
+            OperationCommand::Simulate(_) => {
+                if self.nc_playback_ui.simulation_open() {
+                    return Err("Cierra la simulacion anterior antes de iniciar otra".into());
+                }
+                let (text, xyz, tool) = self.nc_export_ui.playback_for_operation(
+                    index,
+                    &self.project,
+                    &self.test_parallel,
+                    &self.post_ui,
+                )?;
+                self.nc_playback_ui.load_generated_compact(
+                    text,
+                    xyz,
+                    tool,
+                    &self.project,
+                    &self.tool_library,
+                )?;
+                Ok(())
+            }
+        }
+    }
+
+    fn request_cam_command(&mut self, command: project_ui::OperationCommand, ctx: &egui::Context) {
+        use project_ui::OperationCommand;
+        let index = command.index();
+        if !matches!(self.project.selection, project::selection::Selection::Operation(i) if i == index)
+        {
+            self.message = "ERROR: La seleccion de la operacion ha cambiado".into();
+            return;
+        }
+        if matches!(command, OperationCommand::Simulate(_)) && self.nc_playback_ui.simulation_open()
+        {
+            self.message = "ERROR: Cierra la simulacion anterior".into();
+            return;
+        }
+        if self.test_parallel.nc_result(index).is_some()
+            && self
+                .project
+                .operations
+                .items
+                .get(index)
+                .is_some_and(|op| op.status == project::operations::OperationStatus::Ready)
+        {
+            if let Err(error) = self.execute_ready_cam_command(command) {
+                self.message = format!("ERROR: {error}");
+            } else if matches!(command, OperationCommand::Calculate(_)) {
+                self.message = "Trayectoria calculada y vigente; no es necesario recalcular".into();
+            }
+            return;
+        }
+        if self.test_parallel.is_calculating(index) {
+            if !matches!(command, OperationCommand::Calculate(_)) {
+                self.pending_cam_command = Some(command);
+                self.message = "Calculo en curso; la accion continuara cuando termine".into();
+            }
+            return;
+        }
+        if self.test_parallel.calculation_running() {
+            self.message = "ERROR: Ya se esta calculando otra operacion".into();
+            return;
+        }
+        match self.test_parallel.calculate_operation(
+            index,
+            &mut self.project,
+            self.current_stl_path.as_deref(),
+            &self.tool_library,
+            ctx,
+        ) {
+            Ok(()) => {
+                self.pending_cam_command = if matches!(command, OperationCommand::Calculate(_)) {
+                    None
+                } else {
+                    Some(command)
+                };
+                self.message = "Calculo CAM iniciado".into();
+            }
+            Err(error) => self.message = format!("ERROR: {error}"),
+        }
+    }
+
+    fn resume_pending_cam_command(&mut self) {
+        let Some(command) = self.pending_cam_command else {
+            return;
+        };
+        if self.test_parallel.calculation_running() {
+            return;
+        }
+        self.pending_cam_command = None;
+        let index = command.index();
+        if self.project.operations.items.get(index).is_none() {
+            self.message = "ERROR: La operacion desaparecio durante el calculo".into();
+            return;
+        }
+        if let Err(error) = self.execute_ready_cam_command(command) {
+            self.message = format!("ERROR: No se pudo continuar tras el calculo: {error}");
+        }
+    }
+
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             if let Some(path) = &self.project_path {
@@ -1094,66 +1203,6 @@ impl App {
                 }
             } else if self.message.starts_with("ERROR") {
                 ui.colored_label(egui::Color32::RED, &self.message);
-            }
-        });
-    }
-    fn show_cam_workspace(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.strong("Mecanizado");
-            ui.separator();
-            for tab in cam_workspace::Tab::ALL {
-                ui.selectable_value(&mut self.cam_workspace.tab, tab, tab.label());
-            }
-            if ui.button("Ocultar").clicked() {
-                self.cam_workspace.open = false;
-                self.nc_playback_ui.open = false;
-            }
-        });
-        ui.separator();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            match self.cam_workspace.tab {
-                cam_workspace::Tab::Operation => {
-                    ui.heading("Operaciones CAM");
-                    ui.small("Las operaciones siguen en el arbol del proyecto. El editor detallado se conserva sin cambios.");
-                    if self.project.operations.items.is_empty() {
-                        ui.label("No hay operaciones. Crea una desde el arbol del proyecto.");
-                    }
-                    let mut edit = None;
-                    for (index, operation) in self.project.operations.items.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let state = match operation.status {
-                                project::operations::OperationStatus::NotCalculated => "Sin calcular",
-                                project::operations::OperationStatus::Ready => "Calculada",
-                                project::operations::OperationStatus::Error => "Error",
-                            };
-                            ui.label(format!("{} · {}", operation.name, state));
-                            if ui.button("Editar operación").clicked() { edit = Some(index); }
-                        });
-                    }
-                    if let Some(index) = edit {
-                        self.test_parallel.open_editor(index, &self.project);
-                    }
-                    ui.separator();
-                    if ui.button("Ir a G-code").clicked() {
-                        self.cam_workspace.tab = cam_workspace::Tab::Gcode;
-                    }
-                }
-                cam_workspace::Tab::Gcode => {
-                    self.nc_export_ui.show_embedded(ui, &self.project, &self.test_parallel, &self.post_ui);
-                }
-                cam_workspace::Tab::Simulation => {
-                    self.nc_playback_ui.show_embedded(
-                        ui, &self.project, &self.tool_library,
-                        nc_playback_ui::NcWorkspaceView::Simulation,
-                    );
-                }
-                cam_workspace::Tab::Verification => {
-                    ui.small("Verificacion conservadora del NC interpretado; no sustituye la comprobacion en maquina.");
-                    self.nc_playback_ui.show_embedded(
-                        ui, &self.project, &self.tool_library,
-                        nc_playback_ui::NcWorkspaceView::Verification,
-                    );
-                }
             }
         });
     }
@@ -1382,6 +1431,16 @@ impl App {
             self.test_parallel
                 .paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
+        if self.nc_playback_ui.compact_active()
+            && self.nc_playback_ui.compact_controls(
+                ui.ctx(),
+                rect,
+                &self.project,
+                &self.tool_library,
+            )
+        {
+            self.nc_playback_ui.close_compact();
+        }
         self.nc_playback_ui.paint(
             ui,
             rect,
@@ -1391,6 +1450,18 @@ impl App {
             distance,
             pan,
             projection,
+        );
+        self.nc_export_ui.paint_issue_focus(
+            ui,
+            rect,
+            &self.project,
+            nc_tool_overlay::Camera {
+                yaw,
+                pitch,
+                distance,
+                pan,
+                projection,
+            },
         );
         // Marcadores renderizados tras las lineas egui: sus fragmentos opacos
         // sustituyen visualmente las lineas que quedan por debajo del solido.
@@ -1549,6 +1620,7 @@ impl eframe::App for App {
         self.test_parallel
             .sync_tools(&mut self.project, &self.tool_library);
         self.test_parallel.poll(ui.ctx(), &mut self.project);
+        self.resume_pending_cam_command();
         self.nc_playback_ui.sync_session(
             &self.project,
             &self.tool_library,
@@ -1565,27 +1637,43 @@ impl eframe::App for App {
         }
         let enabled = !self.busy();
         let before_transform = self.project.model_transform;
-        let open_docked =
-            self.panels
-                .show_docked(ui, &mut self.project, &mut self.property_error, enabled);
-        if self.cam_workspace.open {
-            self.nc_playback_ui.open = true;
-            egui::Panel::bottom("lagucam_cam_workspace")
-                .resizable(true)
-                .default_size(280.0)
-                .min_size(130.0)
-                .show(ui, |ui| self.show_cam_workspace(ui));
-        } else {
-            self.nc_playback_ui.open = false;
-            self.nc_export_ui.open = false;
-        }
+        let simulation_open = self.nc_playback_ui.simulation_open();
+        let open_docked = self.panels.show_docked(
+            ui,
+            &mut self.project,
+            &mut self.property_error,
+            enabled,
+            simulation_open,
+        );
         egui::CentralPanel::default().show(ui, |ui| self.viewport(ui));
         let open_floating = self.panels.show_floating(
             ui.ctx(),
             &mut self.project,
             &mut self.property_error,
             enabled,
+            simulation_open,
         );
+        // El arbol define el orden de mecanizado. El cambio es solo de indice:
+        // conservar las trayectorias calculadas, pero no los indices del exportador.
+        if let Some((from, to)) = self.panels.take_move_operation()
+            && from != to
+            && from < self.project.operations.items.len()
+            && to < self.project.operations.items.len()
+        {
+            use project::operations::remap_index_after_move;
+            self.test_parallel.operation_moved(from, to);
+            self.project.operations.move_item(from, to);
+            if let project::selection::Selection::Operation(index) = self.project.selection {
+                self.project.selection = project::selection::Selection::Operation(
+                    remap_index_after_move(index, from, to),
+                );
+            }
+            self.nc_export_ui.operation_reordered();
+            if let Some(command) = self.pending_cam_command {
+                self.pending_cam_command =
+                    Some(command.with_index(remap_index_after_move(command.index(), from, to)));
+            }
+        }
         if self.project.model_transform != before_transform {
             self.section_profiles = None;
             self.sample_profiles = None;
@@ -1593,6 +1681,9 @@ impl eframe::App for App {
             self.test_parallel
                 .sync_tools(&mut self.project, &self.tool_library);
             self.message = "Transformacion STL aplicada: bruto reajustado y CAM invalidado; revisar setup y area de corte".into();
+        }
+        if let Some(command) = self.panels.take_operation_command() {
+            self.request_cam_command(command, ui.ctx());
         }
         if let Some(index) = self.panels.take_edit_operation() {
             self.test_parallel.open_editor(index, &self.project);
@@ -1627,17 +1718,15 @@ impl eframe::App for App {
         );
         self.test_parallel
             .sync_tools(&mut self.project, &self.tool_library);
-        if !self.cam_workspace.open {
-            self.nc_export_ui
-                .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
-        }
+        self.nc_export_ui
+            .refresh_verification(&self.project, &self.tool_library);
+        self.nc_export_ui
+            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
         if let Some((text, xyz, tool_signature)) = self.nc_export_ui.take_playback_request() {
             self.nc_playback_ui
                 .load_generated(text, xyz, tool_signature);
-            self.cam_workspace.open = true;
-            self.cam_workspace.tab = cam_workspace::Tab::Simulation;
         }
-        if !self.cam_workspace.open {
+        if !self.nc_playback_ui.compact_active() {
             self.nc_playback_ui
                 .show(ui.ctx(), &self.project, &self.tool_library);
         }

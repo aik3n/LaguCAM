@@ -175,6 +175,12 @@ impl Settings {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PaneView {
+    floating: bool,
+    simulation_open: bool,
+}
+
 pub struct PanelLayout {
     settings: Settings,
     path: Option<PathBuf>,
@@ -182,6 +188,8 @@ pub struct PanelLayout {
     window_generation: u32,
     dragging: Option<DockDrag>,
     edit_operation: Option<usize>,
+    move_operation: Option<(usize, usize)>,
+    operation_command: Option<project_ui::OperationCommand>,
 }
 
 impl PanelLayout {
@@ -200,11 +208,21 @@ impl PanelLayout {
             window_generation: 0,
             dragging: None,
             edit_operation: None,
+            move_operation: None,
+            operation_command: None,
         }
     }
 
     pub fn take_edit_operation(&mut self) -> Option<usize> {
         self.edit_operation.take()
+    }
+
+    pub fn take_move_operation(&mut self) -> Option<(usize, usize)> {
+        self.move_operation.take()
+    }
+
+    pub fn take_operation_command(&mut self) -> Option<project_ui::OperationCommand> {
+        self.operation_command.take()
     }
 
     pub fn reset(&mut self) {
@@ -213,6 +231,8 @@ impl PanelLayout {
         self.window_generation = self.window_generation.wrapping_add(1);
         self.dragging = None;
         self.edit_operation = None;
+        self.move_operation = None;
+        self.operation_command = None;
     }
 
     fn state(&self, pane: Pane) -> PaneState {
@@ -261,10 +281,10 @@ impl PanelLayout {
         project: &mut Project,
         error: &mut String,
         enabled: bool,
-        floating: bool,
+        view: PaneView,
     ) -> bool {
         let mut open_model = false;
-        if !floating {
+        if !view.floating {
             ui.horizontal(|ui| {
                 let handle = panel_drag_handle(ui);
                 if handle.drag_started_by(egui::PointerButton::Primary) {
@@ -295,9 +315,17 @@ impl PanelLayout {
                         if let Some(index) = actions.edit {
                             self.edit_operation = Some(index);
                         }
+                        if let Some(moved) = actions.move_operation {
+                            self.move_operation = Some(moved);
+                        }
                     }
                     Pane::Properties => {
                         open_model = project_ui::properties(ui, project, error);
+                        if let Some(command) =
+                            project_ui::operation_commands(ui, project, view.simulation_open)
+                        {
+                            self.operation_command = Some(command);
+                        }
                     }
                 });
         });
@@ -311,13 +339,24 @@ impl PanelLayout {
         project: &mut Project,
         error: &mut String,
         enabled: bool,
+        simulation_open: bool,
     ) -> bool {
         let panes = self.panes_for(place);
         if panes.is_empty() {
             return false;
         }
         if panes.len() == 1 {
-            return self.content(ui, panes[0], project, error, enabled, false);
+            return self.content(
+                ui,
+                panes[0],
+                project,
+                error,
+                enabled,
+                PaneView {
+                    floating: false,
+                    simulation_open,
+                },
+            );
         }
         let top_height = match place {
             Place::Left => self.settings.left_top_height,
@@ -332,7 +371,17 @@ impl PanelLayout {
                 .default_size(top_height)
                 .size_range(140.0..=3000.0)
                 .show(ui, |ui| {
-                    self.content(ui, top, project, error, enabled, false)
+                    self.content(
+                        ui,
+                        top,
+                        project,
+                        error,
+                        enabled,
+                        PaneView {
+                            floating: false,
+                            simulation_open,
+                        },
+                    )
                 });
         let top_value = top_response.response.rect.height();
         if top_value.is_finite() && (140.0..=3000.0).contains(&top_value) {
@@ -353,7 +402,17 @@ impl PanelLayout {
             }
         }
         let bottom_response = egui::CentralPanel::default().show(ui, |ui| {
-            self.content(ui, bottom, project, error, enabled, false)
+            self.content(
+                ui,
+                bottom,
+                project,
+                error,
+                enabled,
+                PaneView {
+                    floating: false,
+                    simulation_open,
+                },
+            )
         });
         top_response.inner || bottom_response.inner
     }
@@ -364,6 +423,7 @@ impl PanelLayout {
         project: &mut Project,
         error: &mut String,
         enabled: bool,
+        simulation_open: bool,
     ) -> bool {
         let mut open_model = false;
         if !self.panes_for(Place::Left).is_empty() {
@@ -372,7 +432,7 @@ impl PanelLayout {
                 .default_size(self.settings.left_width)
                 .size_range(220.0..=700.0)
                 .show(ui, |ui| {
-                    self.stack(ui, Place::Left, project, error, enabled)
+                    self.stack(ui, Place::Left, project, error, enabled, simulation_open)
                 });
             if (r.response.rect.width() - self.settings.left_width).abs() > 0.5 {
                 self.settings.left_width = r.response.rect.width();
@@ -386,7 +446,7 @@ impl PanelLayout {
                 .default_size(self.settings.right_width)
                 .size_range(220.0..=700.0)
                 .show(ui, |ui| {
-                    self.stack(ui, Place::Right, project, error, enabled)
+                    self.stack(ui, Place::Right, project, error, enabled, simulation_open)
                 });
             if (r.response.rect.width() - self.settings.right_width).abs() > 0.5 {
                 self.settings.right_width = r.response.rect.width();
@@ -403,6 +463,7 @@ impl PanelLayout {
         project: &mut Project,
         error: &mut String,
         enabled: bool,
+        simulation_open: bool,
     ) -> bool {
         let mut open_model = false;
         for pane in [Pane::Project, Pane::Properties] {
@@ -421,7 +482,17 @@ impl PanelLayout {
                 .collapsible(false)
                 .scroll(false)
                 .show(ctx, |ui| {
-                    self.content(ui, pane, project, error, enabled, true)
+                    self.content(
+                        ui,
+                        pane,
+                        project,
+                        error,
+                        enabled,
+                        PaneView {
+                            floating: true,
+                            simulation_open,
+                        },
+                    )
                 });
             if let Some(response) = response {
                 open_model |= response.inner.unwrap_or(false);
@@ -745,6 +816,8 @@ mod tests {
             window_generation: 0,
             dragging: None,
             edit_operation: None,
+            move_operation: None,
+            operation_command: None,
         };
         assert_eq!(
             fresh.panes_for(Place::Left),
@@ -799,6 +872,8 @@ mod tests {
             window_generation: 0,
             dragging: None,
             edit_operation: None,
+            move_operation: None,
+            operation_command: None,
         };
         let ctx = egui::Context::default();
         layout.dock_drop(
@@ -836,6 +911,8 @@ mod tests {
             window_generation: 0,
             dragging: None,
             edit_operation: None,
+            move_operation: None,
+            operation_command: None,
         };
         let size_before = layout.state(Pane::Properties).size;
         let ctx = egui::Context::default();
@@ -855,6 +932,8 @@ mod tests {
             window_generation: 0,
             dragging: None,
             edit_operation: None,
+            move_operation: None,
+            operation_command: None,
         };
         let ctx = egui::Context::default();
         layout.move_to(Pane::Properties, Place::Floating, &ctx);

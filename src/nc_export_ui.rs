@@ -12,10 +12,20 @@ use crate::{
 };
 use cam_libre_visor::{
     cam_contract::CuttingConditions,
+    nc_contract::{
+        NcDistanceMode, NcEventKind, NcInitialState, NcMotion, NcMotionKind, NcSpindleMode,
+        NcTrace, NcUnits,
+    },
+    nc_interpreter::interpret_program,
     nc_post::{GeneratedNc, PostInput, PostMove, PostProcessorProfile, generate_program},
+    nc_verify::{
+        CutterEnvelope, StockEnvelope, VerificationIssue, VerificationReport, VerificationSeverity,
+        verify_trace,
+    },
     toolpath_links::PlannedToolpath,
 };
 use eframe::egui;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct NcPreview {
@@ -24,6 +34,191 @@ struct NcPreview {
     profile_id: String,
     generated: GeneratedNc,
     tool_signature: ToolSignature,
+    summary: Result<NcSummary, String>,
+    verification: Option<Result<NcVerification, String>>,
+    source_frame: WorkFrame,
+    model_session: u64,
+}
+
+/// Magnitudes obtenidas al interpretar el G-code definitivo.
+/// El tiempo G1 no incluye G0, aceleraciones ni tiempos auxiliares.
+#[derive(Clone, Debug, PartialEq)]
+struct NcSummary {
+    rapid_moves: usize,
+    feed_moves: usize,
+    rapid_mm: f64,
+    feed_mm: f64,
+    feed_minutes: f64,
+}
+
+fn summarize_interpreted_nc(
+    generated: &GeneratedNc,
+    profile: &PostProcessorProfile,
+) -> Result<NcSummary, String> {
+    // El origen CAM es la posicion exigida antes del primer movimiento CAM.
+    // Un bloque Start personalizado puede haber desplazado la herramienta.
+    if !profile.start_commands.trim().is_empty() {
+        return Err("Start personalizado: posicion inicial anterior a Start desconocida; no se calculan metricas NC automaticamente".into());
+    }
+    let initial = NcInitialState {
+        position_work_mm: generated.required_first_move_position_work_mm,
+        units: NcUnits::Millimeters,
+        distance_mode: NcDistanceMode::Absolute,
+        feed_mm_min: None,
+        spindle_rpm: None,
+        spindle_mode: NcSpindleMode::Stopped,
+        tool_number: None,
+    };
+    let trace = interpret_program(&generated.text, initial)
+        .map_err(|error| format!("No se pudo interpretar el NC definitivo: {error}"))?;
+    let mut summary = NcSummary {
+        rapid_moves: 0,
+        feed_moves: 0,
+        rapid_mm: 0.0,
+        feed_mm: 0.0,
+        feed_minutes: 0.0,
+    };
+    for event in trace.events {
+        let NcEventKind::Motion(motion) = event.kind else {
+            continue;
+        };
+        let distance = (0..3)
+            .map(|axis| (motion.to_work_mm[axis] - motion.from_work_mm[axis]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if !distance.is_finite() {
+            return Err("Distancia NC fuera del rango numerico".into());
+        }
+        match motion.kind {
+            NcMotionKind::Rapid => {
+                summary.rapid_moves += 1;
+                summary.rapid_mm += distance;
+            }
+            NcMotionKind::LinearFeed => {
+                let feed = motion
+                    .effective_feed_mm_min
+                    .ok_or("Movimiento G1 sin avance modal F")?;
+                if !feed.is_finite() || feed <= 0.0 {
+                    return Err("Avance NC invalido".into());
+                }
+                summary.feed_moves += 1;
+                summary.feed_mm += distance;
+                summary.feed_minutes += distance / feed;
+            }
+        }
+    }
+    if !summary.rapid_mm.is_finite()
+        || !summary.feed_mm.is_finite()
+        || !summary.feed_minutes.is_finite()
+    {
+        return Err("Resumen NC fuera del rango numerico".into());
+    }
+    Ok(summary)
+}
+
+/// La verificacion solo retiene los movimientos citados en los avisos visibles.
+#[derive(Clone)]
+struct NcVerification {
+    report: VerificationReport,
+    issue_motions: Vec<Option<NcMotion>>,
+}
+
+/// El indice del verificador es un indice de MOVIMIENTO, no de evento NC.
+fn issue_motion_targets(trace: &NcTrace, issues: &[VerificationIssue]) -> Vec<Option<NcMotion>> {
+    let wanted: HashSet<usize> = issues.iter().filter_map(|issue| issue.move_index).collect();
+    let mut found = HashMap::with_capacity(wanted.len());
+    let mut move_index = 0;
+    for event in &trace.events {
+        if let NcEventKind::Motion(motion) = event.kind {
+            if wanted.contains(&move_index) {
+                found.insert(move_index, motion);
+            }
+            move_index += 1;
+        }
+    }
+    issues
+        .iter()
+        .map(|issue| {
+            issue
+                .move_index
+                .and_then(|index| found.get(&index).copied())
+        })
+        .collect()
+}
+
+fn verify_generated_nc(
+    preview: &NcPreview,
+    project: &Project,
+    library: &crate::tools::model::ToolLibrary,
+) -> Result<NcVerification, String> {
+    // Un Start personalizado puede desplazar el punto inicial. No se inventa.
+    if preview.summary.is_err() {
+        return Err("No se ha podido establecer una posicion inicial fiable para interpretar todo el NC. Revisa Start y el informe de metricas.".into());
+    }
+    let op = project
+        .operations
+        .items
+        .get(preview.operation_index)
+        .ok_or("La operacion de origen ya no existe")?;
+    if op.status != OperationStatus::Ready
+        || !crate::tools::cam_adapter::signature_current(
+            library,
+            op.tool_id.as_deref(),
+            &preview.tool_signature,
+        )
+    {
+        return Err("La operacion o la fresa han cambiado desde que se genero el NC".into());
+    }
+    if project.model_session != preview.model_session {
+        return Err("El modelo STL ha cambiado desde que se genero el NC".into());
+    }
+    let model = project.model.as_ref().ok_or("No hay modelo STL")?;
+    let stock = project.stock.as_ref().ok_or("No hay bruto")?;
+    let frame = WorkFrame::new(&project.origin, stock, &model.bounds)
+        .map_err(|e| format!("Origen CNC no verificable: {e}"))?;
+    if frame != preview.source_frame {
+        return Err("Ha cambiado el bruto o el origen CNC: regenera el NC".into());
+    }
+    let tool = library
+        .get(&preview.tool_signature.tool_id)
+        .ok_or("La fresa de origen CAM no esta en la biblioteca")?;
+    tool.validate()?;
+    let trace = interpret_program(
+        &preview.generated.text,
+        NcInitialState {
+            position_work_mm: preview.generated.required_first_move_position_work_mm,
+            units: NcUnits::Millimeters,
+            distance_mode: NcDistanceMode::Absolute,
+            feed_mm_min: None,
+            spindle_rpm: None,
+            spindle_mode: NcSpindleMode::Stopped,
+            tool_number: None,
+        },
+    )
+    .map_err(|e| format!("Interpretacion del NC: {e}"))?;
+    let stock_max = stock.max().ok_or("Limites del bruto no validos")?;
+    let report = verify_trace(
+        &trace,
+        StockEnvelope {
+            min_mm: stock.min,
+            max_mm: stock_max,
+        },
+        CutterEnvelope {
+            radius_mm: tool.geometry.diameter_mm() * 0.5,
+            cutting_length_mm: tool.cutting_length_mm,
+        },
+        |position| {
+            project
+                .origin
+                .work_to_model(stock, &model.bounds, position)
+                .map_err(str::to_owned)
+        },
+    )?;
+    let issue_motions = issue_motion_targets(&trace, &report.issues);
+    Ok(NcVerification {
+        report,
+        issue_motions,
+    })
 }
 
 #[derive(Default)]
@@ -33,6 +228,8 @@ pub struct NcExportUi {
     selected_profile: String,
     preview: Option<NcPreview>,
     acknowledge_unverified: bool,
+    pending_preview: bool,
+    focus_issue: Option<usize>,
     message: String,
     pending_playback: Option<(String, [f64; 3], ToolSignature)>,
 }
@@ -92,6 +289,7 @@ fn suggested_filename(name: &str, extension: &str) -> String {
     format!("{stem}.{extension}")
 }
 
+#[cfg(test)]
 fn preview_excerpt(text: &str) -> String {
     const HEAD: usize = 65;
     const TAIL: usize = 22;
@@ -110,6 +308,171 @@ fn preview_excerpt(text: &str) -> String {
 }
 
 impl NcExportUi {
+    /// Una sola verificacion por generacion. Nunca recalcular por cada frame.
+    pub fn refresh_verification(
+        &mut self,
+        project: &Project,
+        library: &crate::tools::model::ToolLibrary,
+    ) {
+        if !self.open {
+            return;
+        }
+        let Some(preview) = self.preview.as_mut() else {
+            return;
+        };
+        if preview.verification.is_none() {
+            preview.verification = Some(verify_generated_nc(preview, project, library));
+        }
+    }
+
+    /// Marca el movimiento asociado a la alerta directamente sobre el visor 3D.
+    /// No carga otro NC en el simulador ni altera la reproduccion en marcha.
+    pub fn paint_issue_focus(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        project: &Project,
+        camera: crate::nc_tool_overlay::Camera,
+    ) {
+        if !self.open {
+            return;
+        }
+        let Some(issue_index) = self.focus_issue else {
+            return;
+        };
+        let Some(preview) = self.preview.as_ref() else {
+            return;
+        };
+        let Some(Ok(verification)) = preview.verification.as_ref() else {
+            return;
+        };
+        let Some(Some(motion)) = verification.issue_motions.get(issue_index) else {
+            return;
+        };
+        let Some(issue) = verification.report.issues.get(issue_index) else {
+            return;
+        };
+        let Some(model) = project.model.as_ref() else {
+            return;
+        };
+        let Some(stock) = project.stock.as_ref() else {
+            return;
+        };
+        if project.model_session != preview.model_session
+            || project
+                .operations
+                .items
+                .get(preview.operation_index)
+                .is_none_or(|op| {
+                    op.status != OperationStatus::Ready
+                        || op.tool_id.as_deref() != Some(preview.tool_signature.tool_id.as_str())
+                })
+            || !WorkFrame::new(&project.origin, stock, &model.bounds)
+                .is_ok_and(|frame| frame == preview.source_frame)
+        {
+            return;
+        }
+        let mvp = crate::navigation::view_projection_mode(
+            camera.yaw,
+            camera.pitch,
+            camera.distance,
+            rect.width() / rect.height().max(1.0),
+            camera.pan,
+            camera.projection,
+        );
+        let screen_point = |work: [f64; 3]| -> Option<egui::Pos2> {
+            let model_xyz = project
+                .origin
+                .work_to_model(stock, &model.bounds, work)
+                .ok()?;
+            let position = model.visual_point(model_xyz)?;
+            let clip = mvp * position.extend(1.0);
+            if !clip.is_finite() || clip.w <= 0.0 {
+                return None;
+            }
+            let ndc = clip.truncate() / clip.w;
+            if !ndc.is_finite()
+                || ndc.x.abs() > 1.0
+                || ndc.y.abs() > 1.0
+                || !(-1.0..=1.0).contains(&ndc.z)
+            {
+                return None;
+            }
+            Some(
+                rect.center()
+                    + egui::vec2(ndc.x * rect.width() * 0.5, -ndc.y * rect.height() * 0.5),
+            )
+        };
+        let (Some(from), Some(to)) = (
+            screen_point(motion.from_work_mm),
+            screen_point(motion.to_work_mm),
+        ) else {
+            return;
+        };
+        let painter = ui.painter().with_clip_rect(rect);
+        painter.line_segment([from, to], egui::Stroke::new(6.0, egui::Color32::BLACK));
+        painter.line_segment([from, to], egui::Stroke::new(3.0, egui::Color32::YELLOW));
+        for point in [from, to] {
+            painter.circle_filled(point, 4.0, egui::Color32::YELLOW);
+            painter.circle_stroke(point, 5.5, egui::Stroke::new(1.5, egui::Color32::BLACK));
+        }
+        let label_position = from + egui::vec2(9.0, -10.0);
+        painter.text(
+            label_position,
+            egui::Align2::LEFT_BOTTOM,
+            format!("Aviso NC · L{}", issue.source_line),
+            egui::FontId::proportional(13.0),
+            egui::Color32::YELLOW,
+        );
+    }
+
+    /// Abrir resultados NC de la operacion seleccionada y generar automaticamente.
+    pub fn open_for_operation(&mut self, index: usize) {
+        self.selected_operation = Some(index);
+        self.preview = None;
+        self.acknowledge_unverified = false;
+        self.pending_preview = true;
+        self.message.clear();
+        self.open = true;
+    }
+
+    /// Construir el NC final para reproduccion, sin seleccionar archivos externos.
+    pub fn playback_for_operation(
+        &mut self,
+        index: usize,
+        project: &Project,
+        panel: &TestParallelPanel,
+        post_ui: &PostUi,
+    ) -> Result<(String, [f64; 3], ToolSignature), String> {
+        let profiles = post_ui.profiles_for_export();
+        let profile = profiles
+            .iter()
+            .find(|p| p.id == self.selected_profile)
+            .or_else(|| profiles.first())
+            .ok_or("No hay postprocesador disponible")?;
+        if !profile.start_commands.trim().is_empty() {
+            return Err("Simulacion automatica no disponible con Start personalizado; puede mover la herramienta antes de CAM".into());
+        }
+        self.selected_profile = profile.id.clone();
+        let preview = self.generate_current(project, panel, profile, index)?;
+        let generated = preview.generated;
+        Ok((
+            generated.text,
+            generated.required_first_move_position_work_mm,
+            preview.tool_signature,
+        ))
+    }
+
+    /// La seleccion interna por indice del exportador anterior no puede apuntar
+    /// a otra operacion despues de mover filas en el arbol.
+    pub fn operation_reordered(&mut self) {
+        self.selected_operation = None;
+        self.preview = None;
+        self.acknowledge_unverified = false;
+        self.pending_playback = None;
+        self.message.clear();
+    }
+
     /// Devuelve una unica peticion; se envia el texto NC completo, no la trayectoria CAM.
     pub fn take_playback_request(&mut self) -> Option<(String, [f64; 3], ToolSignature)> {
         self.pending_playback.take()
@@ -149,12 +512,17 @@ impl NcExportUi {
             format!("Origen CNC no admitido por este postprocesador de tres ejes: {error}")
         })?;
         let generated = build_nc(&frame, linked, conditions, profile)?;
+        let summary = summarize_interpreted_nc(&generated, profile);
         Ok(NcPreview {
             operation_index: index,
             operation_name: operation.name.clone(),
             profile_id: profile.id.clone(),
             generated,
             tool_signature,
+            summary,
+            verification: None,
+            source_frame: frame,
+            model_session: project.model_session,
         })
     }
 
@@ -224,9 +592,9 @@ impl NcExportUi {
             return;
         }
         let mut open = self.open;
-        egui::Window::new("Postprocesar programa NC")
+        egui::Window::new("Resultados NC")
             .open(&mut open)
-            .default_size([870.0, 680.0])
+            .default_size([690.0, 520.0])
             .min_width(570.0)
             .resizable(true)
             .show(ctx, |ui| self.show_embedded(ui, project, panel, post_ui));
@@ -250,11 +618,13 @@ impl NcExportUi {
             .map(|(i, op)| (i, op.name.clone()))
             .collect();
         let profiles = post_ui.profiles_for_export();
+        // La ventana conserva el ultimo programa generado hasta que se regenere.
+        // Cambiar la seleccion del arbol no reemplaza ni invalida la ventana.
         if !available
             .iter()
             .any(|(i, _)| Some(*i) == self.selected_operation)
         {
-            self.selected_operation = available.first().map(|(i, _)| *i);
+            self.selected_operation = None;
             self.preview = None;
             self.acknowledge_unverified = false;
         }
@@ -264,33 +634,26 @@ impl NcExportUi {
             self.acknowledge_unverified = false;
         }
 
-        let mut operation = self.selected_operation;
+        let operation = self.selected_operation;
         let mut profile_id = self.selected_profile.clone();
         let mut acknowledge = self.acknowledge_unverified;
-        let mut preview_requested = false;
+        let mut preview_requested = std::mem::take(&mut self.pending_preview);
         let mut export_requested = false;
         let mut playback_requested = false;
 
-        ui.heading("Vista previa y exportacion G-code");
+        ui.heading("Resultados del programa NC");
         ui.small("Solo operaciones CAM calculadas, con cortes y validadas estructuralmente.");
         if available.is_empty() {
             ui.colored_label(egui::Color32::YELLOW,
                         "No hay una operacion CAM lista. Calcula primero un acabado paralelo con contactos y cortes.");
         }
-        ui.horizontal(|ui| {
-            ui.label("Operacion");
-            let selected_name = available
-                .iter()
-                .find(|(i, _)| Some(*i) == operation)
-                .map_or("Sin operacion", |(_, name)| name.as_str());
-            egui::ComboBox::from_id_salt("p2b3_operation")
-                .selected_text(selected_name)
-                .show_ui(ui, |ui| {
-                    for (i, name) in &available {
-                        ui.selectable_value(&mut operation, Some(*i), name.as_str());
-                    }
-                });
-        });
+        if let Some(index) = operation {
+            if let Some(op) = project.operations.items.get(index) {
+                ui.label(format!("Operacion: {}", op.name));
+            }
+        } else {
+            ui.label("Selecciona una operacion calculada en el arbol del proyecto.");
+        }
         ui.horizontal(|ui| {
             ui.label("Postprocesador");
             let selected_name = profiles
@@ -333,7 +696,7 @@ impl NcExportUi {
         if ui
             .add_enabled(
                 operation.is_some() && !profiles.is_empty(),
-                egui::Button::new("Generar vista previa NC"),
+                egui::Button::new("Regenerar NC"),
             )
             .clicked()
         {
@@ -351,25 +714,103 @@ impl NcExportUi {
                 generated.text.lines().count(),
                 generated.text.len()
             ));
+            ui.separator();
+            match &preview.summary {
+                Ok(summary) => {
+                    ui.label(format!(
+                        "G0: {} movimientos · {:.2} mm     G1: {} movimientos · {:.2} mm",
+                        summary.rapid_moves, summary.rapid_mm, summary.feed_moves, summary.feed_mm,
+                    ));
+                    ui.label(format!(
+                        "Tiempo programado G1: {:.2} min ({:.1} s)",
+                        summary.feed_minutes,
+                        summary.feed_minutes * 60.0,
+                    ));
+                    ui.small("No es el tiempo total: falta velocidad de G0, aceleraciones y tiempos auxiliares de la maquina.");
+                }
+                Err(reason) => {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("Metricas NC no disponibles: {reason}"),
+                    );
+                }
+            }
+            ui.separator();
+            ui.strong("Verificacion preliminar del NC interpretado");
+            match preview.verification.as_ref() {
+                None => {
+                    ui.small("Preparando avisos de verificacion...");
+                    ui.ctx().request_repaint();
+                }
+                Some(Err(reason)) => {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("Verificacion no disponible: {reason}"),
+                    );
+                }
+                Some(Ok(verification)) => {
+                    let report = &verification.report;
+                    ui.label(format!(
+                        "{} movimientos examinados · {} avisos ({} mostrados)",
+                        report.checked_moves,
+                        report.total_issues(),
+                        report.issues.len(),
+                    ));
+                    ui.small("Comprobacion conservadora contra el bruto ORIGINAL. No incluye material ya retirado, fijaciones, portaherramientas ni limites fisicos de maquina.");
+                    if report.total_issues() == 0 {
+                        ui.label("Sin avisos de este verificador preliminar (no certifica seguridad CNC).");
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(200.0)
+                        .show(ui, |ui| {
+                            for (issue_index, issue) in report.issues.iter().enumerate() {
+                                let description =
+                                    format!("L{} · {}", issue.source_line, issue.code.label());
+                                let color = if issue.severity == VerificationSeverity::Warning {
+                                    egui::Color32::YELLOW
+                                } else {
+                                    ui.visuals().text_color()
+                                };
+                                if verification.issue_motions[issue_index].is_some() {
+                                    let selected = self.focus_issue == Some(issue_index);
+                                    if ui
+                                        .selectable_label(
+                                            selected,
+                                            egui::RichText::new(description).color(color),
+                                        )
+                                        .on_hover_text("Resaltar este movimiento en el visor 3D")
+                                        .clicked()
+                                    {
+                                        self.focus_issue = Some(issue_index);
+                                        ui.ctx().request_repaint();
+                                    }
+                                } else {
+                                    ui.label(egui::RichText::new(description).color(color));
+                                }
+                            }
+                        });
+                    if report.omitted_issues > 0 {
+                        ui.small(format!(
+                            "{} avisos adicionales no mostrados.",
+                            report.omitted_issues
+                        ));
+                    }
+                }
+            }
             let xyz = generated.required_first_move_position_work_mm;
             ui.colored_label(egui::Color32::YELLOW, format!(
                         "PRECONDICION: antes del primer movimiento CAM, herramienta en coordenadas de trabajo X{:.6} Y{:.6} Z{:.6} mm.",
                         xyz[0], xyz[1], xyz[2]
                     ));
             ui.colored_label(egui::Color32::YELLOW,
-                        "NO interpretado ni simulado: Start/End, origen fisico, colisiones y estado inicial no verificados.");
+                        "Verificacion fisica pendiente: origen real, limites de maquina, colisiones y estado inicial no comprobados.");
             ui.separator();
-            ui.label("Vista textual: primeras 65 y ultimas 22 lineas si el NC es grande.");
-            let excerpt = preview_excerpt(&generated.text);
-            egui::ScrollArea::vertical()
-                .max_height(270.0)
-                .show(ui, |ui| {
-                    ui.monospace(excerpt);
-                });
-            ui.separator();
-            if ui.button("Reproducir G-code interpretado...").clicked() {
-                playback_requested = true;
-            }
+            ui.small("Para examinar el G-code completo, exporta el fichero y abrelo en un editor externo.");
+            ui.collapsing("Diagnostico avanzado", |ui| {
+                if ui.button("Reproductor NC tecnico").clicked() {
+                    playback_requested = true;
+                }
+            });
             ui.checkbox(&mut acknowledge,
                         "Reconozco que este NC aun no tiene simulacion final y requiere verificar origen, posicion inicial, herramienta, Start/End y maquina.");
             if ui
@@ -406,6 +847,7 @@ impl NcExportUi {
                 });
             match result {
                 Ok(preview) => {
+                    self.focus_issue = None;
                     self.preview = Some(preview);
                     self.acknowledge_unverified = false;
                     self.message = "NC generado en memoria. Revisa la precondicion y el texto antes de exportar.".into();
@@ -492,6 +934,55 @@ mod tests {
         nc_post::PostUnits,
         toolpath_links::{PlannedMove, PlannedMoveKind},
     };
+
+    #[test]
+    fn final_nc_summary_measures_g0_g1_and_programmed_feed_time() {
+        let profile = PostProcessorProfile::grbl_3axis_mm();
+        let generated = build_nc(&frame(), &path(), conditions(), &profile).unwrap();
+        let report = summarize_interpreted_nc(&generated, &profile).unwrap();
+        assert_eq!(report.rapid_moves, 1);
+        assert_eq!(report.feed_moves, 1);
+        assert!((report.rapid_mm - 25.4).abs() < 1.0e-6);
+        assert!((report.feed_mm - 12.7).abs() < 1.0e-6);
+        assert!((report.feed_minutes - 0.05).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn verification_focus_maps_motion_index_not_modal_event_index() {
+        let profile = PostProcessorProfile::grbl_3axis_mm();
+        let generated = build_nc(&frame(), &path(), conditions(), &profile).unwrap();
+        let trace = interpret_program(
+            &generated.text,
+            NcInitialState {
+                position_work_mm: generated.required_first_move_position_work_mm,
+                units: NcUnits::Millimeters,
+                distance_mode: NcDistanceMode::Absolute,
+                feed_mm_min: None,
+                spindle_rpm: None,
+                spindle_mode: NcSpindleMode::Stopped,
+                tool_number: None,
+            },
+        )
+        .unwrap();
+        let issues = vec![
+            VerificationIssue {
+                severity: VerificationSeverity::Warning,
+                code: cam_libre_visor::nc_verify::VerificationCode::RapidStockCandidate,
+                source_line: 7,
+                move_index: Some(1),
+            },
+            VerificationIssue {
+                severity: VerificationSeverity::Warning,
+                code: cam_libre_visor::nc_verify::VerificationCode::UnverifiedToolSelection,
+                source_line: 3,
+                move_index: None,
+            },
+        ];
+        let targets = issue_motion_targets(&trace, &issues);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].unwrap().kind, NcMotionKind::LinearFeed);
+        assert!(targets[1].is_none());
+    }
 
     fn frame() -> WorkFrame {
         let bounds = Bounds {

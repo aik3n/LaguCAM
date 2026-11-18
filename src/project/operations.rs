@@ -159,6 +159,7 @@ pub enum OperationStatus {
 #[derive(Clone, Debug)]
 pub struct Operation {
     pub name: String,
+    pub active: bool,
     pub kind: OperationKind,
     pub status: OperationStatus,
     pub tool_id: Option<ToolId>,
@@ -170,7 +171,29 @@ pub struct Operations {
     pub items: Vec<Operation>,
 }
 
+/// Traduce indices cuando un elemento se mueve de `from` a `to`.
+/// El resto de operaciones conserva su identidad y sus resultados calculados.
+pub fn remap_index_after_move(index: usize, from: usize, to: usize) -> usize {
+    if index == from {
+        to
+    } else if from < to && (from + 1..=to).contains(&index) {
+        index - 1
+    } else if to < from && (to..from).contains(&index) {
+        index + 1
+    } else {
+        index
+    }
+}
+
 impl Operations {
+    pub fn move_item(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.items.len() || to >= self.items.len() || from == to {
+            return false;
+        }
+        let moved = self.items.remove(from);
+        self.items.insert(to, moved);
+        true
+    }
     /// El usuario elige la estrategia despues, desde el editor de operacion.
     pub fn add_new(&mut self) -> Result<usize, String> {
         if self.items.len() >= 32 {
@@ -187,6 +210,7 @@ impl Operations {
         let index = self.items.len();
         self.items.push(Operation {
             name: format!("Nueva operación {serial:02}"),
+            active: true,
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: None,
@@ -216,12 +240,58 @@ impl Operations {
         let index = self.items.len();
         self.items.push(Operation {
             name: format!("Acabado paralelo TEST {serial:02}"),
+            active: true,
             kind: OperationKind::ParallelTest(ParallelTestParameters::default()),
             status: OperationStatus::NotCalculated,
             tool_id: None,
             toolpath_id: None,
         });
         Ok(index)
+    }
+}
+
+#[cfg(test)]
+mod reorder_tests {
+    use super::*;
+
+    #[test]
+    fn remapping_indices_preserves_identity_both_directions() {
+        assert_eq!(
+            (0..4)
+                .map(|i| remap_index_after_move(i, 0, 3))
+                .collect::<Vec<_>>(),
+            vec![3, 0, 1, 2]
+        );
+        assert_eq!(
+            (0..4)
+                .map(|i| remap_index_after_move(i, 3, 0))
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3, 0]
+        );
+        assert_eq!(remap_index_after_move(2, 2, 2), 2);
+    }
+
+    #[test]
+    fn operation_order_changes_without_changing_its_data() {
+        let mut ops = Operations::default();
+        for _ in 0..3 {
+            ops.add_new().unwrap();
+        }
+        ops.items[0].name = "Desbaste".into();
+        ops.items[1].name = "Semiacabado".into();
+        ops.items[2].name = "Acabado".into();
+        ops.items[0].active = false;
+        assert!(ops.move_item(0, 2));
+        assert_eq!(
+            ops.items
+                .iter()
+                .map(|op| op.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Semiacabado", "Acabado", "Desbaste"]
+        );
+        assert!(!ops.items[2].active);
+        assert!(!ops.move_item(1, 1));
+        assert!(!ops.move_item(10, 1));
     }
 }
 
