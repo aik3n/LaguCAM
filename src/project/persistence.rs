@@ -462,7 +462,7 @@ impl ProjectDocument {
 }
 
 /// Firma económica: ~320 KiB de lectura como máximo por comprobación, sin hash de 1 GiB.
-pub(super) fn sample_identity(path: &Path) -> Result<(u64, u32, String, Option<u64>), String> {
+pub(crate) fn sample_identity(path: &Path) -> Result<(u64, u32, String, Option<u64>), String> {
     let mut file =
         File::open(path).map_err(|e| format!("No se puede leer STL {}: {e}", path.display()))?;
     let metadata = file.metadata().map_err(|e| e.to_string())?;

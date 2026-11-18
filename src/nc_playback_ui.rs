@@ -6,7 +6,13 @@
 use crate::{
     material_ui::MaterialUi,
     navigation::Projection,
-    project::{Project, cam_coordinates::WorkFrame},
+    nc_tool_link::{evaluate_tool_link, trace_changes_tool},
+    project::{
+        Project, cam_coordinates::WorkFrame, model_transform::ModelTransform,
+        persistence::sample_identity,
+    },
+    tools::cam_adapter::ToolSignature,
+    tools::model::{Tool, ToolLibrary},
 };
 use cam_libre_visor::nc_verify::{
     CutterEnvelope, StockEnvelope, VerificationReport, VerificationSeverity, verify_trace,
@@ -19,7 +25,11 @@ use cam_libre_visor::{
     nc_interpreter::interpret_program,
 };
 use eframe::egui;
-use std::{fs, path::Path, time::Instant};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{Duration, Instant, SystemTime},
+};
 
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_VISIBLE_SEGMENTS: usize = 12_000;
@@ -87,20 +97,142 @@ pub enum NcWorkspaceView {
     Simulation,
     Verification,
 }
-struct Playback {
-    trace: NcTrace,
-    moves: Vec<DisplayMotion>,
-    frame: WorkFrame,
+/// Identidad de archivo de origen: ruta, metadatos y firma muestreada como CamProvenance.
+/// La firma se repite cada 5 segundos, no una vez por frame con STL gigantes.
+#[derive(Clone, Debug)]
+struct SourceStamp {
+    requested_path: PathBuf,
+    canonical_path: PathBuf,
+    len: u64,
+    triangles: u32,
+    modified: SystemTime,
+    sampled_fnv: String,
+}
+
+impl SourceStamp {
+    fn capture(path: Option<&Path>, project: &Project) -> Result<Self, String> {
+        let path = path.ok_or("No consta el archivo de origen STL en la sesion")?;
+        let model = project.model.as_ref().ok_or("No hay modelo STL cargado")?;
+        let canonical_path = path
+            .canonicalize()
+            .map_err(|e| format!("No se puede identificar el STL: {e}"))?;
+        let (len, triangles, sampled_fnv, _) = sample_identity(&canonical_path)?;
+        if len != model.size_bytes || triangles != model.triangles {
+            return Err("El STL ya no coincide con el modelo importado".into());
+        }
+        let metadata = fs::metadata(&canonical_path).map_err(|e| e.to_string())?;
+        let modified = metadata.modified().map_err(|e| e.to_string())?;
+        Ok(Self {
+            requested_path: path.to_path_buf(),
+            canonical_path,
+            len,
+            triangles,
+            modified,
+            sampled_fnv,
+        })
+    }
+
+    fn metadata_current(&self, selected_path: Option<&Path>) -> bool {
+        let Some(path) = selected_path else {
+            return false;
+        };
+        if path != self.requested_path
+            && path.canonicalize().ok().as_deref() != Some(self.canonical_path.as_path())
+        {
+            return false;
+        }
+        fs::metadata(&self.canonical_path).is_ok_and(|m| {
+            m.is_file() && m.len() == self.len && m.modified().is_ok_and(|v| v == self.modified)
+        })
+    }
+
+    fn samples_current(&self) -> bool {
+        sample_identity(&self.canonical_path).is_ok_and(|(len, triangles, signature, _)| {
+            len == self.len && triangles == self.triangles && signature == self.sampled_fnv
+        })
+    }
+}
+
+/// Identidad de los datos geometricos y del texto NC que originaron la reproduccion.
+#[derive(Clone, Debug)]
+struct PlaybackSession {
+    source: SourceStamp,
+    model_session: u64,
+    model_transform: ModelTransform,
     model_name: String,
     model_triangles: u32,
     model_size_bytes: u64,
     model_bounds: crate::stl::Bounds,
+    model_raw_bounds: crate::stl::Bounds,
+    stock_min: [f64; 3],
+    stock_size: [f64; 3],
+    nc_text_version: u64,
 }
 
-type VerificationSnapshot = (VerificationReport, String, u64, [f64; 3], [f64; 3]);
+impl PlaybackSession {
+    fn capture(
+        project: &Project,
+        source: Option<&Path>,
+        nc_text_version: u64,
+    ) -> Result<Self, String> {
+        let model = project.model.as_ref().ok_or("No hay modelo STL cargado")?;
+        let stock = project.stock.as_ref().ok_or("No hay bruto definido")?;
+        stock.validate().map_err(str::to_owned)?;
+        Ok(Self {
+            source: SourceStamp::capture(source, project)?,
+            model_session: project.model_session,
+            model_transform: project.model_transform,
+            model_name: model.name.clone(),
+            model_triangles: model.triangles,
+            model_size_bytes: model.size_bytes,
+            model_bounds: model.bounds,
+            model_raw_bounds: model.raw_bounds,
+            stock_min: stock.min,
+            stock_size: stock.size,
+            nc_text_version,
+        })
+    }
+
+    fn is_current(
+        &self,
+        project: &Project,
+        source_path: Option<&Path>,
+        nc_text_version: u64,
+    ) -> bool {
+        let (Some(model), Some(stock)) = (&project.model, &project.stock) else {
+            return false;
+        };
+        self.model_session == project.model_session
+            && self.model_transform == project.model_transform
+            && self.model_name == model.name
+            && self.model_triangles == model.triangles
+            && self.model_size_bytes == model.size_bytes
+            && self.model_bounds.min == model.bounds.min
+            && self.model_bounds.max == model.bounds.max
+            && self.model_raw_bounds.min == model.raw_bounds.min
+            && self.model_raw_bounds.max == model.raw_bounds.max
+            && self.stock_min == stock.min
+            && self.stock_size == stock.size
+            && self.nc_text_version == nc_text_version
+            && self.source.metadata_current(source_path)
+    }
+}
+
+struct Playback {
+    trace: NcTrace,
+    moves: Vec<DisplayMotion>,
+    frame: WorkFrame,
+    identity: PlaybackSession,
+}
+
+type VerificationSnapshot = (VerificationReport, Tool, [f64; 3], [f64; 3]);
 
 pub struct NcPlaybackUi {
     pub open: bool,
+    /// Se incrementa en cada carga de texto NC; el texto no es editable directamente.
+    nc_text_version: u64,
+    source_path: Option<PathBuf>,
+    last_source_check: Option<Instant>,
     nc_text: String,
     source_name: String,
     proposed_start: Option<[f64; 3]>,
@@ -116,6 +248,7 @@ pub struct NcPlaybackUi {
     scene_renderer:
         std::sync::Arc<egui::mutex::Mutex<Option<Result<crate::nc_scene_gl::Renderer, String>>>>,
     material: MaterialUi,
+    source_tool: Option<ToolSignature>,
     verify_tool_id: Option<String>,
     verification: Option<VerificationSnapshot>,
     verify_message: String,
@@ -126,6 +259,9 @@ impl Default for NcPlaybackUi {
     fn default() -> Self {
         Self {
             open: false,
+            nc_text_version: 0,
+            source_path: None,
+            last_source_check: None,
             nc_text: String::new(),
             source_name: String::new(),
             proposed_start: None,
@@ -140,6 +276,7 @@ impl Default for NcPlaybackUi {
             show_cutter: true,
             scene_renderer: std::sync::Arc::new(egui::mutex::Mutex::new(None)),
             material: MaterialUi::default(),
+            source_tool: None,
             verify_tool_id: None,
             verification: None,
             verify_message: String::new(),
@@ -150,9 +287,13 @@ impl Default for NcPlaybackUi {
 
 impl NcPlaybackUi {
     pub fn clear(&mut self) {
+        self.nc_text_version = self.nc_text_version.wrapping_add(1);
+        self.last_source_check = None;
         self.verification = None;
         self.verify_message.clear();
-        self.material.clear();
+        self.verify_tool_id = None;
+        self.source_tool = None;
+        self.material.select_source_tool(None);
         self.playback = None;
         self.playing = false;
         self.last_update = None;
@@ -164,10 +305,81 @@ impl NcPlaybackUi {
         self.message.clear();
     }
 
+    /// Validar antes del visor, independientemente de la pestana activa.
+    pub fn sync_session(
+        &mut self,
+        project: &Project,
+        library: &ToolLibrary,
+        source_path: Option<&Path>,
+    ) {
+        self.source_path = source_path.map(Path::to_path_buf);
+        if self.playback.is_some() && !self.projection_current(project) {
+            self.invalidate_derived(
+                "STL, transformacion, bruto, origen o NC modificados: vuelve a interpretar",
+            );
+            return;
+        }
+        if self.playback.is_some()
+            && self
+                .last_source_check
+                .is_none_or(|time| time.elapsed() >= Duration::from_secs(5))
+        {
+            self.last_source_check = Some(Instant::now());
+            if !self
+                .playback
+                .as_ref()
+                .is_some_and(|pb| pb.identity.source.samples_current())
+            {
+                self.invalidate_derived(
+                    "El archivo STL de origen ha cambiado: vuelve a importarlo y a interpretar NC",
+                );
+                return;
+            }
+        }
+        self.material.refresh(project, library);
+        if self
+            .verification
+            .as_ref()
+            .is_some_and(|(_, tool, min, max)| {
+                library.get(&tool.id) != Some(tool)
+                    || project
+                        .stock
+                        .as_ref()
+                        .and_then(|stock| stock.max().map(|limit| (stock.min, limit)))
+                        != Some((*min, *max))
+            })
+        {
+            self.verification = None;
+            self.verify_message =
+                "Fresa o bruto modificados: vuelve a verificar el programa NC".into();
+        }
+    }
+
+    fn invalidate_derived(&mut self, message: &str) {
+        self.material.clear(); // Cancela los calculos en segundo plano.
+        self.verification = None;
+        self.verify_message.clear();
+        self.playback = None;
+        self.playhead = 0.0;
+        self.playing = false;
+        self.last_update = None;
+        self.last_source_check = None;
+        self.message = message.into();
+    }
+
     /// Recibe exactamente la salida textual del postprocesador, no el camino CAM.
     /// La posicion sugerida NO se adopta automaticamente: Start podria mover la herramienta.
-    pub fn load_generated(&mut self, text: String, first_cam_position: [f64; 3]) {
+    pub fn load_generated(
+        &mut self,
+        text: String,
+        first_cam_position: [f64; 3],
+        tool_signature: ToolSignature,
+    ) {
         self.clear();
+        self.material
+            .select_source_tool(Some(&tool_signature.tool_id));
+        self.verify_tool_id = Some(tool_signature.tool_id.clone());
+        self.source_tool = Some(tool_signature);
         self.nc_text = text;
         self.source_name = "Vista previa NC de LaguCAM".into();
         self.proposed_start = Some(first_cam_position);
@@ -236,16 +448,15 @@ impl NcPlaybackUi {
         let trace =
             interpret_program(&self.nc_text, self.initial_state()).map_err(|e| e.to_string())?;
         let moves = motion_list(&trace);
-        let model = project.model.as_ref().ok_or("No hay STL cargado")?;
+        let identity =
+            PlaybackSession::capture(project, self.source_path.as_deref(), self.nc_text_version)?;
         self.playback = Some(Playback {
             trace,
             moves,
             frame,
-            model_name: model.name.clone(),
-            model_triangles: model.triangles,
-            model_size_bytes: model.size_bytes,
-            model_bounds: model.bounds,
+            identity,
         });
+        self.last_source_check = Some(Instant::now());
         self.playing = false;
         self.last_update = None;
         self.playhead = 0.0;
@@ -256,14 +467,9 @@ impl NcPlaybackUi {
         let Some(playback) = &self.playback else {
             return false;
         };
-        let Some(model) = &project.model else {
-            return false;
-        };
-        model.name == playback.model_name
-            && model.triangles == playback.model_triangles
-            && model.size_bytes == playback.model_size_bytes
-            && model.bounds.min == playback.model_bounds.min
-            && model.bounds.max == playback.model_bounds.max
+        playback
+            .identity
+            .is_current(project, self.source_path.as_deref(), self.nc_text_version)
             && Self::frame(project).is_ok_and(|frame| frame == playback.frame)
     }
 
@@ -301,12 +507,9 @@ impl NcPlaybackUi {
     ) {
         let ctx = ui.ctx().clone();
         if self.playback.is_some() && !self.projection_current(project) {
-            self.verification = None;
-            self.material.clear();
-            self.playback = None;
-            self.playing = false;
-            self.last_update = None;
-            self.message = "Modelo, bruto u origen modificados: vuelve a interpretar el NC".into();
+            self.invalidate_derived(
+                "STL, transformacion, bruto, origen o NC modificados: vuelve a interpretar",
+            );
         }
         let now = Instant::now();
         if self.playing
@@ -446,6 +649,19 @@ impl NcPlaybackUi {
             if let Some(pb) = &self.playback {
                 self.material
                     .show(ui, project, tool_library, &pb.trace, self.playhead);
+                let selected_tool = self
+                    .material
+                    .selected_tool_id()
+                    .and_then(|id| tool_library.get(id));
+                let link = evaluate_tool_link(
+                    self.source_tool.as_ref(),
+                    selected_tool,
+                    trace_changes_tool(&pb.trace),
+                );
+                ui.colored_label(
+                    link.color(),
+                    format!("Fresa de simulacion: {}", link.label()),
+                );
             }
         }
         if mode != NcWorkspaceView::Simulation && self.playback.is_some() {
@@ -469,6 +685,13 @@ impl NcPlaybackUi {
                                     }
                                 }
                             });
+                        let selected_tool = chosen.as_deref().and_then(|id| tool_library.get(id));
+                        let link = evaluate_tool_link(
+                            self.source_tool.as_ref(), selected_tool, self.playback.as_ref().is_some_and(|pb| trace_changes_tool(&pb.trace))
+                        );
+                        ui.colored_label(link.color(), format!(
+                            "Fresa de verificacion: {}", link.label()
+                        ));
                         if chosen != self.verify_tool_id {
                             self.verify_tool_id = chosen;
                             self.verification = None;
@@ -476,8 +699,8 @@ impl NcPlaybackUi {
                         if ui.button("Verificar movimientos del G-code").clicked() {
                             verify_requested = true;
                         }
-                        if let Some((report, tool_id, tool_revision, stock_min, stock_max)) = &self.verification
-                            && tool_library.get(tool_id).is_some_and(|tool| tool.revision == *tool_revision)
+                        if let Some((report, verified_tool, stock_min, stock_max)) = &self.verification
+                            && tool_library.get(&verified_tool.id) == Some(verified_tool)
                             && project.stock.as_ref().and_then(|stock| stock.max().map(|max| (stock.min, max)))
                                 .is_some_and(|(min, max)| min == *stock_min && max == *stock_max)
                         {
@@ -586,7 +809,7 @@ impl NcPlaybackUi {
                             .map_err(str::to_owned)
                     },
                 )?;
-                Ok((report, tool.id.clone(), tool.revision, stock.min, max))
+                Ok((report, tool.clone(), stock.min, max))
             })();
             match result {
                 Ok(report) => {
@@ -817,6 +1040,76 @@ impl NcPlaybackUi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        project::{model::ModelReference, stock::Stock},
+        stl::Bounds,
+    };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn rotation_with_identical_bounds_invalidates_nc_and_material() {
+        let path = std::env::temp_dir().join(format!(
+            "lagucam_nc_session_{}_{}.stl",
+            std::process::id(),
+            NEXT_TMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut bytes = vec![0u8; 134];
+        bytes[80..84].copy_from_slice(&1u32.to_le_bytes());
+        fs::write(&path, bytes).unwrap();
+        let bounds = Bounds {
+            min: [-2.0, -2.0, 0.0],
+            max: [2.0, 2.0, 4.0],
+        };
+        let mut project = Project {
+            model_session: 7,
+            model: Some(ModelReference {
+                name: "symmetric.stl".into(),
+                bounds,
+                raw_bounds: bounds,
+                triangles: 1,
+                size_bytes: 134,
+            }),
+            stock: Some(Stock::from_bounds(&bounds)),
+            ..Project::default()
+        };
+        let mut player = NcPlaybackUi {
+            source_path: Some(path.clone()),
+            nc_text: "G21\nG90\nG94\nS8000 M3\nG0 X1 Y0 Z5\nF600 G1 Z0\nM5\nM30\n".into(),
+            initial_xyz: [0.0, 0.0, 5.0],
+            initial_confirmed: true,
+            ..NcPlaybackUi::default()
+        };
+        player.interpret(&project).unwrap();
+        assert!(player.projection_current(&project));
+
+        let initial_bounds = project.model.as_ref().unwrap().bounds;
+        let mut rotated = project.model_transform;
+        rotated.rotation_degrees[2] = 180.0;
+        // Construir explicitamente el peor caso: distinto transform, mismo AABB bit a bit.
+        project.model_transform = rotated;
+        assert_eq!(
+            initial_bounds.min,
+            project.model.as_ref().unwrap().bounds.min
+        );
+        assert_eq!(
+            initial_bounds.max,
+            project.model.as_ref().unwrap().bounds.max
+        );
+        assert!(!player.projection_current(&project));
+
+        project.model_transform = ModelTransform::default();
+        assert!(player.projection_current(&project));
+        project.model_session += 1;
+        assert!(!player.projection_current(&project));
+        project.model_session -= 1;
+        assert!(player.projection_current(&project));
+        player.nc_text_version += 1;
+        assert!(!player.projection_current(&project));
+        fs::remove_file(path).unwrap();
+    }
+
     fn simple() -> NcTrace {
         interpret_program(
             "G21\nG90\nG94\nS8000 M3\nG0 X10 Y0 Z5\nF600 G1 Z0\nM5\nM30\n",

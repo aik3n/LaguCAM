@@ -8,6 +8,7 @@ mod navigation;
 mod nc_export_ui;
 mod nc_playback_ui;
 mod nc_scene_gl;
+mod nc_tool_link;
 mod nc_tool_overlay;
 mod options;
 mod overlay;
@@ -1548,6 +1549,11 @@ impl eframe::App for App {
         self.test_parallel
             .sync_tools(&mut self.project, &self.tool_library);
         self.test_parallel.poll(ui.ctx(), &mut self.project);
+        self.nc_playback_ui.sync_session(
+            &self.project,
+            &self.tool_library,
+            self.current_stl_path.as_deref(),
+        );
         egui::Panel::top("main_menu").show(ui, |ui| self.menu(ui));
         if self.busy()
             || self.sample_profile_job.is_some()
@@ -1625,8 +1631,9 @@ impl eframe::App for App {
             self.nc_export_ui
                 .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
         }
-        if let Some((text, xyz)) = self.nc_export_ui.take_playback_request() {
-            self.nc_playback_ui.load_generated(text, xyz);
+        if let Some((text, xyz, tool_signature)) = self.nc_export_ui.take_playback_request() {
+            self.nc_playback_ui
+                .load_generated(text, xyz, tool_signature);
             self.cam_workspace.open = true;
             self.cam_workspace.tab = cam_workspace::Tab::Simulation;
         }

@@ -11,6 +11,9 @@ pub mod selection;
 pub mod stock;
 
 use crate::stl::StlInfo;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_MODEL_SESSION: AtomicU64 = AtomicU64::new(1);
 use display::StockDisplay;
 use model::ModelReference;
 use model_transform::ModelTransform;
@@ -20,6 +23,8 @@ use selection::Selection;
 use stock::Stock;
 
 pub struct Project {
+    /// Identificador de carga en memoria. No forma parte del archivo .lagucam.
+    pub model_session: u64,
     pub model: Option<ModelReference>,
     pub model_transform: ModelTransform,
     pub stock: Option<Stock>,
@@ -33,6 +38,7 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
+            model_session: 0,
             model: None,
             model_transform: ModelTransform::default(),
             stock: None,
@@ -71,6 +77,7 @@ impl Project {
     }
 
     pub fn loaded(&mut self, name: String, info: StlInfo) {
+        self.model_session = NEXT_MODEL_SESSION.fetch_add(1, Ordering::Relaxed);
         let model = ModelReference::from_stl(name, info);
         self.stock = Some(Stock::from_bounds(&model.bounds));
         self.stock_display = StockDisplay::default();

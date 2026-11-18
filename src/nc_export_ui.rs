@@ -4,6 +4,7 @@
 //! El NC no se simula aqui: el interprete independiente llegara en P2-C.
 //! El fichero se regenera justo al guardar, sin exportar una vista previa obsoleta.
 
+use crate::tools::cam_adapter::ToolSignature;
 use crate::{
     post_ui::PostUi,
     project::{Project, cam_coordinates::WorkFrame, operations::OperationStatus},
@@ -22,6 +23,7 @@ struct NcPreview {
     operation_name: String,
     profile_id: String,
     generated: GeneratedNc,
+    tool_signature: ToolSignature,
 }
 
 #[derive(Default)]
@@ -32,7 +34,7 @@ pub struct NcExportUi {
     preview: Option<NcPreview>,
     acknowledge_unverified: bool,
     message: String,
-    pending_playback: Option<(String, [f64; 3])>,
+    pending_playback: Option<(String, [f64; 3], ToolSignature)>,
 }
 
 /// Contrato puro: el post solo recibe coordenadas de trabajo en mm.
@@ -109,7 +111,7 @@ fn preview_excerpt(text: &str) -> String {
 
 impl NcExportUi {
     /// Devuelve una unica peticion; se envia el texto NC completo, no la trayectoria CAM.
-    pub fn take_playback_request(&mut self) -> Option<(String, [f64; 3])> {
+    pub fn take_playback_request(&mut self) -> Option<(String, [f64; 3], ToolSignature)> {
         self.pending_playback.take()
     }
 
@@ -133,6 +135,14 @@ impl NcExportUi {
         let (linked, conditions) = panel
             .nc_result(index)
             .ok_or("El resultado CAM ha sido invalidado o no contiene cortes")?;
+        let tool_signature = panel
+            .nc_tool_signature(index)
+            .ok_or("La operacion ya no conserva procedencia de herramienta CAM")?;
+        if operation.tool_id.as_deref() != Some(tool_signature.tool_id.as_str()) {
+            return Err(
+                "La herramienta asignada no coincide con el calculo CAM; vuelve a calcular".into(),
+            );
+        }
         let model = project.model.as_ref().ok_or("No hay modelo cargado")?;
         let stock = project.stock.as_ref().ok_or("No hay bruto definido")?;
         let frame = WorkFrame::new(&project.origin, stock, &model.bounds).map_err(|error| {
@@ -144,6 +154,7 @@ impl NcExportUi {
             operation_name: operation.name.clone(),
             profile_id: profile.id.clone(),
             generated,
+            tool_signature,
         })
     }
 
@@ -166,6 +177,7 @@ impl NcExportUi {
         }
         let current = self.generate_current(project, panel, profile, index)?;
         if current.operation_name != previous.operation_name
+            || current.tool_signature != previous.tool_signature
             || current.generated != previous.generated
         {
             self.preview = None;
@@ -329,6 +341,10 @@ impl NcExportUi {
         }
         if selected_matches_preview && let Some(preview) = self.preview.as_ref() {
             let generated = &preview.generated;
+            ui.small(format!(
+                "Herramienta de origen CAM: {} (UUID + SHA-256 geometrico)",
+                preview.tool_signature.tool_id
+            ));
             ui.label(format!(
                 "{} movimientos CAM · {} lineas NC · {} bytes",
                 generated.cam_move_count,
@@ -419,6 +435,7 @@ impl NcExportUi {
                     if current.operation_index != previous.operation_index
                         || current.operation_name != previous.operation_name
                         || current.profile_id != previous.profile_id
+                        || current.tool_signature != previous.tool_signature
                         || current.generated != previous.generated
                     {
                         return Err(
@@ -429,6 +446,7 @@ impl NcExportUi {
                     Ok((
                         current.generated.text.clone(),
                         current.generated.required_first_move_position_work_mm,
+                        current.tool_signature.clone(),
                     ))
                 });
             match result {

@@ -76,6 +76,17 @@ fn supported_spec(tool: &Tool) -> Option<CutterSpec> {
 }
 
 impl MaterialUi {
+    /// Al cambiar de programa, no reutilizar una seleccion de su programa anterior.
+    /// Para NC generado se propone la fresa de su operacion; se puede cambiar a mano.
+    pub fn select_source_tool(&mut self, tool_id: Option<&str>) {
+        self.clear();
+        self.selected_tool_id = tool_id.map(str::to_owned);
+    }
+
+    pub fn selected_tool_id(&self) -> Option<&str> {
+        self.selected_tool_id.as_deref()
+    }
+
     /// Vista aislada solo si existe material calculado y visible.
     /// La herramienta tiene la misma identidad y geometria que la simulacion calculada.
     /// Si el resultado se invalida, no se muestra una fresa obsoleta.
@@ -202,14 +213,8 @@ impl MaterialUi {
         }
     }
 
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        project: &Project,
-        library: &ToolLibrary,
-        trace: &NcTrace,
-        playhead: f64,
-    ) {
+    /// Comprueba dependencias incluso cuando no se muestra la pestana Simulacion.
+    pub fn refresh(&mut self, project: &Project, library: &ToolLibrary) {
         if self
             .snapshot
             .as_ref()
@@ -218,6 +223,17 @@ impl MaterialUi {
             self.clear();
             self.message = "Fresa o bruto modificado: recalcula el material".into();
         }
+    }
+
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        library: &ToolLibrary,
+        trace: &NcTrace,
+        playhead: f64,
+    ) {
+        self.refresh(project, library);
         self.poll(ui.ctx());
         if let Some(field) = &mut self.field {
             field.seek(playhead);

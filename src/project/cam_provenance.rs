@@ -72,6 +72,11 @@ pub struct CamProvenance {
 }
 
 impl CamProvenance {
+    /// Firma efectiva conservada junto al resultado CAM, no tomada de una seleccion UI.
+    pub fn tool_signature(&self) -> &ToolSignature {
+        &self.tool
+    }
+
     pub fn capture(
         project: &Project,
         operation_index: usize,

@@ -1,6 +1,7 @@
 //! Acabado paralelo — TEST. Previsualizacion geometrica, sin G-code ni movimientos CNC.
 //! El motor solo calcula alturas de contacto para una punta esferica; esta
 //! capa decide donde muestrear, y dibuja los segmentos entre esos puntos.
+use crate::tools::cam_adapter::ToolSignature;
 use crate::{
     project::{
         Project,
@@ -448,6 +449,17 @@ impl TestParallelPanel {
         }
         Some((&outcome.linked, outcome.conditions))
     }
+    /// Identidad exacta de la herramienta del calculo vigente.
+    pub fn nc_tool_signature(&self, index: usize) -> Option<ToolSignature> {
+        self.nc_result(index)?;
+        Some(
+            self.result_provenances
+                .get(&index)?
+                .tool_signature()
+                .clone(),
+        )
+    }
+
     pub fn open_editor(&mut self, index: usize, project: &Project) {
         if let Some(op) = project.operations.items.get(index) {
             // Solo un editor: al editar otra operacion se descarta el borrador anterior.
