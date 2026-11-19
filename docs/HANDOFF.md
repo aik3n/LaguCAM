@@ -1,45 +1,45 @@
 # Traspaso operativo del Chat Master — LaguCAM
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: b5b15248ecf357c005dc2fadb7388e545d25cfa7 -->
 
-**Corte preparado:** 2026-11-18. **HEAD publico inspeccionado:** `85dfda28658d5f8e779caae97838742d1444be73` (`main`, «operaciones multiples»). Base local no inspeccionada; aplicar parche `.ps1` de documentacion es responsabilidad del usuario. **Sin ejecucion propia de cargo, GUI, benchmark ni CNC sobre ese SHA.** El commit documental posterior no existe mientras el usuario no lo realice.
+**Corte preparado:** 2026-11-19. **Código público inspeccionado:** [`b5b15248ecf357c005dc2fadb7388e545d25cfa7`](https://github.com/aik3n/LaguCAM/commit/b5b15248ecf357c005dc2fadb7388e545d25cfa7). Base local no leída directamente por el Master; pruebas Windows **reportadas por el usuario**. El commit documental posterior todavía corresponde al usuario.
 
-## Autoridad y lectura
+## Autoridad y fuentes
 
-- Usuario: decide prioridades, acepta alcance, ejecuta parches y tests en Windows, realiza todo Git y autoriza cualquier prueba en maquina.
-- Master: audita, documenta y coordina; no realiza implementacion de codigo salvo delegacion expresa.
-- Integrador CAM: responde del recorrido completo. Especialistas Motor, Acabado, Post/Maquina y UI/UX intervienen por contratos. Desbaste permanece pospuesto.
-- Orden: `../AGENTS.md` → `WORKFLOW.md` → `CHAT_ROLES.md` → `DECISIONS.md` → `STATUS.md` → `ROADMAP.md` → `ARCHITECTURE.md` → `TESTING.md`.
-- `STATUS.md` es la unica referencia de estado y evidencias; `ROADMAP.md` tareas; `DECISIONS.md` acuerdos y propuestas. No deducir resultados de test desde un commit.
+- **Usuario:** acepta hitos, ejecuta parches y pruebas en Windows, hace Git y decide el uso real de CNC.
+- **Chat Master:** debate, arquitectura, auditoría independiente y documentación; no ejecuta cambios de código ni Git.
+- **Integrador CAM:** implementa el flujo completo según los nueve contratos. Especialistas consultivos por responsabilidad; desbaste aún pospuesto.
+- Consultar `../AGENTS.md` → `WORKFLOW.md` → `CHAT_ROLES.md` → `RESPONSABILIDADES_CAM_NC.md` → `DECISIONS.md` → `STATUS.md` → `ROADMAP.md` → `ARCHITECTURE.md`.
+- `STATUS.md` es la referencia técnica del corte y de las evidencias; documentos antiguos siguen siendo historia, no estado vigente.
 
-## Hitos mas recientes inspeccionados
+## Hitos recientes y evidencia
 
-| SHA | Novedad | Garantia real |
+| SHA | Implementación o cambio | Evidencia / límite |
 | --- | --- | --- |
-| `59e8f1a` | Primer post/NC experimental y exportacion | No NC apto para mecanizado |
-| `de8c0b6` / `d32101e` / `1c64ceb` | Interpretacion NC, simulacion 2,5D, visor OpenGL y comprobacion preliminar | G53 y colisiones reales aun no cubiertos |
-| `d108dfad` | Identidad de sesion y correspondencia UUID/hash de herramienta | Requiere regresion GUI y pruebas integradas |
-| `0f4c811` | UX de operacion individual y resumen/avisos NC | Tiempo G1 no es tiempo fisico de ciclo |
-| **`85dfda2`** | Calculo conjunto de operaciones activas, cache, cancelacion, indices | **Sin NC conjunto ni simulacion conjunta** |
+| `85dfda2` | Cálculo secuencial de operaciones activas (histórico) | Aún sin NC conjunto en aquel corte; no extrapolar |
+| `dd228bf` | Estado previo a formalizar los nueve contratos | D-048 y `RESPONSABILIDADES_CAM_NC.md` aceptados posteriormente |
+| `6325e521` | Extracción a `cam_plan.rs` de enlaces geométricos entre operaciones | **373 tests Windows reportados**; regresión NC favorable |
+| **`b5b15248`** | `emit_plan` común para individual y conjunto, `plan_single` sin inventar despeje, políticas específicas conservadas | **379 tests Windows reportados** y `fmt`, `clippy -D warnings`, build Release correctos; revisión estática favorable |
 
-## Decisiones nuevas del responsable (2026-11-18)
+**Detalle de validación del último hito:** el usuario ejecutó `cargo test --locked --all-targets` (129 + 211 + 6 + 6 + 6 + 7 + 5 + 9 = 379; 0 fallos), `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets -- -D warnings` y `cargo build --locked --release`, todos correctos. No se acreditó un `cargo check` separado ni pruebas GUI/CNC. El log no certifica por sí solo el SHA exacto del directorio local.
 
-- **D-045 ACEPTADA:** cada estrategia comienza en su XY de operacion a Z de seguridad sobre el bruto definida por la propia estrategia; prohibido mover XY para buscar aparcamiento/homing de maquina. Enlaces internos entre pasadas siguen permitidos a despeje adecuado.
-- **D-046 ACEPTADA como reparto de responsabilidad:** posicion inicial, homing, montaje y origen fisicos del operador; retirada inicial **opcional** solo Z mediante G53, configurada en post/perfil de maquina, sin cota universal ni seguridad presumida. En este SHA `nc_interpreter.rs` rechaza G53 y un Start personalizado puede impedir analisis automatico.
-- **D-047 PROPUESTA:** planificador global para transiciones entre operaciones; no atribuirlo a estrategias. No confundir calculo en lote de `85dfda2` con programa NC conjunto.
+## Contratos y diferencias que deben conservarse
 
-## Riesgos no cerrados
+- `cam_plan.rs` produce transiciones neutrales; `nc_post.rs` no decide enlaces geométricos.
+- `generate_program()` admite Start/End y no exige despeje de lote; `generate_batch_program()` exige extremos a despeje válido, rechaza Start/End significativos y conserva solicitudes T/M6, incluso repetidas.
+- `GeneratedNc`, precisión, unidades, avances, husillo, movimientos, orden modal y precedencia de errores deben permanecer estables sin aprobación de cambio de contrato.
+- C8/C9 exigen incidencias UI contextuales y **sin** casillas de reconocimiento de riesgos. Las pantallas de exportación aún contienen esas casillas: contrato aprobado, implementación pendiente.
 
-1. No certificacion de seguridad CNC: colisiones de fresa/portaherramientas/sujeciones y material remanente ausentes; NC de ejemplo pueden contener entradas verticales profundas.
-2. G53 no interpretado; perfil de maquina/homing/limites FluidNC real pendiente. Posicion teórica de CAM no es posicion fisica CNC.
-3. Validar operaciones activas, reordenacion, error intermedio, cancelacion, guardado/recarga y caducidad en lote; no hay pruebas de ejecucion de `85dfda2` acreditadas.
-4. Inspeccionar fallback visual de `preview_matrix()` a identidad y coherencia del modo aislado y render; sin refactorizacion masiva por tamano de fichero.
-5. Nombres historicos de hitos en codigo/tests pendientes de limpieza selectiva, conservando cobertura.
+## Riesgos abiertos
 
-## Proximo trabajo concreto
+1. G53, estados de máquina, homing y perfil FluidNC no verificados; M6 es una solicitud NC, no una simulación de cambio físico.
+2. NC conjunto generado e interpretado, **sin** simulación multiherramienta de material ni validación de colisiones/fijaciones.
+3. Pruebas GUI integrales de cálculo/cancelación/reordenación/exportación, y benchmarks CAM/simulación con STL grande pendientes.
+4. Riesgo de mensajes excesivos y casillas de aceptación en UI, explícitamente contrario a C8/C9; resolver en hito separado.
+5. No considerar seguridad CNC demostrada por compilación, G-code ni simulación 2,5D.
 
-1. Contrastar archivos locales contra `85dfda2`; si hay cambios posteriores, **no** aplicar un parche preparado para otra base sin revisarlo.
-2. Solicitar salida real de `fmt`, `check`, `test`, `clippy`, release y pruebas GUI del calculo individual y conjunto; registrar ejecutor, entorno y SHA.
-3. Preparar con Integrador/Acabado un test de contrato de punto inicial XY/Z y continuidad; no cambiar estrategia mientras no exista alcance aceptado.
-4. Con Post/Maquina proponer contrato de `G53` y estados de maquina, **sin anunciarlo implementado**.
-5. Actualizar `HANDOFF.md` nuevamente cuando se validen los siguientes cambios; el usuario decide cuando hacer commit y si cambia de Master.
+## Próximo paso y relevo
+
+1. Aplicar y validar el **parche exclusivamente documental** sobre `STATUS.md`, `CHANGELOG.md` y `HANDOFF.md`; el usuario hace commit/push si lo considera oportuno.
+2. El usuario decidirá el siguiente hito: eliminación de fricción UI según C8/C9, contrato de preparación de máquina/G53 o revisión técnica del motor de simulación. **No hay implementación autorizada aún.**
+3. Ante cambio de Master, contrastar el SHA del árbol local con el corte y las evidencias antes de preparar parches nuevos. Un parche previo no se considera aplicado por estar escrito en el chat.

@@ -1,6 +1,15 @@
 # Historial de LaguCAM
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: b5b15248ecf357c005dc2fadb7388e545d25cfa7 -->
+
+## 2026-11-19 — Contratos CAM/NC y unificación del motor post (`b5b15248`)
+
+- **Código revisado:** [`b5b15248ecf357c005dc2fadb7388e545d25cfa7`](https://github.com/aik3n/LaguCAM/commit/b5b15248ecf357c005dc2fadb7388e545d25cfa7); comparación estática con `6325e521`. No se ha inspeccionado directamente el árbol local.
+- **Documentación de contrato:** D-048 y `RESPONSABILIDADES_CAM_NC.md` fijan nueve responsabilidades (estrategia, planificador, post, máquina, intérprete, simulador, verificador, UI y operador); aceptación normativa distinta del cumplimiento completo.
+- **Hito `6325e521`:** nuevo `cam_plan.rs` para enlaces neutrales entre operaciones, sin generar G-code; pruebas golden de NC conjunto.
+- **Hito `b5b15248`:** emisor NC interno común (`emit_plan`), `plan_single` con trayectorias prestadas; APIs públicas individual/conjunto preservadas, con Start/End y despejes específicos y T/M6 explícito.
+- **Validación reportada por el usuario en Windows tras `b5b15248`:** `cargo test --locked --all-targets` **379/379**; `cargo fmt --all -- --check` correcto; `cargo clippy --locked --all-targets -- -D warnings` correcto; `cargo build --locked --release` correcto. No se acredita ejecución de estas pruebas por el Master, identidad exacta del árbol local, pruebas GUI ni CNC.
+- **Limitaciones abiertas:** G53/FluidNC y seguridad física no verificados, simulación conjunta multiherramienta ausente, y casillas de reconocimiento de riesgos en UI pendientes de adecuación a C8/C9. P1–P4 no se declaran cerrados.
 
 ## 2026-11-18 — Primera integracion NC, simulacion y calculo de operaciones activas (`85dfda2`)
 
