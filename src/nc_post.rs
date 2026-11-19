@@ -12,10 +12,13 @@
 //! incluyendo Start/End y los redondeos, antes de simular movimiento o material.
 
 use crate::cam_contract::ConfiguredCuttingConditions;
+use crate::cam_plan::plan_batch;
 use crate::nc_contract::NcUnits;
 use crate::toolpath_links::PlannedMoveKind;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+pub use crate::cam_plan::{CamBatchOperation as PostBatchOperation, CamMove as PostMove};
 
 pub const POST_PROFILE_VERSION: u32 = 1;
 pub const MAX_POST_MOVES: usize = 1_000_000;
@@ -197,14 +200,6 @@ impl PostProcessorProfile {
         validate_user_block(&self.end_commands)?;
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PostMove {
-    pub kind: PlannedMoveKind,
-    pub from_work_mm: [f64; 3],
-    pub to_work_mm: [f64; 3],
-    pub pass_index: usize,
 }
 
 /// Condiciones ya resueltas y una unica secuencia de herramienta, antes de
@@ -524,17 +519,6 @@ pub fn generate_program(
     })
 }
 
-/// Una operacion CAM con herramienta ya cargada; el cambio fisico de herramienta
-/// no puede suponerse a partir de una instruccion T aislada.
-#[derive(Clone, Copy, Debug)]
-pub struct PostBatchOperation<'a> {
-    pub moves_work_mm: &'a [PostMove],
-    pub conditions: ConfiguredCuttingConditions,
-    pub tool_number: Option<u32>,
-    /// Altura de despeje de esta operacion, en el mismo sistema de trabajo.
-    pub clearance_z_work_mm: f64,
-}
-
 fn emit_batch_move(
     output: &mut NcWriter,
     profile: &PostProcessorProfile,
@@ -661,39 +645,13 @@ pub fn generate_batch_program(
     output.line("G94")?;
     output.line("G17")?;
     let mut last_written = None;
-    let mut position: Option<[f64; 3]> = None;
+    let plan = plan_batch(operations);
     let mut count = 0;
-    for (i, operation) in operations.iter().enumerate() {
-        let first = operation
-            .moves_work_mm
-            .first()
-            .ok_or(PostError::EmptyToolpath)?;
-        if let Some(previous) = position {
-            let target = first.from_work_mm;
-            let link_z = previous[2].max(target[2]);
-            let vertical_top = [previous[0], previous[1], link_z];
-            let horizontal_end = [target[0], target[1], link_z];
-            for (from, to) in [
-                (previous, vertical_top),
-                (vertical_top, horizontal_end),
-                (horizontal_end, target),
-            ] {
-                if from != to {
-                    emit_batch_move(
-                        &mut output,
-                        profile,
-                        &PostMove {
-                            kind: PlannedMoveKind::RapidTraverse,
-                            from_work_mm: from,
-                            to_work_mm: to,
-                            pass_index: 0,
-                        },
-                        &mut last_written,
-                        None,
-                    )?;
-                    count += 1;
-                }
-            }
+    for (i, planned) in plan.operations.iter().enumerate() {
+        let operation = planned.operation;
+        for movement in planned.transition.iter().flatten() {
+            emit_batch_move(&mut output, profile, movement, &mut last_written, None)?;
+            count += 1;
         }
         // Cada T es una peticion independiente, incluso si se repite.
         // El procedimiento M6 pertenece al perfil/controlador, no al CAM.
@@ -735,10 +693,6 @@ pub fn generate_batch_program(
             )?;
             count += 1;
         }
-        position = operation
-            .moves_work_mm
-            .last()
-            .map(|movement| movement.to_work_mm);
     }
     if profile.auto_stop_spindle {
         output.line("M5")?;
@@ -747,7 +701,11 @@ pub fn generate_batch_program(
         output.line("M30")?;
     }
     let first = operations[0].moves_work_mm[0].from_work_mm;
-    let last = position.ok_or(PostError::EmptyToolpath)?;
+    let last = operations
+        .last()
+        .and_then(|operation| operation.moves_work_mm.last())
+        .ok_or(PostError::EmptyToolpath)?
+        .to_work_mm;
     Ok(GeneratedNc {
         text: output.text,
         profile_id: profile.id.clone(),
