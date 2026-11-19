@@ -16,6 +16,7 @@ El documento principal del **último corte documentado** es [`STATUS.md`](STATUS
 
 | Documento | Propósito |
 | --- | --- |
+| [`RESPONSABILIDADES_CAM_NC.md`](RESPONSABILIDADES_CAM_NC.md) | Contratos aceptados de los nueve responsables y politica de incidencias UI |
 | [`REQUIREMENTS.md`](REQUIREMENTS.md) | Requisitos y criterios técnicos, no un segundo estado del código |
 | [`LIBRARIES.md`](LIBRARIES.md) | Bibliotecas de herramientas, máquinas y postprocesadores |
 | [`TESTING.md`](TESTING.md) | Pruebas, benchmarks y requisitos de seguridad CNC |

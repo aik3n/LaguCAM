@@ -56,6 +56,7 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-046 | **ACEPTADA (2026-11-18)** | Posición inicial física corresponde al usuario; el post puede preparar retirada vertical inicial con G53 configurable por máquina | Homing y posición MPos segura verificados; no fijar Z universal, no inventar estado de máquina; G53 aún no interpretado en el código |
 | D-047 | **PROPUESTA (2026-11-18)** | Planificador externo a las estrategias coordinará transiciones entre operaciones | El cálculo conjunto actual no genera un NC conjunto ni certifica transiciones XY/Z, cambios de herramienta o colisiones |
 
+| D-048 | **ACEPTADA (2026-11-19)** | Nueve contratos de responsabilidad CAM/NC y politica UI de incidencias con iconos | La estrategia, planificador, post, maquina, interprete, simulador, verificador, UI y operador tienen fronteras definidas en `RESPONSABILIDADES_CAM_NC.md`; el principio de D-047 queda aprobado, sin declarar el codigo conforme |
 
 ## Cómo registrar una nueva decisión
 
@@ -84,6 +85,15 @@ No convertir automáticamente una recomendación de un asistente en **ACEPTADA**
 - **Razon:** al encadenar operaciones habrá transiciones de Z/XY, cambios de herramienta y estado de control que no pertenecen a una estrategia individual.
 - **Estado:** propuesta arquitectónica, no autorizacion de implementación. Diseñar contrato y pruebas con usuario, Integrador y Post antes de habilitar NC conjunto.
 - **Distincion vigente:** `cam_batch.rs` calcula operaciones activas de forma secuencial; no planifica trayectos de máquina entre ellas ni genera un solo NC.
+
+## D-048 — Contratos de responsabilidad CAM/NC (ACEPTADA)
+
+- **Fecha:** 2026-11-19. Los nueve contratos se aprobaron expresamente, uno por uno.
+- **Fuente normativa:** [`RESPONSABILIDADES_CAM_NC.md`](RESPONSABILIDADES_CAM_NC.md).
+- **D-047:** su principio (el planificador coordina las transiciones entre operaciones, fuera de las estrategias) queda **aceptado** por D-048. La formulacion anterior como PROPUESTA queda como antecedente historico, no como decision vigente.
+- **UI/UX:** error, advertencia e informacion se muestran mediante iconos en contexto; no usar casillas de confirmacion para reconocer avisos o riesgos. Solo errores tecnicos bloquean la accion concreta que impiden.
+- **Operador:** prepara fisicamente la CNC; LaguCAM no condiciona la generacion o exportacion NC a reconocer esas responsabilidades mediante casillas.
+- **Estado:** acuerdo arquitectonico; no confirma implementacion, compilacion, pruebas ni comportamiento fisico. Las diferencias entre el codigo y el contrato se resolveran en parches posteriores aprobados.
 
 ## Preguntas abiertas
 
