@@ -27,7 +27,6 @@ pub struct NcBatchExportUi {
     open: bool,
     selected_profile: String,
     preview: Option<CombinedPreview>,
-    acknowledged: bool,
     message: String,
     refresh: bool,
 }
@@ -36,14 +35,12 @@ impl NcBatchExportUi {
     pub fn open_for_batch(&mut self) {
         self.open = true;
         self.preview = None;
-        self.acknowledged = false;
         self.message.clear();
         self.refresh = true;
     }
 
     pub fn invalidate(&mut self) {
         self.preview = None;
-        self.acknowledged = false;
         self.message = "Vista previa invalidada: vuelve a generar el NC conjunto".into();
     }
 
@@ -169,11 +166,6 @@ impl NcBatchExportUi {
         panel: &TestParallelPanel,
         profile: &PostProcessorProfile,
     ) -> Result<(), String> {
-        if !self.acknowledged {
-            return Err(
-                "Confirma primero la precondicion de posicion y las limitaciones CNC".into(),
-            );
-        }
         let original = self.preview.as_ref().ok_or("Genera la vista previa")?;
         if original.profile_id != profile.id {
             return Err("El postprocesador ha cambiado; regenera el NC".into());
@@ -230,31 +222,35 @@ impl NcBatchExportUi {
                     self.invalidate();
                 }
                 ui.heading("Programa NC conjunto");
-                ui.label("Operaciones activas en orden. Cada T solicita M6; sin T no se solicita cambio.");
                 if let Some(active) = profiles.first() {
                     ui.label(format!("Postprocesador global: {}", active.name));
                 } else {
-                    ui.colored_label(egui::Color32::LIGHT_RED, "Postprocesador global no disponible");
+                    ui.colored_label(egui::Color32::LIGHT_RED, "\u{2716} Postprocesador global no disponible");
                 }
-                ui.small(format!("Maquina global: {} (datos fisicos informativos)", machine_ui.display_name()));                if ui.add_enabled(!profiles.is_empty(), egui::Button::new("Regenerar NC conjunto")).clicked() {
+                ui.small(format!("Maquina global: {}", machine_ui.display_name()));
+                if ui.add_enabled(!profiles.is_empty(), egui::Button::new("Regenerar NC conjunto")).clicked() {
                     self.refresh = true;
                 }
                 if self.refresh {
                     self.refresh = false;
-                    self.acknowledged = false;
                     self.preview = None;
                     if let Some(profile) = profiles.iter().find(|p| p.id == self.selected_profile) {
                         match Self::generate_current(project, panel, profile) {
                             Ok(preview) => {
                                 self.preview = Some(preview);
-                                self.message = "NC conjunto generado. Revisa antes de exportar".into();
+                                self.message.clear();
                             }
                             Err(error) => self.message = format!("ERROR: {error}"),
                         }
                     }
                 }
-                if self.message.starts_with("ERROR") {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.message);
+                if self.message.starts_with("ERROR")
+                    || self.message.starts_with("Vista previa invalidada")
+                {
+                    ui.colored_label(
+                        egui::Color32::LIGHT_RED,
+                        format!("\u{2716} {}", self.message),
+                    );
                 } else if !self.message.is_empty() {
                     ui.small(&self.message);
                 }
@@ -265,15 +261,14 @@ impl NcBatchExportUi {
                     ui.label(format!(
                         "{} operaciones · {} solicitudes de cambio T/M6 · {} movimientos · {} lineas NC",
                         preview.operations.len(), requested, result.cam_move_count, result.text.lines().count()
-                    ));
+                    ))
+                    .on_hover_text("NC definitivo interpretado; no verifica fijaciones, limites fisicos ni la ejecucion real de M6.");
                     ui.label(format!("Programa: {} bytes", result.text.len()));
                     let start = result.required_first_move_position_work_mm;
-                    ui.colored_label(egui::Color32::YELLOW,
-                        format!("PRECONDICION: posicion inicial de trabajo X{:.3} Y{:.3} Z{:.3} mm antes de ejecutar el NC.",
-                            start[0], start[1], start[2]));
-                    ui.small("Cada operacion con T solicita un cambio, incluso T repetido. Sin T, no se solicita. No se infiere herramienta desde la geometria.");
-                    ui.small("El perfil M6 debe gestionar el cambio real y retornar a la posicion de trabajo esperada. No se comprueban fijaciones, limites de maquina ni el comportamiento fisico de M6.");
-                    ui.small("El NC definitivo se ha interpretado, pero no certifica seguridad fisica ni simulacion de material conjunta.");
+                    ui.label(format!(
+                        "\u{24d8} Posicion inicial requerida antes del NC: X{:.3} Y{:.3} Z{:.3} mm (coordenadas de trabajo).",
+                        start[0], start[1], start[2]
+                    ));
                     ui.separator();
                     ui.strong("Operaciones incluidas en el NC generado:");
                     for (order, (index, _, requested_t)) in preview.operations.iter().enumerate() {
@@ -285,8 +280,10 @@ impl NcBatchExportUi {
                         );
                         ui.label(format!("{}. {}  |  {}", order + 1, name, tool));
                     }
-                    ui.small("IMPORTANTE: el fragmento inicial solo contiene 45 lineas. Utiliza el fragmento final o exporta el NC para examinarlo completo.");
                     ui.collapsing("Solicitudes T/M6 realmente emitidas en el NC", |ui| {
+                        if requested > 0 {
+                            ui.small("Cada T solicita M6, incluso si se repite. El controlador debe devolver la posicion de trabajo esperada tras el cambio.");
+                        }
                         let mut total = 0usize;
                         for (line_number, line) in result.text.lines().enumerate() {
                             if line.trim_end().ends_with(" M6") {
@@ -313,10 +310,8 @@ impl NcBatchExportUi {
                         });
                     });
                     ui.separator();
-                    ui.checkbox(&mut self.acknowledged,
-                        "He comprobado herramienta montada, posicion inicial, despejes y fijaciones");
                     let profile = profiles.iter().find(|p| p.id == self.selected_profile);
-                    if ui.add_enabled(self.acknowledged && profile.is_some(), egui::Button::new("Exportar NC conjunto")).clicked()
+                    if ui.add_enabled(profile.is_some(), egui::Button::new("Exportar NC conjunto")).clicked()
                         && let Some(profile) = profile
                         && let Err(error) = self.save_current(project, panel, profile)
                         {

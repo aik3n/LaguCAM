@@ -227,7 +227,6 @@ pub struct NcExportUi {
     selected_operation: Option<usize>,
     selected_profile: String,
     preview: Option<NcPreview>,
-    acknowledge_unverified: bool,
     pending_preview: bool,
     focus_issue: Option<usize>,
     message: String,
@@ -430,7 +429,6 @@ impl NcExportUi {
     pub fn open_for_operation(&mut self, index: usize) {
         self.selected_operation = Some(index);
         self.preview = None;
-        self.acknowledge_unverified = false;
         self.pending_preview = true;
         self.message.clear();
         self.open = true;
@@ -468,7 +466,6 @@ impl NcExportUi {
     pub fn operation_reordered(&mut self) {
         self.selected_operation = None;
         self.preview = None;
-        self.acknowledge_unverified = false;
         self.pending_playback = None;
         self.message.clear();
     }
@@ -533,9 +530,6 @@ impl NcExportUi {
         profile: &PostProcessorProfile,
         index: usize,
     ) -> Result<(), String> {
-        if !self.acknowledge_unverified {
-            return Err("Confirma primero las limitaciones del NC no simulado".into());
-        }
         let previous = self
             .preview
             .as_ref()
@@ -549,7 +543,6 @@ impl NcExportUi {
             || current.generated != previous.generated
         {
             self.preview = None;
-            self.acknowledge_unverified = false;
             return Err("El NC ha cambiado desde la vista previa (origen, CAM o perfil). Regenera la vista previa antes de exportar".into());
         }
         let suggestion = suggested_filename(&current.operation_name, &profile.extension);
@@ -573,10 +566,7 @@ impl NcExportUi {
         // No se toca el STL ni .lagucam. Se escribe un temporal completo antes
         // de reemplazar el destino seleccionado (si el usuario confirma).
         crate::portable::atomic_write(&path, current.generated.text.as_bytes())?;
-        self.message = format!(
-            "NC exportado: {}. SIN simulacion NC ni verificacion de maquina.",
-            path.display()
-        );
+        self.message = format!("NC exportado: {}", path.display());
         Ok(())
     }
 
@@ -630,45 +620,40 @@ impl NcExportUi {
         {
             self.selected_operation = None;
             self.preview = None;
-            self.acknowledge_unverified = false;
         }
         if !profiles.iter().any(|p| p.id == self.selected_profile) {
             self.selected_profile = profiles.first().map_or_else(String::new, |p| p.id.clone());
             self.preview = None;
-            self.acknowledge_unverified = false;
         }
 
         let operation = self.selected_operation;
         let profile_id = self.selected_profile.clone();
-        let mut acknowledge = self.acknowledge_unverified;
         let mut preview_requested = std::mem::take(&mut self.pending_preview);
         let mut export_requested = false;
         let mut playback_requested = false;
 
         ui.heading("Resultados del programa NC");
-        ui.small("Solo operaciones CAM calculadas, con cortes y validadas estructuralmente.");
         if available.is_empty() {
-            ui.colored_label(egui::Color32::YELLOW,
-                        "No hay una operacion CAM lista. Calcula primero un acabado paralelo con contactos y cortes.");
+            ui.colored_label(
+                egui::Color32::LIGHT_RED,
+                "\u{2716} No hay una operacion CAM lista para exportar.",
+            );
         }
         if let Some(index) = operation {
             if let Some(op) = project.operations.items.get(index) {
                 ui.label(format!("Operacion: {}", op.name));
             }
-        } else {
+        } else if !available.is_empty() {
             ui.label("Selecciona una operacion calculada en el arbol del proyecto.");
         }
         if let Some(active) = profiles.first() {
             ui.label(format!("Postprocesador global: {}", active.name));
         }
-        ui.small(format!(
-            "Maquina global: {} (sin verificacion fisica automatica)",
-            machine_ui.display_name()
-        ));
+        ui.small(format!("Maquina global: {}", machine_ui.display_name()));
         if profiles.is_empty() {
             ui.colored_label(
                 egui::Color32::LIGHT_RED,
-                "Postprocesador global no disponible. Revisa su configuracion.",
+                "\u{2716} Postprocesador global no disponible. Revisa su configuracion.",
             );
         }
         if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {
@@ -680,8 +665,10 @@ impl NcExportUi {
                 profile.xyz_decimals
             ));
             if !profile.start_commands.is_empty() || !profile.end_commands.is_empty() {
-                ui.colored_label(egui::Color32::YELLOW,
-                            "Este perfil contiene Start/End personalizados: pueden introducir movimientos adicionales.");
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    "\u{26a0} Start/End personalizados pueden introducir movimientos adicionales.",
+                );
             }
         }
         ui.separator();
@@ -700,10 +687,6 @@ impl NcExportUi {
         }
         if selected_matches_preview && let Some(preview) = self.preview.as_ref() {
             let generated = &preview.generated;
-            ui.small(format!(
-                "Herramienta de origen CAM: {} (UUID + SHA-256 geometrico)",
-                preview.tool_signature.tool_id
-            ));
             ui.label(format!(
                 "{} movimientos CAM · {} lineas NC · {} bytes",
                 generated.cam_move_count,
@@ -721,18 +704,21 @@ impl NcExportUi {
                         "Tiempo programado G1: {:.2} min ({:.1} s)",
                         summary.feed_minutes,
                         summary.feed_minutes * 60.0,
-                    ));
-                    ui.small("No es el tiempo total: falta velocidad de G0, aceleraciones y tiempos auxiliares de la maquina.");
+                    ))
+                    .on_hover_text(
+                        "Tiempo parcial G1: no incluye G0, aceleraciones ni tiempos auxiliares.",
+                    );
                 }
                 Err(reason) => {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("Metricas NC no disponibles: {reason}"),
+                        format!("\u{26a0} Metricas NC no disponibles: {reason}"),
                     );
                 }
             }
             ui.separator();
-            ui.strong("Verificacion preliminar del NC interpretado");
+            ui.strong("Verificacion preliminar del NC interpretado")
+                .on_hover_text("Evaluacion del bruto original; no verifica fijaciones, portaherramientas ni limites fisicos de maquina.");
             match preview.verification.as_ref() {
                 None => {
                     ui.small("Preparando avisos de verificacion...");
@@ -741,32 +727,34 @@ impl NcExportUi {
                 Some(Err(reason)) => {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("Verificacion no disponible: {reason}"),
+                        format!("\u{26a0} Verificacion no disponible: {reason}"),
                     );
                 }
                 Some(Ok(verification)) => {
                     let report = &verification.report;
                     ui.label(format!(
-                        "{} movimientos examinados · {} avisos ({} mostrados)",
+                        "{} movimientos examinados · {} incidencias ({} visibles)",
                         report.checked_moves,
                         report.total_issues(),
                         report.issues.len(),
                     ));
-                    ui.small("Comprobacion conservadora contra el bruto ORIGINAL. No incluye material ya retirado, fijaciones, portaherramientas ni limites fisicos de maquina.");
-                    if report.total_issues() == 0 {
-                        ui.label("Sin avisos de este verificador preliminar (no certifica seguridad CNC).");
-                    }
                     egui::ScrollArea::vertical()
                         .max_height(200.0)
                         .show(ui, |ui| {
                             for (issue_index, issue) in report.issues.iter().enumerate() {
-                                let description =
-                                    format!("L{} · {}", issue.source_line, issue.code.label());
-                                let color = if issue.severity == VerificationSeverity::Warning {
-                                    egui::Color32::YELLOW
-                                } else {
-                                    ui.visuals().text_color()
+                                let (symbol, color) = match issue.severity {
+                                    VerificationSeverity::Warning => {
+                                        ("\u{26a0}", egui::Color32::YELLOW)
+                                    }
+                                    VerificationSeverity::Info => {
+                                        ("\u{24d8}", ui.visuals().text_color())
+                                    }
                                 };
+                                let description = format!(
+                                    "{symbol} L{} · {}",
+                                    issue.source_line,
+                                    issue.code.label()
+                                );
                                 if verification.issue_motions[issue_index].is_some() {
                                     let selected = self.focus_issue == Some(issue_index);
                                     if ui
@@ -794,38 +782,38 @@ impl NcExportUi {
                 }
             }
             let xyz = generated.required_first_move_position_work_mm;
-            ui.colored_label(egui::Color32::YELLOW, format!(
-                        "PRECONDICION: antes del primer movimiento CAM, herramienta en coordenadas de trabajo X{:.6} Y{:.6} Z{:.6} mm.",
-                        xyz[0], xyz[1], xyz[2]
-                    ));
-            ui.colored_label(egui::Color32::YELLOW,
-                        "Verificacion fisica pendiente: origen real, limites de maquina, colisiones y estado inicial no comprobados.");
+            ui.label(format!(
+                "\u{24d8} Posicion inicial requerida antes del primer movimiento CAM: X{:.6} Y{:.6} Z{:.6} mm (coordenadas de trabajo).",
+                xyz[0], xyz[1], xyz[2]
+            ));
             ui.separator();
-            ui.small("Para examinar el G-code completo, exporta el fichero y abrelo en un editor externo.");
             ui.collapsing("Diagnostico avanzado", |ui| {
+                ui.small(format!(
+                    "Herramienta CAM (UUID): {}",
+                    preview.tool_signature.tool_id
+                ));
                 if ui.button("Reproductor NC tecnico").clicked() {
                     playback_requested = true;
                 }
             });
-            ui.checkbox(&mut acknowledge,
-                        "Reconozco que este NC aun no tiene simulacion final y requiere verificar origen, posicion inicial, herramienta, Start/End y maquina.");
-            if ui
-                .add_enabled(acknowledge, egui::Button::new("Exportar archivo NC..."))
-                .clicked()
-            {
+            if ui.button("Exportar archivo NC...").clicked() {
                 export_requested = true;
             }
         }
         if !self.message.is_empty() {
             ui.separator();
-            ui.label(&self.message);
+            if self.message.starts_with("ERROR:") {
+                ui.colored_label(
+                    egui::Color32::LIGHT_RED,
+                    format!("\u{2716} {}", self.message),
+                );
+            } else {
+                ui.small(&self.message);
+            }
         }
         if operation != self.selected_operation || profile_id != self.selected_profile {
             self.preview = None;
-            self.acknowledge_unverified = false;
             self.message.clear();
-        } else {
-            self.acknowledge_unverified = acknowledge;
         }
         self.selected_operation = operation;
         self.selected_profile = profile_id;
@@ -845,12 +833,10 @@ impl NcExportUi {
                 Ok(preview) => {
                     self.focus_issue = None;
                     self.preview = Some(preview);
-                    self.acknowledge_unverified = false;
-                    self.message = "NC generado en memoria. Revisa la precondicion y el texto antes de exportar.".into();
+                    self.message.clear();
                 }
                 Err(error) => {
                     self.preview = None;
-                    self.acknowledge_unverified = false;
                     self.message = format!("ERROR: {error}");
                 }
             }
@@ -890,9 +876,7 @@ impl NcExportUi {
             match result {
                 Ok(request) => {
                     self.pending_playback = Some(request);
-                    self.message =
-                        "NC enviado al reproductor; confirma la posicion inicial ANTES de Start."
-                            .into();
+                    self.message = "NC enviado al reproductor.".into();
                 }
                 Err(error) => {
                     self.pending_playback = None;
