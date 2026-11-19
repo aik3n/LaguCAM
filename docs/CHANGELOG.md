@@ -1,5 +1,16 @@
 # Historial de LaguCAM
 
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
+## 2026-11-18 — Primera integracion NC, simulacion y calculo de operaciones activas (`85dfda2`)
+
+- **Codigo inspeccionado estaticamente en GitHub:** `85dfda28658d5f8e779caae97838742d1444be73`; **no hay pruebas cargo/GUI/CNC ejecutadas por este Master sobre este SHA**, ni confirmacion de identidad de carpeta local.
+- `59e8f1a`: post generico 3 ejes, biblioteca de perfiles y primera exportacion NC experimental; `de8c0b6`, `d32101e`, `1c64ceb`: interprete del NC definitivo, reproducir G-code, simulador heightfield, renderer y avisos preliminares.
+- `d108dfad`: sesion de reproduccion atada a modelo/transformacion/stock/NC y correspondencia UUID+hash de fresa. `0f4c811`: comandos directos del arbol, informes G0/G1, foco en avisos NC y simulacion compacta.
+- **`85dfda2`:** `cam_batch.rs` calcula secuencialmente operaciones activas, reutiliza resultados, admite cancelacion y remapea indices al reordenar. **No** genera ni simula un programa NC conjunto.
+- **D-045 y D-046 aceptadas (responsable, 18-11):** la estrategia empieza en su primer XY a Z segura sobre bruto sin desplazamiento XY de maquina; operador responde de posicion inicial fisica y el post puede ofrecer retirada Z G53 parametrizada. **NO** esta implementado soporte G53 en interprete ni existe perfil FluidNC fisico validado. **D-047** planificador de transiciones es propuesta, no funcionalidad.
+- Se sincronizan `STATUS`, `ROADMAP`, `ARCHITECTURE`, `REQUIREMENTS`, `TESTING`, `DECISIONS`, `HANDOFF` y referencia de corte de `AGENTS` mediante parche documental local. Los SHAs del codigo siguen intactos; el commit documental sera exclusivo del usuario.
+
 ## 2026-11-17 — Organización de chats, sucesión Master y auditoría de P1 (solo documentación)
 
 - **Base inspeccionada en GitHub:** `a10e0c0` (`4a51d65` procedencia; `94b6d8c` transformaciones; `a10e0c0` mantenimiento); no constan tests ejecutados por este chat sobre esa versión ni acceso a archivos locales.

@@ -1,6 +1,8 @@
 # Registro de decisiones técnicas
 
-**Última revisión de gobierno:** 2026-11-17 · **Código público inspeccionado en el corte actual:** `a10e0c0d7c95db773417c2b190e7f4ff9005d8d4` · **Evidencia:** [`STATUS.md`](STATUS.md)
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
+**Última actualización de decisiones:** 2026-11-18 · **Código público inspeccionado:** `85dfda28658d5f8e779caae97838742d1444be73` · **Evidencia:** [`STATUS.md`](STATUS.md)
 
 Una decisión se cambia mediante una nueva entrada con justificación, no reescribiendo silenciosamente lo que se acordó. Las entradas **PROPUESTAS** no autorizan implementación.
 
@@ -50,6 +52,10 @@ Una decisión se cambia mediante una nueva entrada con justificación, no reescr
 | D-042 | **ACEPTADA (2026-11-17)** | Parches `.ps1` autocontenidos, con preflight por hashes, modo `-CheckOnly`, idempotencia, staging y recuperación | Ningún chat ejecuta Git ni toca la carpeta local directamente; no afirmar atomicidad multarchivo; gestionar conflictos sin sobrescribir |
 | D-043 | **ACEPTADA (2026-11-17)** | Auditoría crítica e independiente, evidencias etiquetadas, un único parche en aplicación/validación | No aprobar por ausencia de avisos ni por compilar; priorizar riesgos y corrección geométrica frente a estética o refactorización masiva |
 | D-044 | **ACEPTADA (2026-11-17)** | Refactorización selectiva por problema demostrable y pruebas, no por longitud de archivo | Mantener contratos estables, limitar alcance y extraer responsabilidades solo cuando facilita el hito o reduce riesgo probado |
+| D-045 | **ACEPTADA (2026-11-18)** | La estrategia comienza en el primer XY de mecanizado a su Z de seguridad sobre el bruto | No mover XY por cuenta propia a zonas seguras de máquina; sí conservar enlaces internos entre pasadas a despeje definido |
+| D-046 | **ACEPTADA (2026-11-18)** | Posición inicial física corresponde al usuario; el post puede preparar retirada vertical inicial con G53 configurable por máquina | Homing y posición MPos segura verificados; no fijar Z universal, no inventar estado de máquina; G53 aún no interpretado en el código |
+| D-047 | **PROPUESTA (2026-11-18)** | Planificador externo a las estrategias coordinará transiciones entre operaciones | El cálculo conjunto actual no genera un NC conjunto ni certifica transiciones XY/Z, cambios de herramienta o colisiones |
+
 
 ## Cómo registrar una nueva decisión
 
@@ -58,6 +64,26 @@ Cada nueva entrada debe contener ID, fecha, estado (**PROPUESTA**, **ACEPTADA**,
 No convertir automáticamente una recomendación de un asistente en **ACEPTADA** sin respuesta del usuario. Si se cambia una decisión, enlazar la entrada a la decisión anterior y explicar las migraciones/repercusiones.
 
 **Normativa de aplicación de D-040–D-044:** [`CHAT_ROLES.md`](CHAT_ROLES.md) define responsables y secuencia; [`WORKFLOW.md`](WORKFLOW.md) regula aceptación, scripts, pruebas y recuperación; [`HANDOFF.md`](HANDOFF.md) facilita la sustitución del Chat Master. Los cambios de gobernanza **no acreditan pruebas Rust**.
+
+## D-045 — Contrato de inicio y límite de responsabilidad de estrategia (ACEPTADA)
+
+- **Fecha:** 2026-11-18; criterio expresamente indicado por el responsable.
+- **Entrada de la trayectoria neutral:** primer punto del primer segmento al XY efectivo inicial de mecanizado, **Z en el despeje definido por la estrategia respecto al bruto**, no en una posición de máquina arbitraria. La misma estrategia resuelve aproximaciones, retiradas y enlaces de pasadas.
+- **Prohibición:** no introducir por cuenta propia desplazamientos XY exteriores al trabajo para buscar una posición de máquina, aparcamiento u homing. Los enlaces XY internos entre pasadas a clearance siguen siendo movimientos de la estrategia.
+- **Alcance de código:** `src/toolpath_links.rs` ya arranca con `safe_start` en el primer XY y clearance; comprobar el invariante con tests. No equivale a certificación de la trayectoria.
+
+## D-046 — Preparación inicial mediante post/perfil de máquina (ACEPTADA COMO REPARTO)
+
+- **Fecha:** 2026-11-18. El operador es responsable del homing, la posición física inicial, la herramienta, la fijación y el origen de trabajo; LaguCAM no puede inferirlos del primer movimiento CAM.
+- **Opción de diseño aceptada:** post/perfil puede emitir retirada **solo Z** en coordenadas de máquina (`G53 G0 Z...`) a un valor **configurado y comprobado**, antes del posicionamiento XY de la operación. No se impone por defecto ni se presupone `G53 Z0` seguro.
+- **Condiciones:** homing válido, MPos Z y límites reales de máquina conocidos, clearance suficiente para XY y estado modal del control. El post no inventa geometría de corte; preparaciones de máquina son responsabilidad externa a la estrategia.
+- **Estado de implementación en `85dfda2`:** NO implementado como contrato verificado. `nc_interpreter.rs` rechaza G53; Start personalizado puede bloquear resumen/simulación automática; no declarar verificable el preámbulo.
+
+## D-047 — Planificador global de transiciones (PROPUESTA)
+
+- **Razon:** al encadenar operaciones habrá transiciones de Z/XY, cambios de herramienta y estado de control que no pertenecen a una estrategia individual.
+- **Estado:** propuesta arquitectónica, no autorizacion de implementación. Diseñar contrato y pruebas con usuario, Integrador y Post antes de habilitar NC conjunto.
+- **Distincion vigente:** `cam_batch.rs` calcula operaciones activas de forma secuencial; no planifica trayectos de máquina entre ellas ni genera un solo NC.
 
 ## Preguntas abiertas
 

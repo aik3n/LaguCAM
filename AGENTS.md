@@ -1,6 +1,8 @@
 # LaguCAM — Contrato obligatorio para todos los chats
 
-**Vigente:** 2026-11-17 · **Autoridad:** responsable humano del proyecto · **Código público auditado:** `a10e0c0d7c95db773417c2b190e7f4ff9005d8d4`.
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
+**Normativa vigente desde:** 2026-11-17 · **Autoridad:** responsable humano del proyecto · **Último corte de inspección estática:** `85dfda28658d5f8e779caae97838742d1444be73` (2026-11-18; pruebas de este SHA no acreditadas aquí).
 
 Este archivo establece **reglas**, no atribuye permisos para implementar. Consultar [`docs/CHAT_ROLES.md`](docs/CHAT_ROLES.md), [`docs/WORKFLOW.md`](docs/WORKFLOW.md), [`docs/HANDOFF.md`](docs/HANDOFF.md), [`docs/STATUS.md`](docs/STATUS.md) y [`docs/DECISIONS.md`](docs/DECISIONS.md). Si hay contradicción, detenerse y elevarla al usuario; **no escoger por cuenta propia la interpretación más cómoda**.
 

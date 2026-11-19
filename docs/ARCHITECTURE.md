@@ -1,6 +1,8 @@
 # Arquitectura de LaguCAM
 
-**Arquitectura contrastada con código público:** `a10e0c0` (2026-11-17), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
+**Arquitectura contrastada con código público:** `85dfda2` (2026-11-18), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
 
 ## 1. Stack y distribución [ACTUAL]
 
@@ -22,7 +24,7 @@ La distribución portable sitúa `settings.json`, `panels.json`, `tools.json` y 
 | `project/persistence.rs` | Serialización `.lagucam` v2, validación y comprobación económica del STL externo |
 | `project/model_transform.rs` | Origen mm/pulgadas, escala, rotación, traslación y pivote; transformación afín no destructiva compartida entre visor y CAM |
 | `project/cam_provenance.rs` | Dependencias geométricas de previews TEST; invalidación por STL, bruto, estrategia, transformación y fresa |
-| `project_ui.rs` | Árbol lateral y propiedades |
+| `project_ui.rs` | Árbol y propiedades; selección, activación, reordenación y comandos de operaciones |
 | `tools/model.rs` | Definición y validación de seis familias de fresas, UUID y perfiles geométricos `f64` |
 | `tools/storage.rs` | Biblioteca global versionada y persistencia independiente |
 | `tools_ui.rs`, `tools_profile.rs` | Editor/filtros y perfil gráfico de las fresas |
@@ -36,7 +38,13 @@ La distribución portable sitúa `settings.json`, `panels.json`, `tools.json` y 
 | `cam_contract.rs`, `project/cam_coordinates.rs` | Vista inmutable de operación/F/S y conversión al origen de trabajo con traslación y giro Rz |
 | `cam_markers_3d.rs` | Indicadores visuales de principio y fin de recorrido, no geometría de corte |
 | `sample_direct.rs`, `sample_overlay.rs`, `section_overlay.rs` | Instrumentos transitorios de diagnóstico geométrico |
-| `main.rs` | Coordinación de UI, flujo de archivos, importación en segundo plano, render y diagnósticos |
+| `cam_batch.rs` | Cola en memoria para cálculo secuencial de operaciones activas; no genera NC ni geometría |
+| `nc_post.rs`, `post_ui.rs` | Postprocesador 3 ejes y biblioteca de perfiles, cabeceras Start/End; exportación experimental |
+| `nc_contract.rs`, `nc_interpreter.rs` | Contrato modal de programa NC e intérprete estricto del texto final; G53 no soportado |
+| `nc_export_ui.rs`, `nc_verify.rs` | Resultados del programa NC, métricas, alertas conservadoras de bruto original y exportación |
+| `nc_playback_ui.rs`, `nc_tool_link.rs` | Reproducción, vigencia de sesión NC, correspondencia UUID/SHA-256 de herramienta y controles compactos |
+| `material_sim.rs`, `material_ui.rs`, `nc_scene_gl.rs`, `nc_tool_overlay.rs` | Simulación aproximada 2,5D y render de material/herramienta; no colisiones integrales |
+| `main.rs` | Coordinación de UI, trabajos CAM, cálculo por lote, interpretación/reproducción NC, render y diagnósticos |
 
 `main.rs` y `panel_layout.rs` son extensos, pero no requieren refactorización por tamaño sin una necesidad concreta. El solver no depende del render. Los movimientos neutros G25 están separados de la estrategia, aunque **todavía no están verificados para postprocesado seguro**.
 
@@ -68,43 +76,40 @@ La biblioteca es la **única fuente editable**. Ninguna operación conserva una 
 
 El cálculo resuelve la fresa por UUID y conserva una firma (UUID + SHA-256). Desde P1-A, `CamProvenance` invalida previews por fuente, bruto, modelo transformado, herramienta y parámetros geométricos; no almacena G-code. Aún falta definir y comprobar la **validez de exportación**: origen/setup de trabajo, tolerancias, verificación geométrica, máquina y post. Ø6 → Ø4 → Ø6 puede restaurar el hash anterior, pero **no** acredita la trayectoria completa ni ningún G-code.
 
-El hash y la procedencia se usan para vigencia de **previsualizaciones geométricas**, pero no hay contrato completo de invalidación de programa ni exportación. Hay trayectoria neutral y verificador estructural; **no** hay trayectoria segura para CNC. El contrato v1 utiliza el dominio `LaguCAM/tool-geometry/SHA-256\0`, versión `u32 LE=1`, discriminantes fijos `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5, toroidal=6), las dimensiones específicas de cada variante en el orden de su declaración, y finalmente longitud de corte, diámetro de mango y longitud total. Los `f64` se escriben mediante IEEE-754 little-endian, normalizando el cero con signo y rechazando geometría inválida. Un cambio del contrato requiere nueva versión y vectores de prueba.
+La huella UUID/SHA y la procedencia se usan para vigencia de **previsualizaciones geométricas**. Desde `d108dfad`, la reproduccion NC conserva una identidad de sesion (fuente STL, transformacion, bruto, version del NC) y comprueba herramienta frente a la geometria de origen. Siguen pendientes la validez fisica de maquina y la verificacion integral de barrido/colisiones. Hay trayectoria neutral y validador estructural; **no** hay trayectoria certificada para CNC. El contrato v1 utiliza el dominio `LaguCAM/tool-geometry/SHA-256\0`, versión `u32 LE=1`, discriminantes fijos `u8` (plana=1, esférica=2, V=3, cónica plana=4, cónica esférica=5, toroidal=6), las dimensiones específicas de cada variante en el orden de su declaración, y finalmente longitud de corte, diámetro de mango y longitud total. Los `f64` se escriben mediante IEEE-754 little-endian, normalizando el cero con signo y rechazando geometría inválida. Un cambio del contrato requiere nueva versión y vectores de prueba.
 
 El contacto esférico con STL se calcula a partir de los valores `f32` originales convertidos a `f64`, nunca desde la normalización gráfica. El BVH usa límites XY y posiciones de registro para no guardar toda la malla dos veces; su presupuesto no incluye toda la RSS del proceso. La fachada del servicio de contacto tiene protección de inmutabilidad de archivo implementada en Windows; otras plataformas siguen pendientes.
 
 **Precaución:** cada punto muestreado puede ser un contacto válido sin que el **movimiento entre puntos** lo sea. El muestreo TEST no verifica el volumen barrido ni colisiones de mango y portaherramientas.
 
-## 6. Capas de arquitectura: componentes experimentales y futuros
+## 6. Flujo de CAM, post, interpretación y simulación [CÓDIGO OBSERVADO EN 85dfda2]
 
 ```text
-      Interfaz egui + Estado del proyecto
-                     │
-   STL original → ModelTransform (mm físicos)
-                     │
-      Operaciones → Resolver UUID en biblioteca (implementado)
-                     │
-      Estrategias CAM 3 ejes (TEST inicial)
-                     │
-       Servicios geométricos independientes (STL experimental)
-               ┌─────┴─────┐
-           STL (inicio)  STEP/B-Rep (futuro)
-                     │
-       G25: trayectoria y enlaces propuestos
-                     │
-       P1-A: procedencia/invalidación de previews
-                     │
-       Validación estructural (implementada)
-                     │
-       F1.1: vista CAM; F1.2: marco de trabajo
-                     │
-   Colisiones + máquina (PENDIENTES)
-                     │
-   Post FluidNC y exportación (PENDIENTES)
+Proyecto STL + modelo transformado + bruto + origen + herramienta UUID
+   |  -> estrategia acabado paralelo TEST / ContactSolver
+   v
+Trayectoria neutral y enlaces internos -> validación ESTRUCTURAL
+   |   primer punto = XY inicial de operacion a Z de despeje de estrategia
+   v
+WorkFrame modelo -> trabajo (mm) -> nc_post.rs -> G-code FINAL
+   |                                  -> nc_export_ui: métricas y alertas
+   v
+nc_interpreter.rs (texto NC final, modos soportados) -> NcTrace
+   |                                        |
+   +-> nc_verify.rs: bruto original          +-> material_sim.rs: heightfield 2,5D
+   |                                        |
+   +-> avisos enlazados al visor             +-> nc_playback_ui/nc_scene_gl: reproducir
+
+Operaciones activas -> cam_batch.rs -> secuencia de calculos CAM independientes
+    [NO concatena NC; NO planifica transiciones de maquina entre operaciones]
 ```
 
-Una estrategia dependerá de **capacidades geométricas**, no solo de la extensión del modelo. No forzar STEP a triangulación universal. Los índices espaciales y heightfields auxiliares podrán utilizarse con tolerancia/error explícitos y pruebas independientes, sin comprometer calidad del mecanizado.
+- **Frontera CAM:** `toolpath_links.rs` empieza en el primer XY real de mecanizado a la Z de clearance calculada con el bruto/geometria; conserva G0 XY de enlace entre pasadas **dentro** de la operacion. No inventa el movimiento desde la posicion fisica de maquina. Acuerdo normativo D-045.
+- **Frontera de post y maquina:** el post traduce la trayectoria y puede, cuando se implemente y valide el perfil, incorporar una retirada Z de maquina mediante G53 y movimiento XY al inicio; el operador es responsable de condiciones fisicas. No convertir `G53` en una funcion de estrategia. Acuerdo D-046.
+- **Frontera de operaciones multiples:** la cola `cam_batch.rs` administra cálculo de varias operaciones, no un planificador de recorridos entre operaciones. Un futuro planificador es PROPUESTA D-047.
+- **Frontera de verificacion:** el intérprete rechaza G53, G54, arcos y otros codigos no soportados; los Start/End personalizados pueden impedir metricas/simulacion automatica. `nc_verify.rs` solo informa intersecciones candidatas respecto al bruto original; no verifica el material restante ni el portaherramientas.
 
-El fresado inicial tendrá tres ejes, herramienta paralela a Z del setup, avance de corte habitual hacia −Z. Reservar extensibilidad sin implantar cinco ejes ahora. **Máquina** y **postprocesador** serán bibliotecas independientes: FluidNC primero; la máquina de pruebas cambia fresas manualmente, otras podrán tener ATC. No asumir soporte universal `M6` ni rotación por `G54`.
+El motor inicial sigue limitado a tres ejes y herramienta paralela a Z del setup. Máquina, estrategia, planificador y post deben tener contratos independientes; no asumir `M6` ni rotacion por `G54`. Las geometrías futuras se conectarán por capacidades del backend, sin imponer triangulación universal.
 
 ## 7. Riesgos e invariantes
 

@@ -1,44 +1,45 @@
-# Traspaso del Chat Master — LaguCAM
+# Traspaso operativo del Chat Master — LaguCAM
 
-**Última preparación:** 2026-11-17 · **Naturaleza:** estado operativo para sucesión; **no es otro `STATUS.md`**.
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
 
-## Identidad y límites
+**Corte preparado:** 2026-11-18. **HEAD publico inspeccionado:** `85dfda28658d5f8e779caae97838742d1444be73` (`main`, «operaciones multiples»). Base local no inspeccionada; aplicar parche `.ps1` de documentacion es responsabilidad del usuario. **Sin ejecucion propia de cargo, GUI, benchmark ni CNC sobre ese SHA.** El commit documental posterior no existe mientras el usuario no lo realice.
 
-- **Proyecto:** LaguCAM · https://github.com/aik3n/LaguCAM · Rust/egui/OpenGL · CAM experimental de tres ejes.
-- **Último HEAD público inspeccionado en esta revisión:** `a10e0c0d7c95db773417c2b190e7f4ff9005d8d4` (17-11-2026).
-- **Base local:** **NO observada** por el Master. El código publicado no acredita el contenido de `Escritorio/LaguCAM`.
-- **Estado de aplicación de este parche documental:** **PENDIENTE DE CONFIRMACIÓN** hasta que el usuario lo ejecute y comunique el resultado; **SHA de commit posterior: no existe acreditado en este traspaso**.
-- **Pruebas sobre `a10e0c0`:** solo inspección estática de GitHub; **sin ejecución propia de `cargo`, GUI, benchmark ni CNC**, ni CI publicado observado. Nunca atribuirlas al usuario sin informe.
+## Autoridad y lectura
 
-## Hito activo
+- Usuario: decide prioridades, acepta alcance, ejecuta parches y tests en Windows, realiza todo Git y autoriza cualquier prueba en maquina.
+- Master: audita, documenta y coordina; no realiza implementacion de codigo salvo delegacion expresa.
+- Integrador CAM: responde del recorrido completo. Especialistas Motor, Acabado, Post/Maquina y UI/UX intervienen por contratos. Desbaste permanece pospuesto.
+- Orden: `../AGENTS.md` → `WORKFLOW.md` → `CHAT_ROLES.md` → `DECISIONS.md` → `STATUS.md` → `ROADMAP.md` → `ARCHITECTURE.md` → `TESTING.md`.
+- `STATUS.md` es la unica referencia de estado y evidencias; `ROADMAP.md` tareas; `DECISIONS.md` acuerdos y propuestas. No deducir resultados de test desde un commit.
 
-**P1 — Cerrar contrato e integración CAM.** Responsable de implementación: **Integrador CAM**. Master supervisa y audita. Cambios recientes en código publicado (commits `4a51d65`, `94b6d8c`, `a10e0c0`) incorporan procedencia/invalidez de previews, unidad fuente del STL y transformaciones físicas no destructivas en visor/BVH, además de ajustes de tests. **No se ha certificado P1 como cerrado.**
+## Hitos mas recientes inspeccionados
 
-**Próxima tarea concreta:** pedir al Integrador que contraste la base local y prepare una propuesta *sin programar hasta aceptación* para resolver: (a) fallo silencioso de `preview_matrix()` a identidad visual; (b) invalidación innecesaria de geometría al editar nombre, F/S; (c) pruebas end-to-end de unidades/transformación/guardado/cálculo/trayectoria/origen; (d) contrato explícito de validez antes de cualquier post; (e) benchmark BVH/STL grande con datos medidos. Priorizar por impacto y dividir en parches pequeños.
-
-## Riesgos y límites abiertos
-
-| Tema | Evidencia observada | Estado / medida |
+| SHA | Novedad | Garantia real |
 | --- | --- | --- |
-| Divergencia visual/CAM | `main.rs` usa `unwrap_or(Mat4::IDENTITY)` si falla `preview_matrix()` | Corregir vía manejo de error o bloquear, no renderizar geometría distinta en silencio |
-| Invalidación excesiva | Editor borra `Outcome` por cualquier cambio en `kind`/`name`; `CamProvenance` excluye F/S como dependencia geométrica | Separar validez geométrica de tecnológica cuando exista contrato claro |
-| Identidad del STL | FNV-64 muestreado + metadatos para verificación económica | No describir como comprobación criptográfica completa; definir robustez exigida antes de exportar |
-| Contactos y recorridos | G25 verifica estructura, no volumen barrido ni colisiones | Mantener exportación operativa bloqueada hasta verificaciones adicionales |
-| Máquina FluidNC | Sin perfil operativo ni post | P3 futuro; no asumir `M6`, `G54` ni límites de la máquina |
-| Calidad | Hay pruebas unitarias; sin CI ni ejecución de este HEAD acreditada aquí | Requerir salidas Windows, casos integrados y métricas; no extrapolar |
-| Acoplamiento | `test_parallel.rs` acumula UI, hilos y resultados | Refactorización **localizada solo cuando facilite un contrato/probabilidad de fallo concreto**, no reescritura general |
+| `59e8f1a` | Primer post/NC experimental y exportacion | No NC apto para mecanizado |
+| `de8c0b6` / `d32101e` / `1c64ceb` | Interpretacion NC, simulacion 2,5D, visor OpenGL y comprobacion preliminar | G53 y colisiones reales aun no cubiertos |
+| `d108dfad` | Identidad de sesion y correspondencia UUID/hash de herramienta | Requiere regresion GUI y pruebas integradas |
+| `0f4c811` | UX de operacion individual y resumen/avisos NC | Tiempo G1 no es tiempo fisico de ciclo |
+| **`85dfda2`** | Calculo conjunto de operaciones activas, cache, cancelacion, indices | **Sin NC conjunto ni simulacion conjunta** |
 
-## Organización, reglas y referencias de autoridad
+## Decisiones nuevas del responsable (2026-11-18)
 
-- **Usuario** decide, ejecuta parches/validaciones y hace **todo Git**. Los chats no ejecutan Git ni escriben directamente en la carpeta de trabajo: entregan un `.ps1` por avance, colocado en el Escritorio junto a `LaguCAM`.
-- **Master** planifica, objeta, audita y documenta; **Integrador** responde del primer flujo completo; **Motor**, **Acabado**, **Post** y **UI/UX** se activan por contrato; **Desbaste** queda en espera.
-- **Lectura obligatoria por orden:** [`../AGENTS.md`](../AGENTS.md) → [`WORKFLOW.md`](WORKFLOW.md) → [`CHAT_ROLES.md`](CHAT_ROLES.md) → [`DECISIONS.md`](DECISIONS.md) → [`STATUS.md`](STATUS.md) → [`ROADMAP.md`](ROADMAP.md) → [`ARCHITECTURE.md`](ARCHITECTURE.md) → [`TESTING.md`](TESTING.md).
-- **Fuente del último estado técnico:** `STATUS.md` (con SHA y evidencias). **Prioridades:** `ROADMAP.md`. **Acuerdos:** `DECISIONS.md`. Este documento contiene **solo el relevo operativo**.
+- **D-045 ACEPTADA:** cada estrategia comienza en su XY de operacion a Z de seguridad sobre el bruto definida por la propia estrategia; prohibido mover XY para buscar aparcamiento/homing de maquina. Enlaces internos entre pasadas siguen permitidos a despeje adecuado.
+- **D-046 ACEPTADA como reparto de responsabilidad:** posicion inicial, homing, montaje y origen fisicos del operador; retirada inicial **opcional** solo Z mediante G53, configurada en post/perfil de maquina, sin cota universal ni seguridad presumida. En este SHA `nc_interpreter.rs` rechaza G53 y un Start personalizado puede impedir analisis automatico.
+- **D-047 PROPUESTA:** planificador global para transiciones entre operaciones; no atribuirlo a estrategias. No confundir calculo en lote de `85dfda2` con programa NC conjunto.
 
-## Protocolo para el siguiente Master
+## Riesgos no cerrados
 
-1. Obtener del usuario la confirmación del último parche aplicado y resultados de pruebas; **no asumir que esta entrega ya se ejecutó**.
-2. Leer los documentos normativos y verificar el código real accesible (o declarar que solo se audita GitHub). Comparar el último SHA conocido y parches locales pendientes sin ejecutar comandos Git.
-3. Reconciliar hechos con las evidencias: qué está implementado, probado en Windows, validado por el usuario, pendiente o fuera de alcance. Registrar discrepancias sin inventar datos.
-4. Mantener **P1** hasta aceptación de sus criterios de salida; no abrir P3 o desbaste por iniciativa propia. Auditoría crítica y proporcional.
-5. **Actualizar este `HANDOFF.md` en cada hito documental validado**, conservándolo breve: HEAD público, base local reportada, parche/resultado, hito y responsable, bloqueos, pruebas y próxima decisión. La sustitución de Master requiere designación explícita del usuario, no depende del chat anterior.
+1. No certificacion de seguridad CNC: colisiones de fresa/portaherramientas/sujeciones y material remanente ausentes; NC de ejemplo pueden contener entradas verticales profundas.
+2. G53 no interpretado; perfil de maquina/homing/limites FluidNC real pendiente. Posicion teórica de CAM no es posicion fisica CNC.
+3. Validar operaciones activas, reordenacion, error intermedio, cancelacion, guardado/recarga y caducidad en lote; no hay pruebas de ejecucion de `85dfda2` acreditadas.
+4. Inspeccionar fallback visual de `preview_matrix()` a identidad y coherencia del modo aislado y render; sin refactorizacion masiva por tamano de fichero.
+5. Nombres historicos de hitos en codigo/tests pendientes de limpieza selectiva, conservando cobertura.
+
+## Proximo trabajo concreto
+
+1. Contrastar archivos locales contra `85dfda2`; si hay cambios posteriores, **no** aplicar un parche preparado para otra base sin revisarlo.
+2. Solicitar salida real de `fmt`, `check`, `test`, `clippy`, release y pruebas GUI del calculo individual y conjunto; registrar ejecutor, entorno y SHA.
+3. Preparar con Integrador/Acabado un test de contrato de punto inicial XY/Z y continuidad; no cambiar estrategia mientras no exista alcance aceptado.
+4. Con Post/Maquina proponer contrato de `G53` y estados de maquina, **sin anunciarlo implementado**.
+5. Actualizar `HANDOFF.md` nuevamente cuando se validen los siguientes cambios; el usuario decide cuando hacer commit y si cambia de Master.

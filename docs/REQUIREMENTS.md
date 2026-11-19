@@ -1,9 +1,11 @@
 # Requisitos de LaguCAM
 
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
 > **Requisitos y criterios**, no estado vivo de implementación. Estado actualizado y SHA cubierto: [`STATUS.md`](STATUS.md).
 
 
-**Estado:** requisitos vigentes · **Revisión:** 2026-11-17. Los estados son observaciones estáticas del código público hasta `a10e0c0`; la evidencia de pruebas y la distinción local/remoto están en STATUS.
+**Estado:** requisitos vigentes · **Revisión:** 2026-11-18. La inspeccion estatica cubre `85dfda2`; los resultados de pruebas y la distincion local/remoto estan en STATUS.
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -32,16 +34,20 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | GEO-03 | Admitir STL primero y otros formatos, especialmente sólidos STEP, a futuro | Acordado; STEP pendiente |
 | GEO-04 | Abstracciones por **capacidad geométrica**, sin obligar a convertir todo B-Rep a una malla única | Acordado como criterio arquitectónico |
 | GEO-05 | Consultas eficientes de contacto/intersección para millones de triángulos | ContactSolver esférico, plano y toroidal/BVH implementado; rendimiento real por validar |
-| GEO-06 | Permitir representaciones auxiliares (p. ej. heightfield), con error definido | Acordado; implementación pendiente |
+| GEO-06 | Permitir representaciones auxiliares (p. ej. heightfield), con error definido | Simulacion heightfield 2,5D aproximada implementada; error fisico y colisiones no verificados |
 | CAM-01 | Estrategias iniciales estrictamente 3 ejes, husillo fijo paralelo al Z del setup | Acordado |
 | CAM-02 | Posibilitar 4/5 ejes sin implementar hoy su cinemática | Acordado |
 | CAM-03 | Desbaste, semiacabado, acabado, contorno, conforme se desarrollen | Previsto, no implementado |
 | CAM-04 | Estrategias disponibles según capacidades del modelo, no solo extensión del fichero | Acordado |
 | CAM-05 | Primera estrategia de prueba: acabado paralelo con fresa esférica | TEST con raster, movimiento neutral y enlaces propuestos; sin trayectoria CNC segura |
 | CAM-06 | Trayectorias y geometría con tolerancias de cálculo, error y validación | Validador estructural G25 implementado; tolerancias entre muestras y colisiones pendientes |
-| CAM-08 | Trayectoria neutral separada de estrategia y post | G25 implementado; enlaces propuestos y validación estructural, sin exportación CNC |
+| CAM-08 | Trayectoria neutral separada de estrategia y post | Trayectorias y enlaces con post experimental desacoplado; validacion solo estructural |
 | CAM-09 | Contrato F/S y conversión al origen de trabajo 3 ejes | F1.1–F1.2 implementados; comprobación de máquina y unidades pendiente |
 | CAM-10 | Invalidación de resultados cuando cambie cualquier entrada geométrica significativa | P1-A `CamProvenance` implementado para previews, con firma STL muestreada; contrato exportable pendiente |
+| CAM-11 | Inicio de cada estrategia en XY inicial efectivo de mecanizado y Z de seguridad sobre el bruto definida por ella; ningun XY de aparcamiento externo | **Aceptado D-045**; `toolpath_links.rs` sigue este patron, falta prueba de contrato para todas las estrategias |
+| CAM-12 | Operaciones activas calculadas secuencialmente, con reutilizacion y cancelacion; no confundir lote con NC conjunto | **Implementado** `cam_batch.rs` en `85dfda2`; pruebas GUI de regresion pendientes |
+| CAM-13 | Transiciones globales entre operaciones fuera de estrategias | **Propuesta D-047**; planificador NC conjunto pendiente |
+
 
 ## 3. Herramientas, máquinas y control
 
@@ -56,10 +62,15 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | MACH-01 | Biblioteca de perfiles de máquina, independiente de herramientas y postprocesadores | Acordado |
 | MACH-02 | Características físicas, límites, husillo y modo de cambio manual/ATC según máquina | Acordado; aún no implementado |
 | MACH-03 | Perfil de la máquina de pruebas con FluidNC y cambio manual | Confirmado como caso de uso; valores físicos de captura por verificar |
-| POST-01 | Postprocesadores independientes, primer objetivo FluidNC | Acordado; pendiente |
+| POST-01 | Postprocesadores independientes, primer objetivo FluidNC | Post generico GRBL 3 ejes y exportacion NC experimental implementados; perfil FluidNC fisico validado pendiente |
 | POST-02 | Estrategias no generan directamente dialecto G-code de una máquina | Acordado |
 | POST-03 | Validar secuencia de cambio manual sin asumir que `M6` hace el trabajo | Acordado; pendiente |
 | POST-04 | No asumir que `G54` rota el espacio; transformar solo con soporte explícito del control | Acordado |
+| POST-05 | Preparacion de maquina externa a estrategia: retirada G53 vertical Z configurable, solo con homing y pos. MPos seguras conocidas | **Contrato D-046 aceptado**, no implementado; interprete actual rechaza G53 |
+| POST-06 | Distinguir posicion fisica real de usuario de posicion teorica del CAM para simulacion | **Aceptado D-046**; simulacion compacta usa posicion teorica, no certificacion de maquina |
+| NC-01 | Interpretar NC FINAL para reproducir movimientos, no la trayectoria CAM original | Implementado para subconjunto G-code; sin G53/arcos ni prueba fisica |
+| NC-02 | Diagnosticos de bruto y herramienta no equivalen a comprobacion integral de colisiones | Avisos preliminares en codigo; verificacion real pendiente |
+
 
 ## 4. Requisitos no funcionales y de seguridad
 
@@ -94,7 +105,7 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 ## Requisitos añadidos tras D-033 y D-034
 
 - **TL-10 — Huella geométrica (ACEPTADA, integrada parcialmente en previsualizaciones):** SHA-256 canónico y versionado sobre tipo, diámetros, radios, ángulos, longitud de corte, diámetro del mango, longitud total y otras cotas físicas pertinentes; sin UUID, revisión, nombre, notas, RPM o avance. Prueba Ø6 → Ø4 → Ø6 debe recuperar la huella cuando toda la geometría coincide.
-- **TL-11 — Vigencia de resultados (PARCIAL):** el cálculo ya resuelve UUID y registra firma geométrica para previsualización; faltan modelo, bruto, setup, estrategia, tolerancias y post antes de reutilizar/exportar. No autorizar exportación de resultados obsoletos.
+- **TL-11 — Vigencia de resultados (PARCIAL):** `CamProvenance` conserva UUID/huella, identidad economica STL, transformacion, bruto y parametros de estrategia; la reproduccion NC conserva sesion/modelo/bruto/texto y vinculacion de herramienta. Siguen pendientes verificaciones geometricas completas, estados de maquina y post fisicamente validado. No autorizar produccion por una firma coincidente.
 - **PRJ-06 — Compatibilidad experimental (ACEPTADO):** durante desarrollo no mantener versiones anteriores ni migraciones obligatorias; comunicar incompatibilidades y no destruir archivos personales.
 - **CAM-07 — Separación de validez:** cambios tecnológicos como avance y RPM pueden requerir regenerar G-code sin modificar la geometría calculada; una coincidencia de hash geométrico no valida por sí sola máquina, setup ni programa.
 

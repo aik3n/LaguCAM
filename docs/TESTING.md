@@ -1,6 +1,8 @@
 # Política de pruebas, regresión y seguridad CNC
 
-**Política vigente:** 2026-11-17. Ejecuciones concretas y SHA público en [`STATUS.md`](STATUS.md). Esta política se aplica a **parches `.ps1` locales** ejecutados por el usuario. Actualizar Markdown no ejecuta Rust, GUI ni CNC.
+<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+
+**Politica vigente desde:** 2026-11-17. **Extension de cobertura:** 2026-11-18 (`85dfda2`). Ejecuciones concretas y SHA publico en [`STATUS.md`](STATUS.md). Esta política se aplica a **parches `.ps1` locales** ejecutados por el usuario. Actualizar Markdown no ejecuta Rust, GUI ni CNC.
 
 ## Comprobaciones de identidad UUID y proyecto v2
 
@@ -119,6 +121,20 @@ Registrar explícitamente cuál se realizó y cuál falta.
 7. **Cierre del prototipo:** añadir comprobaciones de volumen barrido/cuerpos/stock/utillaje, post FluidNC con casos golden, simulación independiente, pruebas sin material y rendimiento del STL grande. Las restricciones de una CNC real deben comprobarse antes de uso.
 
 Registrar resultado **reportado por el usuario** y entorno/versión concreta. Nunca afirmar un número de tests sin la salida correspondiente.
+
+## 7.b. Contratos nuevos a probar antes de cerrar lote, NC y preparacion de maquina
+
+**No son pruebas ejecutadas en `85dfda2`; son criterios de aceptacion propuestos/pendientes.**
+
+1. **Inicio de estrategia D-045:** el primer punto neutral coincide exactamente con el primer XY de mecanizado y Z de clearance sobre el bruto; ningun XY externo de aparcamiento al inicio; los enlaces internos entre pasadas permanecen a despeje y sin saltos.
+2. **G53 D-046 (NO implementado):** validar cuando se implemente retirada unica Z, estado de homing y MPos conocida, limite de ejes y posterior posicionamiento XY al inicio; rechazar coordenada maquina no disponible, Z no segura y Start no interpretable. La posicion CAM teorica no confirma la posicion fisica.
+3. **Cola conjunta en `85dfda2`:** cero operaciones activas; seleccion parcial; cache reutilizada; una fallida con resto exitoso; cancelacion durante calculo; reordenacion durante el trabajo; desactivacion en curso; cambio de proyecto; error al leer STL; ausencia de NC conjunto.
+4. **No obsolescencia:** cambio STL/model_transform, bruto, origen, herramienta UUID/hash, parametros de estrategia o texto NC invalida solo lo dependiente; cambios esteticos no recalculan CAM.
+5. **NC experimental:** mismo G-code final para preview, informe y reproducción; metricas G0/G1 calculadas con modos finales, tiempo G1 excluye aceleraciones, G0 y auxiliares; Start personalizado no se convierte en seguridad ni se ignora.
+6. **Verificador y simulacion:** probar fondos/alturas, G0 potencialmente en material, entrada G1 profunda, seleccion de fresa, movimientos de Start/End, desbaste de stock original vs material restante, limitaciones 2,5D y sin portaherramientas.
+7. **Render y GUI:** controles compactos, vista aislada, abrir/cerrar simulacion, identidad de herramienta, aviso enlazado a movimiento y FPS/RAM sin extrapolar del visor STL.
+
+**Comandos de calidad en Windows, registrar SHA y log real:** `cargo fmt --all -- --check`; `cargo check --locked --all-targets`; `cargo test --locked --all-targets`; `cargo clippy --locked --all-targets -- -D warnings`; `cargo build --locked --release`. Las pruebas de maquina son otro hito, con procedimiento controlado y responsabilidad humana.
 
 ## 8. Trazabilidad de pruebas por hito
 
