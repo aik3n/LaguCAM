@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod cam_batch;
+mod cam_combined_nc;
 mod cam_markers_3d;
 mod material_ui;
 mod nav_cube;
@@ -164,6 +165,7 @@ struct App {
     tool_ui: tools_ui::ToolUi,
     post_ui: post_ui::PostUi,
     nc_export_ui: nc_export_ui::NcExportUi,
+    nc_batch_export: cam_combined_nc::NcBatchExportUi,
     nc_playback_ui: nc_playback_ui::NcPlaybackUi,
     test_parallel: test_parallel::TestParallelPanel,
     pending_cam_command: Option<project_ui::OperationCommand>,
@@ -239,6 +241,7 @@ impl App {
             tool_ui: tools_ui::ToolUi::new(tool_error),
             post_ui: post_ui::PostUi::load(),
             nc_export_ui: nc_export_ui::NcExportUi::default(),
+            nc_batch_export: cam_combined_nc::NcBatchExportUi::default(),
             nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
             test_parallel: test_parallel::TestParallelPanel::default(),
             pending_cam_command: None,
@@ -1084,6 +1087,9 @@ impl App {
             OperationCommand::CalculateAll => {
                 Err("El calculo conjunto requiere su propia cola".into())
             }
+            OperationCommand::GenerateAllNc => {
+                Err("La generacion conjunta no corresponde a una operacion individual".into())
+            }
             OperationCommand::GenerateNc(_) => {
                 self.nc_export_ui.open_for_operation(index);
                 Ok(())
@@ -1112,6 +1118,18 @@ impl App {
 
     fn request_cam_command(&mut self, command: project_ui::OperationCommand, ctx: &egui::Context) {
         use project_ui::OperationCommand;
+        if command == OperationCommand::GenerateAllNc {
+            if self.project.selection != project::selection::Selection::Operations {
+                self.message = "ERROR: Selecciona el nodo Operaciones".into();
+            } else if self.batch_calculation.is_some() || self.test_parallel.calculation_running() {
+                self.message = "ERROR: Espera a que termine el calculo CAM".into();
+            } else {
+                self.nc_batch_export.open_for_batch();
+                self.message =
+                    "Generando NC conjunto: comprueba los resultados en su ventana".into();
+            }
+            return;
+        }
         if command == OperationCommand::CalculateAll {
             if self.project.selection != project::selection::Selection::Operations {
                 self.message = "ERROR: Selecciona el nodo Operaciones".into();
@@ -1826,6 +1844,7 @@ impl eframe::App for App {
                 );
             }
             self.nc_export_ui.operation_reordered();
+            self.nc_batch_export.invalidate();
             if let Some(command) = self.pending_cam_command {
                 self.pending_cam_command = command
                     .index()
@@ -1879,6 +1898,8 @@ impl eframe::App for App {
         self.nc_export_ui
             .refresh_verification(&self.project, &self.tool_library);
         self.nc_export_ui
+            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        self.nc_batch_export
             .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
         if let Some((text, xyz, tool_signature)) = self.nc_export_ui.take_playback_request() {
             self.nc_playback_ui

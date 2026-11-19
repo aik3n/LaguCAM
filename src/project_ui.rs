@@ -129,6 +129,7 @@ struct OperationDrag(usize);
 pub enum OperationCommand {
     Calculate(usize),
     CalculateAll,
+    GenerateAllNc,
     GenerateNc(usize),
     Simulate(usize),
 }
@@ -137,7 +138,7 @@ impl OperationCommand {
     pub fn index(self) -> Option<usize> {
         match self {
             Self::Calculate(index) | Self::GenerateNc(index) | Self::Simulate(index) => Some(index),
-            Self::CalculateAll => None,
+            Self::CalculateAll | Self::GenerateAllNc => None,
         }
     }
 
@@ -145,6 +146,7 @@ impl OperationCommand {
         match self {
             Self::Calculate(_) => Self::Calculate(index),
             Self::CalculateAll => Self::CalculateAll,
+            Self::GenerateAllNc => Self::GenerateAllNc,
             Self::GenerateNc(_) => Self::GenerateNc(index),
             Self::Simulate(_) => Self::Simulate(index),
         }
@@ -174,8 +176,13 @@ pub fn operation_commands(
             {
                 command = Some(OperationCommand::CalculateAll);
             }
-            ui.add_enabled(false, egui::Button::new("Generar NC"))
-                .on_hover_text("Disponible en UX-01E.2");
+            if ui
+                .add_enabled(active > 0, egui::Button::new("Generar NC"))
+                .on_hover_text("Generar un programa NC con las operaciones activas; se requiere una sola herramienta fisica")
+                .clicked()
+            {
+                command = Some(OperationCommand::GenerateAllNc);
+            }
             ui.add_enabled(false, egui::Button::new("Simular"))
                 .on_hover_text("Disponible tras generar el NC conjunto");
         });
@@ -323,10 +330,14 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
                                         .on_hover_text("Arrastrar para reordenar");
                                     },
                                 );
+                                let display_name = match op.tool_number {
+                                    Some(number) => format!("{}  T{number}", op.name),
+                                    None => op.name.clone(),
+                                };
                                 let response = icon_selectable_label(
                                     ui,
                                     project.selection == Selection::Operation(i),
-                                    &op.name,
+                                    &display_name,
                                     TreeIcon::Operation,
                                 );
                                 if response.clicked() {
@@ -749,6 +760,10 @@ pub fn properties(ui: &mut egui::Ui, project: &mut Project, error: &mut String) 
         Selection::Operation(i) => {
             if let Some(op) = project.operations.items.get(i) {
                 ui.heading(&op.name);
+                ui.label(match op.tool_number {
+                    Some(number) => format!("Numero de herramienta CNC: T{number}"),
+                    None => "Numero de herramienta CNC: sin asignar".to_owned(),
+                });
                 match &op.kind {
                     OperationKind::Placeholder => {
                         ui.label("Sin estrategia. Doble clic para seleccionar una.");

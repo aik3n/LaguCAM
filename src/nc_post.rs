@@ -223,6 +223,9 @@ pub enum PostError {
     InvalidCuttingConditions,
     EmptyToolpath,
     TooManyMoves,
+    InvalidToolNumber,
+    BatchToolChange,
+    UnsafeBatchLink,
     InvalidCoordinates,
     DiscontinuousPath,
     ZeroLengthMotion,
@@ -242,6 +245,13 @@ impl fmt::Display for PostError {
             Self::InvalidCuttingConditions => "Avance F o velocidad S no validos",
             Self::EmptyToolpath => "No hay movimientos CAM para postprocesar",
             Self::TooManyMoves => "Demasiados movimientos CAM para postprocesar",
+            Self::InvalidToolNumber => "Numero de herramienta CNC invalido (T1..T9999)",
+            Self::BatchToolChange => {
+                "El lote requiere un cambio fisico de herramienta no configurado"
+            }
+            Self::UnsafeBatchLink => {
+                "El enlace entre operaciones no tiene extremos de Z segura verificables o usa Start/End personalizado"
+            }
             Self::InvalidCoordinates => "Movimiento CAM con coordenadas no finitas",
             Self::DiscontinuousPath => "Los movimientos CAM no son continuos",
             Self::ZeroLengthMotion => "Movimiento CAM de longitud nula",
@@ -493,6 +503,351 @@ pub fn generate_program(
     })
 }
 
+/// Una operacion CAM con herramienta ya cargada; el cambio fisico de herramienta
+/// no puede suponerse a partir de una instruccion T aislada.
+#[derive(Clone, Copy, Debug)]
+pub struct PostBatchOperation<'a> {
+    pub moves_work_mm: &'a [PostMove],
+    pub conditions: ConfiguredCuttingConditions,
+    pub tool_number: u32,
+    /// Altura de despeje de esta operacion, en el mismo sistema de trabajo.
+    pub clearance_z_work_mm: f64,
+}
+
+fn emit_batch_move(
+    output: &mut NcWriter,
+    profile: &PostProcessorProfile,
+    movement: &PostMove,
+    last_written: &mut Option<[String; 3]>,
+    feed: Option<&str>,
+) -> Result<(), PostError> {
+    if movement.from_work_mm == movement.to_work_mm {
+        return Err(PostError::ZeroLengthMotion);
+    }
+    let from = formatted_position(movement.from_work_mm, profile.units, profile.xyz_decimals)?;
+    let to = formatted_position(movement.to_work_mm, profile.units, profile.xyz_decimals)?;
+    if from == to
+        || last_written
+            .as_ref()
+            .is_some_and(|previous| previous == &to)
+    {
+        return Err(PostError::RoundedMotionLost);
+    }
+    let first = last_written.is_none();
+    let mut line = if movement.kind == PlannedMoveKind::RapidTraverse {
+        "G0".to_owned()
+    } else {
+        "G1".to_owned()
+    };
+    for (axis, i) in [('X', 0), ('Y', 1), ('Z', 2)] {
+        if first
+            || !profile.suppress_unchanged_axes
+            || last_written
+                .as_ref()
+                .is_some_and(|previous| previous[i] != to[i])
+        {
+            line.push(' ');
+            line.push(axis);
+            line.push_str(&to[i]);
+        }
+    }
+    if movement.kind != PlannedMoveKind::RapidTraverse
+        && let Some(feed) = feed
+    {
+        line.push_str(" F");
+        line.push_str(feed);
+    }
+    output.line(&line)?;
+    *last_written = Some(to);
+    Ok(())
+}
+
+/// Genera un unico programa para operaciones sucesivas de LA MISMA herramienta.
+/// Cada trayectoria empieza y acaba en su despeje. El enlace sube a la mayor Z,
+/// cruza horizontalmente y baja a la siguiente Z, siempre por movimientos G0
+/// separados por eje. No resuelve fijaciones ni cambios de herramienta fisicos.
+/// El usuario debe colocar previamente la herramienta en la posicion inicial CAM.
+pub fn generate_batch_program(
+    profile: &PostProcessorProfile,
+    operations: &[PostBatchOperation<'_>],
+) -> Result<GeneratedNc, PostError> {
+    profile.validate()?;
+    if operations.is_empty() {
+        return Err(PostError::EmptyToolpath);
+    }
+    // Start/End personalizados pueden mover ejes o cambiar estado modal; no se
+    // deduce de ellos una posicion de enlace segura.
+    if !profile.start_commands.trim().is_empty() || !profile.end_commands.trim().is_empty() {
+        return Err(PostError::UnsafeBatchLink);
+    }
+    let number = operations[0].tool_number;
+    if !(1..=9999).contains(&number) {
+        return Err(PostError::InvalidToolNumber);
+    }
+    let mut total_moves = 0usize;
+    for operation in operations {
+        if operation.tool_number != number {
+            return Err(PostError::BatchToolChange);
+        }
+        if !finite_positive(operation.conditions.feed_mm_min)
+            || !finite_positive(operation.conditions.spindle_rpm)
+        {
+            return Err(PostError::InvalidCuttingConditions);
+        }
+        let first = operation
+            .moves_work_mm
+            .first()
+            .ok_or(PostError::EmptyToolpath)?;
+        let last = operation
+            .moves_work_mm
+            .last()
+            .ok_or(PostError::EmptyToolpath)?;
+        if !operation.clearance_z_work_mm.is_finite()
+            || first.kind != PlannedMoveKind::Approach
+            || last.kind != PlannedMoveKind::Retract
+            || first.from_work_mm[2] != operation.clearance_z_work_mm
+            || last.to_work_mm[2] != operation.clearance_z_work_mm
+        {
+            return Err(PostError::UnsafeBatchLink);
+        }
+        for (i, movement) in operation.moves_work_mm.iter().enumerate() {
+            if !movement
+                .from_work_mm
+                .iter()
+                .chain(movement.to_work_mm.iter())
+                .all(|coordinate| coordinate.is_finite())
+            {
+                return Err(PostError::InvalidCoordinates);
+            }
+            if movement.from_work_mm == movement.to_work_mm {
+                return Err(PostError::ZeroLengthMotion);
+            }
+            if i > 0 && operation.moves_work_mm[i - 1].to_work_mm != movement.from_work_mm {
+                return Err(PostError::DiscontinuousPath);
+            }
+        }
+        total_moves = total_moves
+            .checked_add(operation.moves_work_mm.len())
+            .ok_or(PostError::TooManyMoves)?;
+    }
+    // Maximo tres enlaces entre dos operaciones: subida, XY y bajada.
+    let reserved = operations.len().saturating_sub(1).saturating_mul(3);
+    if total_moves.saturating_add(reserved) > MAX_POST_MOVES {
+        return Err(PostError::TooManyMoves);
+    }
+    let mut output = NcWriter::new(profile);
+    output.line(profile.units.code())?;
+    output.line("G90")?;
+    output.line("G94")?;
+    output.line("G17")?;
+    output.line(&format!("T{number}"))?;
+    let mut last_written = None;
+    let mut position: Option<[f64; 3]> = None;
+    let mut count = 0;
+    for (i, operation) in operations.iter().enumerate() {
+        let first = operation
+            .moves_work_mm
+            .first()
+            .ok_or(PostError::EmptyToolpath)?;
+        if let Some(previous) = position {
+            let target = first.from_work_mm;
+            let link_z = previous[2].max(target[2]);
+            let vertical_top = [previous[0], previous[1], link_z];
+            let horizontal_end = [target[0], target[1], link_z];
+            for (from, to) in [
+                (previous, vertical_top),
+                (vertical_top, horizontal_end),
+                (horizontal_end, target),
+            ] {
+                if from != to {
+                    emit_batch_move(
+                        &mut output,
+                        profile,
+                        &PostMove {
+                            kind: PlannedMoveKind::RapidTraverse,
+                            from_work_mm: from,
+                            to_work_mm: to,
+                            pass_index: 0,
+                        },
+                        &mut last_written,
+                        None,
+                    )?;
+                    count += 1;
+                }
+            }
+        }
+        let rpm = format_number(operation.conditions.spindle_rpm, profile.spindle_decimals)?;
+        if rpm.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
+            return Err(PostError::InvalidCuttingConditions);
+        }
+        output.line(&format!("S{rpm}"))?;
+        if i == 0 && profile.auto_start_spindle {
+            output.line(profile.spindle_direction.code())?;
+        }
+        let feed = format_number(
+            operation.conditions.feed_mm_min / profile.units.mm_per_unit(),
+            profile.feed_decimals,
+        )?;
+        if feed.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
+            return Err(PostError::InvalidCuttingConditions);
+        }
+        let mut feed_written = false;
+        for movement in operation.moves_work_mm {
+            let print_feed = if movement.kind != PlannedMoveKind::RapidTraverse && !feed_written {
+                feed_written = true;
+                Some(feed.as_str())
+            } else {
+                None
+            };
+            emit_batch_move(
+                &mut output,
+                profile,
+                movement,
+                &mut last_written,
+                print_feed,
+            )?;
+            count += 1;
+        }
+        position = operation
+            .moves_work_mm
+            .last()
+            .map(|movement| movement.to_work_mm);
+    }
+    if profile.auto_stop_spindle {
+        output.line("M5")?;
+    }
+    if profile.auto_program_end {
+        output.line("M30")?;
+    }
+    let first = operations[0].moves_work_mm[0].from_work_mm;
+    let last = position.ok_or(PostError::EmptyToolpath)?;
+    Ok(GeneratedNc {
+        text: output.text,
+        profile_id: profile.id.clone(),
+        units: profile.units.as_nc_units(),
+        required_first_move_position_work_mm: first,
+        last_cam_position_work_mm: last,
+        cam_move_count: count,
+        requires_nc_interpretation: true,
+        has_custom_blocks: false,
+    })
+}
+
+#[cfg(test)]
+mod batch_generation_tests {
+    use super::*;
+
+    fn operation(a: [f64; 3], tip: [f64; 3]) -> [PostMove; 2] {
+        [
+            PostMove {
+                kind: PlannedMoveKind::Approach,
+                from_work_mm: a,
+                to_work_mm: tip,
+                pass_index: 0,
+            },
+            PostMove {
+                kind: PlannedMoveKind::Retract,
+                from_work_mm: tip,
+                to_work_mm: a,
+                pass_index: 0,
+            },
+        ]
+    }
+
+    fn conditions(f: f64, s: f64) -> ConfiguredCuttingConditions {
+        ConfiguredCuttingConditions {
+            feed_mm_min: f,
+            spindle_rpm: s,
+        }
+    }
+
+    #[test]
+    fn linked_operations_raise_cross_and_descend_with_single_header() {
+        let a = operation([1.0, 2.0, 12.0], [1.0, 2.0, 2.0]);
+        let b = operation([9.0, 4.0, 20.0], [9.0, 4.0, 4.0]);
+        let batch = [
+            PostBatchOperation {
+                moves_work_mm: &a,
+                conditions: conditions(100.0, 8000.0),
+                tool_number: 3,
+                clearance_z_work_mm: 12.0,
+            },
+            PostBatchOperation {
+                moves_work_mm: &b,
+                conditions: conditions(250.0, 12000.0),
+                tool_number: 3,
+                clearance_z_work_mm: 20.0,
+            },
+        ];
+        let nc = generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap();
+        assert!(nc.text.starts_with("G21\nG90\nG94\nG17\nT3\nS8000\nM3\n"));
+        assert!(nc.text.contains("G0 X1.000 Y2.000 Z20.000"));
+        assert!(nc.text.contains("G0 X9.000 Y4.000 Z20.000"));
+        assert!(nc.text.contains("G1 X9.000 Y4.000 Z4.000 F250.000"));
+        assert_eq!(nc.text.matches("M30").count(), 1);
+        assert_eq!(nc.text.matches("T3\n").count(), 1);
+        assert_eq!(nc.cam_move_count, 6);
+    }
+
+    #[test]
+    fn rejects_tool_change_and_unknown_clearance() {
+        let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
+        let mut batch = [
+            PostBatchOperation {
+                moves_work_mm: &a,
+                conditions: conditions(100.0, 8000.0),
+                tool_number: 1,
+                clearance_z_work_mm: 10.0,
+            },
+            PostBatchOperation {
+                moves_work_mm: &a,
+                conditions: conditions(100.0, 8000.0),
+                tool_number: 2,
+                clearance_z_work_mm: 10.0,
+            },
+        ];
+        assert_eq!(
+            generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap_err(),
+            PostError::BatchToolChange
+        );
+        batch[1].tool_number = 1;
+        batch[1].clearance_z_work_mm = 3.0;
+        assert_eq!(
+            generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap_err(),
+            PostError::UnsafeBatchLink
+        );
+    }
+
+    #[test]
+    fn numbering_is_continuous_across_operations() {
+        let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
+        let b = operation([5.0, 0.0, 10.0], [5.0, 0.0, 1.0]);
+        let mut profile = PostProcessorProfile::grbl_3axis_mm();
+        profile.line_numbers = Some(PostLineNumbers {
+            start: 10,
+            step: 10,
+        });
+        let ops = [
+            PostBatchOperation {
+                moves_work_mm: &a,
+                conditions: conditions(100.0, 8000.0),
+                tool_number: 1,
+                clearance_z_work_mm: 10.0,
+            },
+            PostBatchOperation {
+                moves_work_mm: &b,
+                conditions: conditions(100.0, 8000.0),
+                tool_number: 1,
+                clearance_z_work_mm: 10.0,
+            },
+        ];
+        let nc = generate_batch_program(&profile, &ops).unwrap();
+        let lines = nc.text.lines().collect::<Vec<_>>();
+        for (i, line) in lines.iter().enumerate() {
+            assert!(line.starts_with(&format!("N{} ", (i + 1) * 10)));
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -400,6 +400,7 @@ struct OperationEditorDraft {
     name: String,
     kind: OperationKind,
     tool_id: Option<String>,
+    tool_number: Option<u32>,
     visible: bool,
 }
 
@@ -409,6 +410,7 @@ impl OperationEditorDraft {
             name: op.name.clone(),
             kind: op.kind.clone(),
             tool_id: op.tool_id.clone(),
+            tool_number: op.tool_number,
             visible,
         }
     }
@@ -419,6 +421,9 @@ impl OperationEditorDraft {
         }
         if let OperationKind::ParallelTest(p) = &self.kind {
             p.validate()?;
+        }
+        if !crate::project::operations::nc_tool_number_valid(self.tool_number) {
+            return Err("Numero CNC invalido (admitido T1..T9999)".into());
         }
         Ok(())
     }
@@ -829,7 +834,26 @@ impl TestParallelPanel {
                                             }
                                         });
                                 });
-                                if let Some(id) = draft.tool_id.as_deref() {
+                                ui.separator();
+                                ui.add_enabled_ui(!running, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let mut assigned = draft.tool_number.is_some();
+                                        if ui.checkbox(&mut assigned, "Asignar numero de herramienta CNC").changed() {
+                                            draft.tool_number = assigned.then_some(1);
+                                        }
+                                        if let Some(number) = draft.tool_number.as_mut() {
+                                            ui.add(
+                                                egui::DragValue::new(number)
+                                                    .range(1..=crate::project::operations::MAX_NC_TOOL_NUMBER)
+                                                    .speed(1)
+                                                    .prefix("T"),
+                                            );
+                                        } else {
+                                            ui.small("Sin T asignado");
+                                        }
+                                    });
+                                });
+                                ui.small("T es el numero de herramienta del CNC; es independiente de la fresa de biblioteca. No emite M6 automaticamente.");                                if let Some(id) = draft.tool_id.as_deref() {
                                     if let Some(tool) = tool_library.get(id) {
                                                                                 ui.small(format!("{} · Diametro Ø{} (biblioteca)",
                                             tool.geometry.kind().label(), units.length(tool.geometry.diameter_mm(), 3)));
@@ -1211,6 +1235,7 @@ impl TestParallelPanel {
             if let Some(op) = project.operations.items.get_mut(index) {
                 let modified =
                     op.name != draft.name || op.kind != draft.kind || op.tool_id != draft.tool_id;
+                op.tool_number = draft.tool_number;
                 if modified {
                     op.name = draft.name.clone();
                     op.kind = draft.kind.clone();
@@ -1651,10 +1676,15 @@ mod operation_editor_tabs_tests {
             name: " ".into(),
             kind: OperationKind::Placeholder,
             tool_id: None,
+            tool_number: None,
             visible: true,
         };
         assert!(draft.validate().is_err());
         draft.name = "Operacion A".into();
+        assert!(draft.validate().is_ok());
+        draft.tool_number = Some(0);
+        assert!(draft.validate().is_err());
+        draft.tool_number = Some(12);
         assert!(draft.validate().is_ok());
         let p = Parameters {
             stepover: -1.0,

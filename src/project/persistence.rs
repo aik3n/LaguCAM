@@ -7,6 +7,7 @@ use crate::{
         model_transform::ModelTransform,
         operations::{
             Operation, OperationKind, OperationStatus, Operations, ParallelTestParameters,
+            nc_tool_number_valid,
         },
         origin::{OriginPoint, OriginReference, WorkOrigin},
         selection::Selection,
@@ -117,6 +118,9 @@ pub struct SavedOperation {
     pub kind: String,
     pub status: String,
     pub tool_id: Option<ToolId>,
+    /// Numero de herramienta CNC por operacion, sin asociacion automatica a biblioteca.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_number: Option<u32>,
     pub toolpath_id: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallel_test: Option<ParallelTestParameters>,
@@ -201,6 +205,7 @@ impl ProjectState {
                     }
                     .into(),
                     tool_id: op.tool_id.clone(),
+                    tool_number: op.tool_number,
                     toolpath_id: op.toolpath_id,
                     parallel_test: match &op.kind {
                         OperationKind::ParallelTest(params) => Some(*params),
@@ -252,6 +257,9 @@ impl ProjectState {
         for op in &self.operations {
             if let Some(id) = &op.tool_id {
                 validate_tool_id(id)?;
+            }
+            if !nc_tool_number_valid(op.tool_number) {
+                return Err("Numero de herramienta CNC fuera del rango T1..T9999".into());
             }
             if op.name.is_empty() || op.name.len() > 4096 {
                 return Err("Nombre de operación inválido".into());
@@ -352,6 +360,7 @@ impl ProjectState {
                         }
                     },
                     tool_id: op.tool_id.clone(),
+                    tool_number: op.tool_number,
                     toolpath_id: op.toolpath_id,
                 })
                 .collect(),
@@ -735,6 +744,7 @@ mod tests {
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Ready,
                 tool_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+                tool_number: Some(7),
                 toolpath_id: None,
             },
             Operation {
@@ -743,6 +753,7 @@ mod tests {
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Error,
                 tool_id: None,
+                tool_number: None,
                 toolpath_id: Some(7),
             },
         ];
@@ -805,6 +816,46 @@ mod tests {
     }
 
     #[test]
+    fn tool_number_is_optional_and_survives_project_roundtrip() {
+        let mut project = Project::default();
+        let index = project.operations.add_new().unwrap();
+        let saved_legacy = ProjectState::capture(&project);
+        let json_legacy = serde_json::to_value(&saved_legacy).unwrap();
+        assert!(json_legacy["operations"][0].get("tool_number").is_none());
+
+        project.operations.items[index].tool_number = Some(18);
+        let saved = ProjectState::capture(&project);
+        let json = serde_json::to_value(&saved).unwrap();
+        assert_eq!(json["operations"][0]["tool_number"], 18);
+        let loaded: ProjectState = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(
+            loaded
+                .restore(String::new(), None)
+                .unwrap()
+                .operations
+                .items[0]
+                .tool_number,
+            Some(18)
+        );
+
+        let legacy: ProjectState = serde_json::from_value(json_legacy).unwrap();
+        assert_eq!(
+            legacy
+                .restore(String::new(), None)
+                .unwrap()
+                .operations
+                .items[0]
+                .tool_number,
+            None
+        );
+
+        for invalid in [0, 10_000] {
+            let mut changed = loaded.clone();
+            changed.operations[0].tool_number = Some(invalid);
+            assert!(changed.validate(None).is_err());
+        }
+    }
+    #[test]
     fn operation_tool_id_is_uuid_in_json_and_restores_without_conversion() {
         const UUID: &str = "550e8400-e29b-41d4-a716-446655440000";
         let mut project = Project::default();
@@ -814,6 +865,7 @@ mod tests {
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: Some(UUID.into()),
+            tool_number: None,
             toolpath_id: None,
         });
         let saved = ProjectState::capture(&project);

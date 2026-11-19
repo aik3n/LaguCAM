@@ -163,7 +163,15 @@ pub struct Operation {
     pub kind: OperationKind,
     pub status: OperationStatus,
     pub tool_id: Option<ToolId>,
+    /// Numero de herramienta fisico del controlador; no sustituye el UUID de biblioteca.
+    pub tool_number: Option<u32>,
     pub toolpath_id: Option<u64>,
+}
+
+pub const MAX_NC_TOOL_NUMBER: u32 = 9999;
+
+pub fn nc_tool_number_valid(value: Option<u32>) -> bool {
+    value.is_none_or(|number| (1..=MAX_NC_TOOL_NUMBER).contains(&number))
 }
 
 #[derive(Default)]
@@ -214,6 +222,7 @@ impl Operations {
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: None,
+            tool_number: None,
             toolpath_id: None,
         });
         Ok(index)
@@ -244,6 +253,7 @@ impl Operations {
             kind: OperationKind::ParallelTest(ParallelTestParameters::default()),
             status: OperationStatus::NotCalculated,
             tool_id: None,
+            tool_number: None,
             toolpath_id: None,
         });
         Ok(index)
