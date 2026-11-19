@@ -12,7 +12,7 @@
 //! incluyendo Start/End y los redondeos, antes de simular movimiento o material.
 
 use crate::cam_contract::ConfiguredCuttingConditions;
-use crate::cam_plan::plan_batch;
+use crate::cam_plan::{BatchPlan, plan_batch, plan_single};
 use crate::nc_contract::NcUnits;
 use crate::toolpath_links::PlannedMoveKind;
 use serde::{Deserialize, Serialize};
@@ -397,12 +397,28 @@ impl NcWriter {
     }
 }
 
-/// Genera un NC sin escribir en disco. NO verifica Start/End ni confirma
-/// seguridad de maquina: el futuro interprete debera leer su texto completo.
-/// No emite un rapido hasta la posicion del primer movimiento; esa posicion
-/// es una precondicion fisica explicita para el futuro gestor de exportacion.
-/// Los G20/G21, G90, G94 y G17 se restablecen DESPUES de Start para los
-/// movimientos generados, pero los movimientos presentes en Start permanecen.
+fn validate_moves(moves_work_mm: &[PostMove]) -> Result<(), PostError> {
+    for (index, move_) in moves_work_mm.iter().enumerate() {
+        if !move_
+            .from_work_mm
+            .iter()
+            .chain(move_.to_work_mm.iter())
+            .all(|v| v.is_finite())
+        {
+            return Err(PostError::InvalidCoordinates);
+        }
+        if move_.from_work_mm == move_.to_work_mm {
+            return Err(PostError::ZeroLengthMotion);
+        }
+        if index > 0 && moves_work_mm[index - 1].to_work_mm != move_.from_work_mm {
+            return Err(PostError::DiscontinuousPath);
+        }
+    }
+    Ok(())
+}
+
+/// Entrada individual: conserva Start/End y sus propias condiciones de
+/// rechazo; el plan neutral contiene una sola operacion y ningun despeje ficticio.
 pub fn generate_program(
     profile: &PostProcessorProfile,
     input: PostInput<'_>,
@@ -419,107 +435,12 @@ pub fn generate_program(
     if input.moves_work_mm.len() > MAX_POST_MOVES {
         return Err(PostError::TooManyMoves);
     }
-    for (index, move_) in input.moves_work_mm.iter().enumerate() {
-        if !move_
-            .from_work_mm
-            .iter()
-            .chain(move_.to_work_mm.iter())
-            .all(|v| v.is_finite())
-        {
-            return Err(PostError::InvalidCoordinates);
-        }
-        if move_.from_work_mm == move_.to_work_mm {
-            return Err(PostError::ZeroLengthMotion);
-        }
-        if index > 0 && input.moves_work_mm[index - 1].to_work_mm != move_.from_work_mm {
-            return Err(PostError::DiscontinuousPath);
-        }
-    }
-
-    let mut output = NcWriter::new(profile);
-    output.custom(&profile.start_commands)?;
-    output.line(profile.units.code())?;
-    output.line("G90")?;
-    output.line("G94")?;
-    output.line("G17")?;
-    let spindle = format_number(input.conditions.spindle_rpm, profile.spindle_decimals)?;
-    if spindle.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
-        return Err(PostError::InvalidCuttingConditions);
-    }
-    output.line(&format!("S{spindle}"))?;
-    if profile.auto_start_spindle {
-        output.line(profile.spindle_direction.code())?;
-    }
-    let feed = format_number(
-        input.conditions.feed_mm_min / profile.units.mm_per_unit(),
-        profile.feed_decimals,
-    )?;
-    if feed.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
-        return Err(PostError::InvalidCuttingConditions);
-    }
-
-    let mut last_written_position: Option<[String; 3]> = None;
-    let mut feed_written = false;
-    for move_ in input.moves_work_mm {
-        let from = formatted_position(move_.from_work_mm, profile.units, profile.xyz_decimals)?;
-        let to = formatted_position(move_.to_work_mm, profile.units, profile.xyz_decimals)?;
-        if to == from {
-            return Err(PostError::RoundedMotionLost);
-        }
-        let mut line = if move_.kind == PlannedMoveKind::RapidTraverse {
-            "G0".to_owned()
-        } else {
-            "G1".to_owned()
-        };
-        let first = last_written_position.is_none();
-        for (axis, i) in [('X', 0), ('Y', 1), ('Z', 2)] {
-            if first
-                || !profile.suppress_unchanged_axes
-                || last_written_position
-                    .as_ref()
-                    .is_some_and(|p| p[i] != to[i])
-            {
-                line.push(' ');
-                line.push(axis);
-                line.push_str(&to[i]);
-            }
-        }
-        // Si los movimientos se redondean hasta convertirse en un mismo
-        // destino, abortar: omitirlos silenciosamente falsearia el programa.
-        if !first && last_written_position.as_ref().is_some_and(|p| p == &to) {
-            return Err(PostError::RoundedMotionLost);
-        }
-        if move_.kind != PlannedMoveKind::RapidTraverse && !feed_written {
-            line.push_str(" F");
-            line.push_str(&feed);
-            feed_written = true;
-        }
-        output.line(&line)?;
-        last_written_position = Some(to);
-    }
-
-    output.custom(&profile.end_commands)?;
-    if profile.auto_stop_spindle {
-        output.line("M5")?;
-    }
-    if profile.auto_program_end {
-        output.line("M30")?;
-    }
-    let first_move = input.moves_work_mm.first().expect("Entrada no vacia");
-    let last_move = input.moves_work_mm.last().expect("Entrada no vacia");
-    Ok(GeneratedNc {
-        text: output.text,
-        profile_id: profile.id.clone(),
-        units: profile.units.as_nc_units(),
-        required_first_move_position_work_mm: first_move.from_work_mm,
-        last_cam_position_work_mm: last_move.to_work_mm,
-        cam_move_count: input.moves_work_mm.len(),
-        requires_nc_interpretation: true,
-        has_custom_blocks: !profile.start_commands.is_empty() || !profile.end_commands.is_empty(),
-    })
+    validate_moves(input.moves_work_mm)?;
+    let plan = plan_single(input.moves_work_mm, input.conditions);
+    emit_plan(profile, &plan, NcGenerationMode::Individual)
 }
 
-fn emit_batch_move(
+fn emit_move(
     output: &mut NcWriter,
     profile: &PostProcessorProfile,
     movement: &PostMove,
@@ -615,22 +536,7 @@ pub fn generate_batch_program(
         {
             return Err(PostError::UnsafeBatchLink);
         }
-        for (i, movement) in operation.moves_work_mm.iter().enumerate() {
-            if !movement
-                .from_work_mm
-                .iter()
-                .chain(movement.to_work_mm.iter())
-                .all(|coordinate| coordinate.is_finite())
-            {
-                return Err(PostError::InvalidCoordinates);
-            }
-            if movement.from_work_mm == movement.to_work_mm {
-                return Err(PostError::ZeroLengthMotion);
-            }
-            if i > 0 && operation.moves_work_mm[i - 1].to_work_mm != movement.from_work_mm {
-                return Err(PostError::DiscontinuousPath);
-            }
-        }
+        validate_moves(operation.moves_work_mm)?;
         total_moves = total_moves
             .checked_add(operation.moves_work_mm.len())
             .ok_or(PostError::TooManyMoves)?;
@@ -639,27 +545,47 @@ pub fn generate_batch_program(
     if total_moves.saturating_add(reserved) > MAX_POST_MOVES {
         return Err(PostError::TooManyMoves);
     }
+    let plan = plan_batch(operations);
+    emit_plan(profile, &plan, NcGenerationMode::Batch)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NcGenerationMode {
+    Individual,
+    Batch,
+}
+
+/// Unico emisor: recibe movimientos neutrales ya planificados y validados.
+/// La modalidad solo conserva diferencias existentes de cabecera y T/M6.
+fn emit_plan(
+    profile: &PostProcessorProfile,
+    plan: &BatchPlan<'_>,
+    mode: NcGenerationMode,
+) -> Result<GeneratedNc, PostError> {
     let mut output = NcWriter::new(profile);
+    if mode == NcGenerationMode::Individual {
+        output.custom(&profile.start_commands)?;
+    }
     output.line(profile.units.code())?;
     output.line("G90")?;
     output.line("G94")?;
     output.line("G17")?;
     let mut last_written = None;
-    let plan = plan_batch(operations);
     let mut count = 0;
     for (i, planned) in plan.operations.iter().enumerate() {
-        let operation = planned.operation;
+        let operation = &planned.operation;
         for movement in planned.transition.iter().flatten() {
-            emit_batch_move(&mut output, profile, movement, &mut last_written, None)?;
+            emit_move(&mut output, profile, movement, &mut last_written, None)?;
             count += 1;
         }
-        // Cada T es una peticion independiente, incluso si se repite.
-        // El procedimiento M6 pertenece al perfil/controlador, no al CAM.
-        if let Some(number) = operation.tool_number {
-            if i > 0 && profile.auto_stop_spindle {
-                output.line("M5")?;
+        if mode == NcGenerationMode::Batch {
+            // M6 depende exclusivamente del perfil, no de la identidad geometrica.
+            if let Some(number) = operation.tool_number {
+                if i > 0 && profile.auto_stop_spindle {
+                    output.line("M5")?;
+                }
+                output.line(&format!("T{number} M6"))?;
             }
-            output.line(&format!("T{number} M6"))?;
         }
         let rpm = format_number(operation.conditions.spindle_rpm, profile.spindle_decimals)?;
         if rpm.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
@@ -684,7 +610,7 @@ pub fn generate_batch_program(
             } else {
                 None
             };
-            emit_batch_move(
+            emit_move(
                 &mut output,
                 profile,
                 movement,
@@ -694,16 +620,25 @@ pub fn generate_batch_program(
             count += 1;
         }
     }
+    if mode == NcGenerationMode::Individual {
+        output.custom(&profile.end_commands)?;
+    }
     if profile.auto_stop_spindle {
         output.line("M5")?;
     }
     if profile.auto_program_end {
         output.line("M30")?;
     }
-    let first = operations[0].moves_work_mm[0].from_work_mm;
-    let last = operations
+    let first = plan
+        .operations
+        .first()
+        .and_then(|op| op.operation.moves_work_mm.first())
+        .ok_or(PostError::EmptyToolpath)?
+        .from_work_mm;
+    let last = plan
+        .operations
         .last()
-        .and_then(|operation| operation.moves_work_mm.last())
+        .and_then(|op| op.operation.moves_work_mm.last())
         .ok_or(PostError::EmptyToolpath)?
         .to_work_mm;
     Ok(GeneratedNc {
@@ -714,7 +649,8 @@ pub fn generate_batch_program(
         last_cam_position_work_mm: last,
         cam_move_count: count,
         requires_nc_interpretation: true,
-        has_custom_blocks: false,
+        has_custom_blocks: mode == NcGenerationMode::Individual
+            && (!profile.start_commands.is_empty() || !profile.end_commands.is_empty()),
     })
 }
 

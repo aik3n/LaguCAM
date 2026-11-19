@@ -21,14 +21,21 @@ pub struct CamBatchOperation<'a> {
     pub clearance_z_work_mm: f64,
 }
 
-pub(crate) struct PlannedBatchOperation<'batch, 'moves> {
-    pub(crate) operation: &'batch CamBatchOperation<'moves>,
+#[derive(Clone, Copy)]
+pub(crate) struct PlannedOperation<'a> {
+    pub(crate) moves_work_mm: &'a [CamMove],
+    pub(crate) conditions: ConfiguredCuttingConditions,
+    pub(crate) tool_number: Option<u32>,
+}
+
+pub(crate) struct PlannedBatchOperation<'a> {
+    pub(crate) operation: PlannedOperation<'a>,
     /// Se preservan las tres etapas, omitiendo exclusivamente las nulas.
     pub(crate) transition: [Option<CamMove>; 3],
 }
 
-pub(crate) struct BatchPlan<'batch, 'moves> {
-    pub(crate) operations: Vec<PlannedBatchOperation<'batch, 'moves>>,
+pub(crate) struct BatchPlan<'a> {
+    pub(crate) operations: Vec<PlannedBatchOperation<'a>>,
 }
 
 fn rapid(from: [f64; 3], to: [f64; 3]) -> Option<CamMove> {
@@ -51,12 +58,28 @@ fn transition(previous: [f64; 3], target: [f64; 3]) -> [Option<CamMove>; 3] {
     ]
 }
 
+/// Un NC individual se planifica como una operacion sin enlaces externos.
+/// No recibe ni inventa una altura de despeje de lote.
+pub(crate) fn plan_single<'a>(
+    moves_work_mm: &'a [CamMove],
+    conditions: ConfiguredCuttingConditions,
+) -> BatchPlan<'a> {
+    BatchPlan {
+        operations: vec![PlannedBatchOperation {
+            operation: PlannedOperation {
+                moves_work_mm,
+                conditions,
+                tool_number: None,
+            },
+            transition: [None; 3],
+        }],
+    }
+}
+
 /// Requiere operaciones previamente verificadas y no vacias. Solo planifica
 /// los enlaces; cada trayectoria propia conserva sus movimientos y su orden.
 /// Ningun enlace se redondea aqui: eso corresponde al postprocesador.
-pub(crate) fn plan_batch<'batch, 'moves>(
-    operations: &'batch [CamBatchOperation<'moves>],
-) -> BatchPlan<'batch, 'moves> {
+pub(crate) fn plan_batch<'moves>(operations: &[CamBatchOperation<'moves>]) -> BatchPlan<'moves> {
     let mut previous = None;
     let mut planned = Vec::with_capacity(operations.len());
     for operation in operations {
@@ -69,7 +92,11 @@ pub(crate) fn plan_batch<'batch, 'moves>(
             None => [None; 3],
         };
         planned.push(PlannedBatchOperation {
-            operation,
+            operation: PlannedOperation {
+                moves_work_mm: operation.moves_work_mm,
+                conditions: operation.conditions,
+                tool_number: operation.tool_number,
+            },
             transition: links,
         });
         previous = operation
@@ -85,6 +112,22 @@ pub(crate) fn plan_batch<'batch, 'moves>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_plan_borrows_moves_without_a_clearance_or_t_request() {
+        let a = path([0.0, 0.0, 12.0], [0.0, 0.0, 1.0]);
+        let conditions = ConfiguredCuttingConditions {
+            feed_mm_min: 123.0,
+            spindle_rpm: 5678.0,
+        };
+        let plan = plan_single(&a, conditions);
+        assert_eq!(plan.operations.len(), 1);
+        assert!(plan.operations[0].transition.iter().all(Option::is_none));
+        assert_eq!(plan.operations[0].operation.moves_work_mm, &a);
+        assert_eq!(plan.operations[0].operation.tool_number, None);
+        assert_eq!(plan.operations[0].operation.conditions.feed_mm_min, 123.0);
+        assert_eq!(plan.operations[0].operation.conditions.spindle_rpm, 5678.0);
+    }
 
     fn op<'a>(moves: &'a [CamMove], clearance: f64) -> CamBatchOperation<'a> {
         CamBatchOperation {
