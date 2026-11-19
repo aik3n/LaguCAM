@@ -1,273 +1,167 @@
-//! P2-B2: biblioteca portable de postprocesadores y editor transaccional egui.
-//! Las instrucciones Start/End son texto del usuario. Ningún perfil certifica
-//! la seguridad CNC ni se utiliza todavía para exportar NC desde la interfaz.
-
+//! Configuracion global de UN postprocesador, independiente del proyecto.
+//! No hay biblioteca ni seleccion de perfiles durante la exportacion.
 use cam_libre_visor::nc_post::{
-    PostLineEnding, PostLineNumbers, PostProcessorProfile, PostSpindleDirection, PostUnits,
+    PostLineEnding, PostLineNumbers, PostProcessorProfile, PostSpindleDirection, PostToolChange,
+    PostUnits,
 };
 use eframe::egui;
-use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
     fs,
     io::ErrorKind,
     path::{Path, PathBuf},
 };
-use uuid::Uuid;
 
-const LIBRARY_VERSION: u32 = 1;
-const MAX_LIBRARY_BYTES: usize = 2 * 1024 * 1024;
-const MAX_USER_PROFILES: usize = 64;
-const BUILTIN_ID: &str = "grbl_3axis_mm_v1";
+const MAX_BYTES: usize = 2 * 1024 * 1024;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PostLibrary {
-    version: u32,
-    profiles: Vec<PostProcessorProfile>,
+fn default_fluidnc() -> PostProcessorProfile {
+    let mut profile = PostProcessorProfile::grbl_3axis_mm();
+    profile.id = "fluidnc_3axis_global_v1".into();
+    profile.name = "FluidNC - tres ejes (mm)".into();
+    profile.controller = "FluidNC".into();
+    profile.tool_change = PostToolChange::M6;
+    profile
 }
 
-impl Default for PostLibrary {
-    fn default() -> Self {
-        Self {
-            version: LIBRARY_VERSION,
-            profiles: Vec::new(),
+fn read_profile(path: &Path) -> Result<Option<PostProcessorProfile>, String> {
+    let meta = match fs::metadata(path) {
+        Ok(value) => value,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(format!(
+                "No se puede acceder al postprocesador global: {err}"
+            ));
         }
-    }
-}
-
-impl PostLibrary {
-    fn validate(&self) -> Result<(), String> {
-        if self.version != LIBRARY_VERSION {
-            return Err("Versión desconocida de la biblioteca de postprocesadores".into());
-        }
-        if self.profiles.len() > MAX_USER_PROFILES {
-            return Err("Se supera el máximo de 64 perfiles de usuario".into());
-        }
-        let mut seen = HashSet::new();
-        for profile in &self.profiles {
-            profile
-                .validate()
-                .map_err(|err| format!("Perfil '{}': {err}", profile.name))?;
-            if profile.id == BUILTIN_ID || !seen.insert(profile.id.as_str()) {
-                return Err("Identificador reservado o duplicado en biblioteca NC".into());
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Fichero ausente: biblioteca de usuario vacía en memoria. Nunca escribir
-/// automáticamente ni intentar reparar JSON dañado sin intervención del usuario.
-fn read_library(path: &Path) -> Result<PostLibrary, String> {
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(PostLibrary::default()),
-        Err(err) => return Err(format!("No se puede acceder a postprocessors.json: {err}")),
     };
-    if metadata.len() > MAX_LIBRARY_BYTES as u64 {
-        return Err("postprocessors.json excede el límite de 2 MiB".into());
+    if meta.len() > MAX_BYTES as u64 {
+        return Err("El fichero de postprocesador supera 2 MiB".into());
     }
-    let data =
-        fs::read(path).map_err(|err| format!("No se puede leer postprocessors.json: {err}"))?;
-    if data.len() > MAX_LIBRARY_BYTES {
-        return Err("postprocessors.json excede el límite de 2 MiB".into());
+    let data = fs::read(path).map_err(|e| format!("No se puede leer el postprocesador: {e}"))?;
+    if data.len() > MAX_BYTES {
+        return Err("El fichero de postprocesador supera 2 MiB".into());
     }
-    let library: PostLibrary = serde_json::from_slice(&data)
-        .map_err(|err| format!("JSON inválido en postprocessors.json: {err}"))?;
-    library.validate()?;
-    Ok(library)
+    let profile: PostProcessorProfile = serde_json::from_slice(&data).map_err(|e| {
+        format!("JSON no valido: se espera UN postprocesador, no una biblioteca: {e}")
+    })?;
+    profile.validate().map_err(|e| e.to_string())?;
+    Ok(Some(profile))
 }
 
-fn write_library(path: &Path, library: &PostLibrary) -> Result<(), String> {
-    library.validate()?;
-    let bytes = serde_json::to_vec_pretty(library)
-        .map_err(|err| format!("No se puede serializar biblioteca NC: {err}"))?;
-    if bytes.len() > MAX_LIBRARY_BYTES {
-        return Err("La biblioteca NC supera el límite de 2 MiB".into());
+fn write_profile(path: &Path, profile: &PostProcessorProfile) -> Result<(), String> {
+    profile.validate().map_err(|e| e.to_string())?;
+    let data = serde_json::to_vec_pretty(profile).map_err(|e| e.to_string())?;
+    if data.len() > MAX_BYTES {
+        return Err("Postprocesador demasiado grande".into());
     }
-    crate::portable::atomic_write(path, &bytes)
-}
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum EditorTab {
-    #[default]
-    General,
-    StartEnd,
-    Movement,
-    FeedSpindle,
+    crate::portable::atomic_write(path, &data)
 }
 
 pub struct PostUi {
     pub open: bool,
     path: Option<PathBuf>,
-    library: PostLibrary,
-    selected_id: String,
-    draft: Option<PostProcessorProfile>,
-    tab: EditorTab,
-    error: String,
+    current: PostProcessorProfile,
+    draft: PostProcessorProfile,
     blocked: bool,
-    confirm_delete: bool,
+    message: String,
 }
 
 impl PostUi {
     pub fn load() -> Self {
-        let mut error = String::new();
-        let path = match crate::portable::config_file("postprocessors.json") {
+        let mut message = String::new();
+        let path = match crate::portable::config_file("postprocessor.json") {
             Ok(path) => Some(path),
-            Err(err) => {
-                error = err;
+            Err(e) => {
+                message = e;
                 None
             }
         };
         let mut blocked = path.is_none();
-        let library = match path.as_ref() {
-            Some(path) => match read_library(path) {
-                Ok(library) => library,
-                Err(err) => {
-                    blocked = true;
-                    error = err;
-                    PostLibrary::default()
-                }
-            },
-            None => PostLibrary::default(),
+        let current = match path.as_ref().map(|p| read_profile(p)) {
+            Some(Ok(Some(p))) => p,
+            Some(Ok(None)) => default_fluidnc(),
+            Some(Err(e)) => {
+                blocked = true;
+                message = e;
+                default_fluidnc()
+            }
+            None => default_fluidnc(),
         };
+        let draft = current.clone();
         Self {
             open: false,
             path,
-            library,
-            selected_id: BUILTIN_ID.into(),
-            draft: None,
-            tab: EditorTab::General,
-            error,
+            current,
+            draft,
             blocked,
-            confirm_delete: false,
+            message,
         }
     }
 
-    /// Solo perfiles guardados; los cambios del borrador no se exportan.
-    /// Ante una biblioteca ilegible, no se utiliza su contenido en postprocesado.
+    /// Compatibilidad transitoria con las ventanas NC: siempre devuelve
+    /// exactamente el postprocesador global vigente, nunca una biblioteca.
     pub fn profiles_for_export(&self) -> Vec<PostProcessorProfile> {
         if self.blocked {
-            return Vec::new();
-        }
-        let mut profiles = vec![PostProcessorProfile::grbl_3axis_mm()];
-        profiles.extend(self.library.profiles.iter().cloned());
-        profiles
-    }
-    fn selected_profile(&self) -> Option<PostProcessorProfile> {
-        if self.selected_id == BUILTIN_ID {
-            Some(PostProcessorProfile::grbl_3axis_mm())
+            Vec::new()
         } else {
-            self.library
-                .profiles
-                .iter()
-                .find(|p| p.id == self.selected_id)
-                .cloned()
+            vec![self.current.clone()]
         }
     }
 
-    fn switch_to(&mut self, id: &str) {
-        if self.draft.is_some() {
-            self.error = "Guarda o cancela la edición antes de cambiar de perfil".into();
-            return;
-        }
-        self.selected_id = id.to_owned();
-        self.confirm_delete = false;
-        self.error.clear();
-    }
-
-    fn start_new(&mut self, duplicate: bool) {
+    fn save(&mut self) {
         if self.blocked {
+            self.message = "Configuracion bloqueada: corrige el JSON danado; no se sobrescribe automaticamente".into();
             return;
         }
-        if self.draft.is_some() {
-            self.error = "Guarda o cancela el perfil antes de crear otro".into();
-            return;
-        }
-        let mut profile = if duplicate {
-            match self.selected_profile() {
-                Some(profile) => profile,
-                None => return,
-            }
-        } else {
-            PostProcessorProfile::grbl_3axis_mm()
-        };
-        profile.id = format!("user_{}", Uuid::new_v4().simple());
-        profile.name = if duplicate {
-            format!("Copia de {}", profile.name)
-        } else {
-            "Nuevo postprocesador".into()
-        };
-        // El perfil no se guarda hasta pulsar Guardar.
-        self.draft = Some(profile);
-        self.tab = EditorTab::General;
-        self.error.clear();
-        self.confirm_delete = false;
-    }
-
-    fn start_edit(&mut self) {
-        if self.blocked || self.draft.is_some() || self.selected_id == BUILTIN_ID {
-            return;
-        }
-        self.draft = self.selected_profile();
-        self.tab = EditorTab::General;
-        self.error.clear();
-    }
-
-    fn save_draft(&mut self) {
-        if self.blocked {
-            return;
-        }
-        let Some(draft) = self.draft.as_ref() else {
+        let Some(path) = &self.path else {
+            self.message = "Sin ruta de configuracion".into();
             return;
         };
-        let Some(path) = self.path.as_ref() else {
-            self.error = "No hay ruta de biblioteca NC".into();
-            return;
-        };
-        let mut candidate = self.library.clone();
-        let profile = draft.clone();
-        if let Some(existing) = candidate.profiles.iter_mut().find(|p| p.id == profile.id) {
-            *existing = profile.clone();
-        } else {
-            candidate.profiles.push(profile.clone());
-        }
-        match write_library(path, &candidate) {
+        match write_profile(path, &self.draft) {
             Ok(()) => {
-                self.library = candidate;
-                self.selected_id = profile.id;
-                self.draft = None;
-                self.error.clear();
-                self.confirm_delete = false;
+                self.current = self.draft.clone();
+                self.message = "Postprocesador global guardado".into();
             }
-            Err(err) => self.error = err,
+            Err(e) => self.message = format!("ERROR: {e}"),
         }
     }
 
-    fn delete_selected(&mut self) {
-        if self.blocked || self.draft.is_some() || self.selected_id == BUILTIN_ID {
-            return;
-        }
-        let Some(path) = self.path.as_ref() else {
-            self.error = "No hay ruta de biblioteca NC".into();
+    fn import(&mut self) {
+        let path = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .pick_file();
+        let Some(path) = path else {
             return;
         };
-        let mut candidate = self.library.clone();
-        let before = candidate.profiles.len();
-        candidate.profiles.retain(|p| p.id != self.selected_id);
-        if before == candidate.profiles.len() {
-            self.error = "El perfil seleccionado ya no existe".into();
+        match read_profile(&path) {
+            Ok(Some(profile)) => {
+                self.draft = profile;
+                self.message =
+                    "Importado al editor. Pulsa Guardar para activar la configuracion global"
+                        .into();
+            }
+            Ok(None) => self.message = "ERROR: Fichero inexistente".into(),
+            Err(e) => self.message = format!("ERROR: {e}"),
+        }
+    }
+
+    fn export(&mut self) {
+        let path = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .set_file_name("lagucam-postprocesador.json")
+            .save_file();
+        let Some(path) = path else {
+            return;
+        };
+        if !path
+            .extension()
+            .and_then(|s| s.to_str())
+            .is_some_and(|s| s.eq_ignore_ascii_case("json"))
+        {
+            self.message = "ERROR: La exportacion debe terminar en .json".into();
             return;
         }
-        match write_library(path, &candidate) {
-            Ok(()) => {
-                self.library = candidate;
-                self.selected_id = BUILTIN_ID.into();
-                self.confirm_delete = false;
-                self.error.clear();
-            }
-            Err(err) => self.error = err,
+        match write_profile(&path, &self.current) {
+            Ok(()) => self.message = format!("Exportado: {}", path.display()),
+            Err(e) => self.message = format!("ERROR: {e}"),
         }
     }
 
@@ -275,327 +169,126 @@ impl PostUi {
         if !self.open {
             return;
         }
-        let mut window_open = self.open;
-        egui::Window::new("Biblioteca de postprocesadores")
-            .open(&mut window_open)
-            .default_size([1050.0, 700.0])
-            .min_width(740.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                if self.blocked {
-                    ui.colored_label(egui::Color32::RED,
-                        "La biblioteca NC no está disponible. No se sobrescribirá el archivo existente.");
+        let mut open = self.open;
+        egui::Window::new("Postprocesador - configuracion global")
+            .open(&mut open).default_size([700.0, 620.0]).min_width(580.0)
+            .resizable(true).show(ctx, |ui| {
+                ui.small("Un postprocesador activo para todos los proyectos y todas las exportaciones NC.");
+                ui.small("Config/postprocessor.json. La antigua postprocessors.json se conserva intacta, sin utilizar.");
+                if !self.message.is_empty() {
+                    let color = if self.blocked || self.message.starts_with("ERROR") {
+                        egui::Color32::LIGHT_RED
+                    } else { ui.visuals().text_color() };
+                    ui.colored_label(color, &self.message);
                 }
-                if !self.error.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
-                }
-                ui.columns(2, |cols| {
-                    cols[0].set_min_width(290.0);
-                    cols[0].heading("Perfiles");
-                    cols[1].heading("Configuración");
-                    cols[0].separator();
-                    cols[1].separator();
-                    self.list_panel(&mut cols[0]);
-                    self.editor_panel(&mut cols[1]);
-                });
-                ui.separator();
-                ui.small("Start/End: comandos libres bajo responsabilidad del usuario. La simulación debe interpretar el NC final; esta ventana no verifica seguridad de máquina.");
-                ui.small("Configuración independiente de proyectos: config/postprocessors.json");
-            });
-        self.open = window_open;
-    }
-
-    fn list_panel(&mut self, ui: &mut egui::Ui) {
-        let mut entries = vec![(
-            BUILTIN_ID.to_owned(),
-            "GRBL 1.1 - tres ejes (mm) [incluido]".to_owned(),
-        )];
-        entries.extend(
-            self.library
-                .profiles
-                .iter()
-                .map(|p| (p.id.clone(), p.name.clone())),
-        );
-        egui::ScrollArea::vertical()
-            .max_height(410.0)
-            .show(ui, |ui| {
-                for (id, name) in entries {
-                    if ui.selectable_label(self.selected_id == id, name).clicked() {
-                        self.switch_to(&id);
-                    }
-                }
-            });
-        ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    !self.blocked && self.draft.is_none(),
-                    egui::Button::new("Nuevo"),
-                )
-                .clicked()
-            {
-                self.start_new(false);
-            }
-            if ui
-                .add_enabled(
-                    !self.blocked && self.draft.is_none(),
-                    egui::Button::new("Duplicar"),
-                )
-                .clicked()
-            {
-                self.start_new(true);
-            }
-            if ui
-                .add_enabled(
-                    !self.blocked && self.draft.is_none() && self.selected_id != BUILTIN_ID,
-                    egui::Button::new("Editar"),
-                )
-                .clicked()
-            {
-                self.start_edit();
-            }
-        });
-        if self.selected_id == BUILTIN_ID {
-            ui.small("Perfil incluido de solo lectura: duplica para personalizar.");
-        }
-        let can_delete = !self.blocked && self.draft.is_none() && self.selected_id != BUILTIN_ID;
-        if can_delete {
-            if !self.confirm_delete {
-                if ui.button("Eliminar perfil…").clicked() {
-                    self.confirm_delete = true;
-                }
-            } else {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "¿Eliminar este perfil de la biblioteca?",
-                );
                 ui.horizontal(|ui| {
-                    if ui.button("Sí, eliminar").clicked() {
-                        self.delete_selected();
-                    }
-                    if ui.button("Cancelar").clicked() {
-                        self.confirm_delete = false;
+                    if ui.button("Importar JSON...").clicked() { self.import(); }
+                    if ui.button("Exportar vigente...").clicked() { self.export(); }
+                    if ui.button("Restaurar borrador").clicked() {
+                        self.draft = self.current.clone();
+                        self.message.clear();
                     }
                 });
-            }
-        }
-    }
-
-    fn editor_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(draft) = self.draft.as_mut() else {
-            if let Some(profile) = self.selected_profile() {
-                ui.heading(profile.name);
-                ui.label(format!("Controlador: {}", profile.controller));
-                ui.label(format!("Extensión: .{}", profile.extension));
-                ui.label(format!(
-                    "Unidades NC: {}",
-                    match profile.units {
-                        PostUnits::Millimeters => "mm (G21)",
-                        PostUnits::Inches => "inch (G20)",
+                ui.horizontal(|ui| {
+                    if ui.button("Usar plantilla FluidNC").clicked() {
+                        self.draft = default_fluidnc();
                     }
-                ));
-                ui.label(format!(
-                    "Decimales XYZ: {} · F: {} · S: {}",
-                    profile.xyz_decimals, profile.feed_decimals, profile.spindle_decimals
-                ));
-                ui.label(format!(
-                    "Numeración: {}",
-                    if profile.line_numbers.is_some() {
-                        "sí"
-                    } else {
-                        "no"
+                    if ui.button("Usar plantilla GRBL 1.1").clicked() {
+                        self.draft = PostProcessorProfile::grbl_3axis_mm();
                     }
-                ));
-                ui.label(format!(
-                    "Husillo automático: {}",
-                    if profile.auto_start_spindle {
-                        "sí"
-                    } else {
-                        "no"
-                    }
-                ));
+                });
+                ui.colored_label(egui::Color32::YELLOW,
+                    "Tn M6 requiere un controlador o macro M6 compatible y configurado. LaguCAM no puede verificar el cambio fisico.");
                 ui.separator();
-                ui.label("Start (solo lectura)");
-                ui.monospace(if profile.start_commands.is_empty() {
-                    "(sin instrucciones)"
-                } else {
-                    &profile.start_commands
-                });
-                ui.separator();
-                ui.label("End (solo lectura)");
-                ui.monospace(if profile.end_commands.is_empty() {
-                    "(sin instrucciones)"
-                } else {
-                    &profile.end_commands
-                });
-            }
-            return;
-        };
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.tab, EditorTab::General, "General");
-            ui.selectable_value(&mut self.tab, EditorTab::StartEnd, "Start / End");
-            ui.selectable_value(&mut self.tab, EditorTab::Movement, "Movimiento");
-            ui.selectable_value(&mut self.tab, EditorTab::FeedSpindle, "Avance / Husillo");
-        });
-        ui.separator();
-        egui::ScrollArea::vertical().max_height(510.0).show(ui, |ui| {
-            match self.tab {
-                EditorTab::General => {
-                    ui.label("Nombre del postprocesador");
-                    ui.text_edit_singleline(&mut draft.name);
-                    ui.label("Identificador (fijo)");
-                    ui.monospace(&draft.id);
-                    ui.label("Controlador");
-                    ui.text_edit_singleline(&mut draft.controller);
-                    ui.label("Extensión NC (sin punto)");
-                    ui.text_edit_singleline(&mut draft.extension);
-                    ui.label("Unidades del G-code (independientes de Opciones)");
+                let mut save = false;
+                egui::ScrollArea::vertical().max_height(470.0).show(ui, |ui| {
+                    let draft = &mut self.draft;
                     ui.horizontal(|ui| {
-                        ui.selectable_value(&mut draft.units, PostUnits::Millimeters, "G21 - mm");
-                        ui.selectable_value(&mut draft.units, PostUnits::Inches, "G20 - inch");
+                        ui.label("Nombre"); ui.text_edit_singleline(&mut draft.name);
                     });
-                    ui.label("Finales de línea");
                     ui.horizontal(|ui| {
+                        ui.label("Controlador"); ui.text_edit_singleline(&mut draft.controller);
+                    });
+                    ui.small(format!("Identificador del postprocesador: {}", draft.id));
+                    ui.horizontal(|ui| {
+                        ui.label("Extension NC"); ui.text_edit_singleline(&mut draft.extension);
+                        ui.label("Unidades");
+                        ui.selectable_value(&mut draft.units, PostUnits::Millimeters, "G21 mm");
+                        ui.selectable_value(&mut draft.units, PostUnits::Inches, "G20 inch");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Decimales XYZ"); ui.add(egui::DragValue::new(&mut draft.xyz_decimals).range(0..=8));
+                        ui.label("F"); ui.add(egui::DragValue::new(&mut draft.feed_decimals).range(0..=6));
+                        ui.label("S"); ui.add(egui::DragValue::new(&mut draft.spindle_decimals).range(0..=3));
+                    });
+                    ui.checkbox(&mut draft.suppress_unchanged_axes, "Omitir ejes XYZ sin cambio");
+                    ui.horizontal(|ui| {
+                        ui.label("Final de linea");
                         ui.selectable_value(&mut draft.line_ending, PostLineEnding::Lf, "LF");
                         ui.selectable_value(&mut draft.line_ending, PostLineEnding::CrLf, "CRLF");
                     });
                     let mut numbered = draft.line_numbers.is_some();
-                    if ui.checkbox(&mut numbered, "Numerar líneas con N").changed() {
+                    if ui.checkbox(&mut numbered, "Numeracion N").changed() {
                         draft.line_numbers = numbered.then_some(PostLineNumbers { start: 5, step: 5 });
                     }
                     if let Some(numbers) = draft.line_numbers.as_mut() {
                         ui.horizontal(|ui| {
-                            ui.label("Inicio N");
-                            ui.add(egui::DragValue::new(&mut numbers.start).range(1..=u32::MAX));
-                            ui.label("Incremento");
-                            ui.add(egui::DragValue::new(&mut numbers.step).range(1..=u32::MAX));
+                            ui.label("N inicial"); ui.add(egui::DragValue::new(&mut numbers.start).range(1..=u32::MAX));
+                            ui.label("Paso"); ui.add(egui::DragValue::new(&mut numbers.step).range(1..=u32::MAX));
                         });
                     }
-                }
-                EditorTab::StartEnd => {
-                    ui.label("Start: instrucciones antes de la cabecera NC normalizada");
-                    ui.add(egui::TextEdit::multiline(&mut draft.start_commands)
-                        .desired_rows(9).desired_width(f32::INFINITY).code_editor());
+                    ui.horizontal(|ui| {
+                        ui.label("Sentido husillo");
+                        ui.selectable_value(&mut draft.spindle_direction, PostSpindleDirection::Clockwise, "M3");
+                        ui.selectable_value(&mut draft.spindle_direction, PostSpindleDirection::CounterClockwise, "M4");
+                    });
+                    ui.checkbox(&mut draft.auto_start_spindle, "Arranque de husillo automatico");
+                    ui.checkbox(&mut draft.auto_stop_spindle, "M5 al final");
+                    ui.checkbox(&mut draft.auto_program_end, "M30 al final");
+                    ui.horizontal(|ui| {
+                        ui.label("Cambios de herramienta");
+                        ui.selectable_value(&mut draft.tool_change, PostToolChange::Unsupported, "No emitir M6");
+                        ui.selectable_value(&mut draft.tool_change, PostToolChange::M6, "Tn M6 en cada operacion con T");
+                    });
                     ui.separator();
-                    ui.label("End: instrucciones después de los movimientos CAM");
-                    ui.add(egui::TextEdit::multiline(&mut draft.end_commands)
-                        .desired_rows(9).desired_width(f32::INFINITY).code_editor());
-                    ui.small("Se guardan sin interpretarlas; se validan caracteres y longitud. Las instrucciones pueden mover físicamente la máquina.");
-                }
-                EditorTab::Movement => {
-                    ui.label("Movimiento de avance G1 · rápido G0 · ejes XYZ · absoluto G90");
-                    ui.horizontal(|ui| {
-                        ui.label("Decimales XYZ");
-                        ui.add(egui::DragValue::new(&mut draft.xyz_decimals).range(0..=8));
-                    });
-                    ui.checkbox(&mut draft.suppress_unchanged_axes, "Omitir ejes sin cambio");
-                    ui.small("La precisión afecta al G-code final. El motor rechazará movimientos que desaparezcan al redondear.");
-                }
-                EditorTab::FeedSpindle => {
-                    ui.horizontal(|ui| {
-                        ui.label("Decimales F");
-                        ui.add(egui::DragValue::new(&mut draft.feed_decimals).range(0..=6));
-                        ui.label("Decimales S");
-                        ui.add(egui::DragValue::new(&mut draft.spindle_decimals).range(0..=3));
-                    });
-                    ui.label("Sentido de husillo");
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut draft.spindle_direction,
-                            PostSpindleDirection::Clockwise, "M3 horario");
-                        ui.selectable_value(&mut draft.spindle_direction,
-                            PostSpindleDirection::CounterClockwise, "M4 antihorario");
-                    });
-                    ui.checkbox(&mut draft.auto_start_spindle, "Emitir M3/M4 automáticamente");
-                    ui.checkbox(&mut draft.auto_stop_spindle, "Emitir M5 al final");
-                    ui.checkbox(&mut draft.auto_program_end, "Emitir M30 al final");
-                    ui.small("F procede de la operación; S procede de la operación. Ningún valor se inventa aquí.");
-                }
-            }
-        });
-        ui.separator();
-        ui.horizontal(|ui| {
-            if ui.button("Guardar perfil").clicked() {
-                self.save_draft();
-            }
-            if ui.button("Cancelar edición").clicked() {
-                self.draft = None;
-                self.error.clear();
-            }
-        });
+                    ui.label("Start (antes del programa)");
+                    ui.add(egui::TextEdit::multiline(&mut draft.start_commands).desired_rows(4).code_editor());
+                    ui.label("End (despues del programa)");
+                    ui.add(egui::TextEdit::multiline(&mut draft.end_commands).desired_rows(4).code_editor());
+                    ui.small("El NC conjunto no acepta actualmente Start/End con comandos personalizados: no se conoce su efecto sobre la posicion de enlace.");
+                });
+                ui.separator();
+                if ui.add_enabled(!self.blocked, egui::Button::new("Guardar postprocesador global")).clicked() { save = true; }
+                if save { self.save(); }
+            });
+        self.open = open;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_path() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("lagucam-postlib-{}", Uuid::new_v4()));
-        fs::create_dir_all(&dir).unwrap();
-        dir.join("postprocessors.json")
-    }
-
-    fn example_profile() -> PostProcessorProfile {
-        let mut p = PostProcessorProfile::grbl_3axis_mm();
-        p.id = "user_test_001".into();
-        p.name = "Personalizado".into();
-        p.start_commands = "G21\nG90\n".into();
-        p.end_commands = "M5\nM30".into();
-        p
-    }
-
     #[test]
-    fn missing_library_is_in_memory_only_and_roundtrips() {
-        let path = test_path();
-        assert_eq!(read_library(&path).unwrap(), PostLibrary::default());
-        assert!(!path.exists());
-        let library = PostLibrary {
-            version: LIBRARY_VERSION,
-            profiles: vec![example_profile()],
-        };
-        write_library(&path, &library).unwrap();
-        assert_eq!(read_library(&path).unwrap(), library);
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    fn global_profile_roundtrip_and_legacy_default() {
+        let path =
+            std::env::temp_dir().join(format!("lagucam-postglobal-{}.json", uuid::Uuid::new_v4()));
+        assert!(read_profile(&path).unwrap().is_none());
+        let profile = default_fluidnc();
+        assert_eq!(profile.tool_change, PostToolChange::M6);
+        write_profile(&path, &profile).unwrap();
+        assert_eq!(read_profile(&path).unwrap(), Some(profile));
+        fs::remove_file(path).unwrap();
     }
-
     #[test]
-    fn rejects_duplicate_reserved_and_future_profiles() {
-        let p = example_profile();
-        let mut library = PostLibrary {
-            version: LIBRARY_VERSION,
-            profiles: vec![p.clone(), p],
-        };
-        assert!(library.validate().is_err());
-        library.profiles.pop();
-        library.profiles[0].id = BUILTIN_ID.into();
-        assert!(library.validate().is_err());
-        library.profiles[0].id = "user_valid_01".into();
-        library.version = 99;
-        assert!(library.validate().is_err());
-    }
-
-    #[test]
-    fn corrupt_json_is_not_overwritten_while_loading() {
-        let path = test_path();
+    fn invalid_profile_is_not_overwritten() {
+        let path =
+            std::env::temp_dir().join(format!("lagucam-postbad-{}.json", uuid::Uuid::new_v4()));
         fs::write(&path, b"{broken").unwrap();
-        assert!(read_library(&path).is_err());
+        assert!(read_profile(&path).is_err());
+        let mut invalid = default_fluidnc();
+        invalid.xyz_decimals = 99;
+        assert!(write_profile(&path, &invalid).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"{broken");
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
-    }
-
-    #[test]
-    fn invalid_custom_commands_are_not_saved() {
-        let path = test_path();
-        let library = PostLibrary {
-            version: LIBRARY_VERSION,
-            profiles: vec![example_profile()],
-        };
-        write_library(&path, &library).unwrap();
-        let baseline = fs::read(&path).unwrap();
-        let mut invalid = library;
-        invalid.profiles[0].start_commands = "G90\0M30".into();
-        assert!(write_library(&path, &invalid).is_err());
-        assert_eq!(fs::read(&path).unwrap(), baseline);
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        fs::remove_file(path).unwrap();
     }
 }

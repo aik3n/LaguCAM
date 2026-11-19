@@ -68,6 +68,20 @@ impl PostSpindleDirection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PostToolChange {
+    #[default]
+    Unsupported,
+    M6,
+}
+
+impl PostToolChange {
+    pub fn is_unsupported(&self) -> bool {
+        *self == Self::Unsupported
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PostLineEnding {
@@ -118,6 +132,8 @@ pub struct PostProcessorProfile {
     pub auto_start_spindle: bool,
     pub auto_stop_spindle: bool,
     pub auto_program_end: bool,
+    #[serde(default, skip_serializing_if = "PostToolChange::is_unsupported")]
+    pub tool_change: PostToolChange,
 }
 
 impl PostProcessorProfile {
@@ -143,6 +159,7 @@ impl PostProcessorProfile {
             auto_start_spindle: true,
             auto_stop_spindle: true,
             auto_program_end: true,
+            tool_change: PostToolChange::Unsupported,
         }
     }
 
@@ -224,6 +241,7 @@ pub enum PostError {
     EmptyToolpath,
     TooManyMoves,
     InvalidToolNumber,
+    UnsupportedToolChange,
     BatchToolChange,
     UnsafeBatchLink,
     InvalidCoordinates,
@@ -246,6 +264,9 @@ impl fmt::Display for PostError {
             Self::EmptyToolpath => "No hay movimientos CAM para postprocesar",
             Self::TooManyMoves => "Demasiados movimientos CAM para postprocesar",
             Self::InvalidToolNumber => "Numero de herramienta CNC invalido (T1..T9999)",
+            Self::UnsupportedToolChange => {
+                "El postprocesador global no tiene M6 habilitado: configuralo solo si el controlador admite Tn M6"
+            }
             Self::BatchToolChange => {
                 "El lote requiere un cambio fisico de herramienta no configurado"
             }
@@ -509,7 +530,7 @@ pub fn generate_program(
 pub struct PostBatchOperation<'a> {
     pub moves_work_mm: &'a [PostMove],
     pub conditions: ConfiguredCuttingConditions,
-    pub tool_number: u32,
+    pub tool_number: Option<u32>,
     /// Altura de despeje de esta operacion, en el mismo sistema de trabajo.
     pub clearance_z_work_mm: f64,
 }
@@ -562,11 +583,12 @@ fn emit_batch_move(
     Ok(())
 }
 
-/// Genera un unico programa para operaciones sucesivas de LA MISMA herramienta.
-/// Cada trayectoria empieza y acaba en su despeje. El enlace sube a la mayor Z,
-/// cruza horizontalmente y baja a la siguiente Z, siempre por movimientos G0
-/// separados por eje. No resuelve fijaciones ni cambios de herramienta fisicos.
-/// El usuario debe colocar previamente la herramienta en la posicion inicial CAM.
+/// NC conjunto: las operaciones definen T opcional; el post traduce cada
+/// solicitud en Tn M6 si el perfil lo admite. No deduplica numeros repetidos
+/// ni infiere cambios desde la identidad geometrica.
+/// Cada enlace mantiene Z segura (subir, XY, bajar), sin validar fijaciones.
+/// Una macro M6 configurada debe devolver el control a la misma posicion de
+/// trabajo, o el perfil del controlador debe implementar ese contrato.
 pub fn generate_batch_program(
     profile: &PostProcessorProfile,
     operations: &[PostBatchOperation<'_>],
@@ -575,19 +597,18 @@ pub fn generate_batch_program(
     if operations.is_empty() {
         return Err(PostError::EmptyToolpath);
     }
-    // Start/End personalizados pueden mover ejes o cambiar estado modal; no se
-    // deduce de ellos una posicion de enlace segura.
     if !profile.start_commands.trim().is_empty() || !profile.end_commands.trim().is_empty() {
         return Err(PostError::UnsafeBatchLink);
     }
-    let number = operations[0].tool_number;
-    if !(1..=9999).contains(&number) {
-        return Err(PostError::InvalidToolNumber);
-    }
     let mut total_moves = 0usize;
     for operation in operations {
-        if operation.tool_number != number {
-            return Err(PostError::BatchToolChange);
+        if let Some(number) = operation.tool_number {
+            if !(1..=9999).contains(&number) {
+                return Err(PostError::InvalidToolNumber);
+            }
+            if profile.tool_change != PostToolChange::M6 {
+                return Err(PostError::UnsupportedToolChange);
+            }
         }
         if !finite_positive(operation.conditions.feed_mm_min)
             || !finite_positive(operation.conditions.spindle_rpm)
@@ -630,7 +651,6 @@ pub fn generate_batch_program(
             .checked_add(operation.moves_work_mm.len())
             .ok_or(PostError::TooManyMoves)?;
     }
-    // Maximo tres enlaces entre dos operaciones: subida, XY y bajada.
     let reserved = operations.len().saturating_sub(1).saturating_mul(3);
     if total_moves.saturating_add(reserved) > MAX_POST_MOVES {
         return Err(PostError::TooManyMoves);
@@ -640,7 +660,6 @@ pub fn generate_batch_program(
     output.line("G90")?;
     output.line("G94")?;
     output.line("G17")?;
-    output.line(&format!("T{number}"))?;
     let mut last_written = None;
     let mut position: Option<[f64; 3]> = None;
     let mut count = 0;
@@ -676,12 +695,20 @@ pub fn generate_batch_program(
                 }
             }
         }
+        // Cada T es una peticion independiente, incluso si se repite.
+        // El procedimiento M6 pertenece al perfil/controlador, no al CAM.
+        if let Some(number) = operation.tool_number {
+            if i > 0 && profile.auto_stop_spindle {
+                output.line("M5")?;
+            }
+            output.line(&format!("T{number} M6"))?;
+        }
         let rpm = format_number(operation.conditions.spindle_rpm, profile.spindle_decimals)?;
         if rpm.parse::<f64>().ok().is_none_or(|value| value <= 0.0) {
             return Err(PostError::InvalidCuttingConditions);
         }
         output.line(&format!("S{rpm}"))?;
-        if i == 0 && profile.auto_start_spindle {
+        if profile.auto_start_spindle {
             output.line(profile.spindle_direction.code())?;
         }
         let feed = format_number(
@@ -737,18 +764,18 @@ pub fn generate_batch_program(
 mod batch_generation_tests {
     use super::*;
 
-    fn operation(a: [f64; 3], tip: [f64; 3]) -> [PostMove; 2] {
+    fn operation(at: [f64; 3], tip: [f64; 3]) -> [PostMove; 2] {
         [
             PostMove {
                 kind: PlannedMoveKind::Approach,
-                from_work_mm: a,
+                from_work_mm: at,
                 to_work_mm: tip,
                 pass_index: 0,
             },
             PostMove {
                 kind: PlannedMoveKind::Retract,
                 from_work_mm: tip,
-                to_work_mm: a,
+                to_work_mm: at,
                 pass_index: 0,
             },
         ]
@@ -761,93 +788,126 @@ mod batch_generation_tests {
         }
     }
 
+    fn op<'a>(moves: &'a [PostMove], t: Option<u32>, f: f64, z: f64) -> PostBatchOperation<'a> {
+        PostBatchOperation {
+            moves_work_mm: moves,
+            conditions: conditions(f, 8000.0),
+            tool_number: t,
+            clearance_z_work_mm: z,
+        }
+    }
+
     #[test]
-    fn linked_operations_raise_cross_and_descend_with_single_header() {
-        let a = operation([1.0, 2.0, 12.0], [1.0, 2.0, 2.0]);
-        let b = operation([9.0, 4.0, 20.0], [9.0, 4.0, 4.0]);
-        let batch = [
-            PostBatchOperation {
-                moves_work_mm: &a,
-                conditions: conditions(100.0, 8000.0),
-                tool_number: 3,
-                clearance_z_work_mm: 12.0,
-            },
-            PostBatchOperation {
-                moves_work_mm: &b,
-                conditions: conditions(250.0, 12000.0),
-                tool_number: 3,
-                clearance_z_work_mm: 20.0,
-            },
-        ];
-        let nc = generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap();
-        assert!(nc.text.starts_with("G21\nG90\nG94\nG17\nT3\nS8000\nM3\n"));
-        assert!(nc.text.contains("G0 X1.000 Y2.000 Z20.000"));
-        assert!(nc.text.contains("G0 X9.000 Y4.000 Z20.000"));
-        assert!(nc.text.contains("G1 X9.000 Y4.000 Z4.000 F250.000"));
-        assert_eq!(nc.text.matches("M30").count(), 1);
-        assert_eq!(nc.text.matches("T3\n").count(), 1);
+    fn every_explicit_t_emits_m6_even_when_repeated() {
+        let a = operation([0.0, 0.0, 12.0], [0.0, 0.0, 1.0]);
+        let b = operation([5.0, 0.0, 20.0], [5.0, 0.0, 2.0]);
+        let mut profile = PostProcessorProfile::grbl_3axis_mm();
+        profile.tool_change = PostToolChange::M6;
+        let paths = [op(&a, Some(3), 100.0, 12.0), op(&b, Some(3), 220.0, 20.0)];
+        let nc = generate_batch_program(&profile, &paths).unwrap();
+        assert_eq!(nc.text.lines().filter(|line| *line == "T3 M6").count(), 2);
+        assert_eq!(nc.text.lines().filter(|line| *line == "M3").count(), 2);
+        assert_eq!(nc.text.lines().filter(|line| *line == "M30").count(), 1);
+        assert!(nc.text.contains("G0 X0.000 Y0.000 Z20.000"));
+        assert!(nc.text.contains("G0 X5.000 Y0.000 Z20.000"));
+        assert!(nc.text.contains("F220.000"));
         assert_eq!(nc.cam_move_count, 6);
     }
 
     #[test]
-    fn rejects_tool_change_and_unknown_clearance() {
+    fn mixed_and_distinct_t_keep_explicit_requests_in_order() {
         let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
-        let mut batch = [
-            PostBatchOperation {
-                moves_work_mm: &a,
-                conditions: conditions(100.0, 8000.0),
-                tool_number: 1,
-                clearance_z_work_mm: 10.0,
-            },
-            PostBatchOperation {
-                moves_work_mm: &a,
-                conditions: conditions(100.0, 8000.0),
-                tool_number: 2,
-                clearance_z_work_mm: 10.0,
-            },
+        let b = operation([2.0, 0.0, 10.0], [2.0, 0.0, 1.0]);
+        let mut profile = PostProcessorProfile::grbl_3axis_mm();
+        profile.tool_change = PostToolChange::M6;
+        let paths = [
+            op(&a, Some(1), 100.0, 10.0),
+            op(&b, None, 150.0, 10.0),
+            op(&a, Some(5), 200.0, 10.0),
         ];
-        assert_eq!(
-            generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap_err(),
-            PostError::BatchToolChange
+        let nc = generate_batch_program(&profile, &paths).unwrap();
+        let requests = nc
+            .text
+            .lines()
+            .filter(|line| line.contains(" M6"))
+            .collect::<Vec<_>>();
+        assert_eq!(requests, vec!["T1 M6", "T5 M6"]);
+    }
+
+    #[test]
+    fn no_t_is_valid_for_builtin_grbl_and_has_no_tool_request() {
+        let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
+        let batch = [op(&a, None, 100.0, 10.0)];
+        let nc = generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap();
+        assert!(
+            !nc.text
+                .lines()
+                .any(|line| line.contains("M6") || line.starts_with('T'))
         );
-        batch[1].tool_number = 1;
-        batch[1].clearance_z_work_mm = 3.0;
+    }
+
+    #[test]
+    fn t_requires_explicit_post_support_without_guessing_controller() {
+        let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
+        let batch = [op(&a, Some(1), 100.0, 10.0)];
         assert_eq!(
             generate_batch_program(&PostProcessorProfile::grbl_3axis_mm(), &batch).unwrap_err(),
+            PostError::UnsupportedToolChange
+        );
+    }
+
+    #[test]
+    fn invalid_number_or_clearance_is_rejected() {
+        let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
+        let mut profile = PostProcessorProfile::grbl_3axis_mm();
+        profile.tool_change = PostToolChange::M6;
+        let bad = [op(&a, Some(0), 100.0, 10.0)];
+        assert_eq!(
+            generate_batch_program(&profile, &bad).unwrap_err(),
+            PostError::InvalidToolNumber
+        );
+        let bad = [op(&a, Some(4), 100.0, 8.0)];
+        assert_eq!(
+            generate_batch_program(&profile, &bad).unwrap_err(),
             PostError::UnsafeBatchLink
         );
     }
 
     #[test]
-    fn numbering_is_continuous_across_operations() {
+    fn line_numbering_continues_through_repeated_m6() {
         let a = operation([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);
-        let b = operation([5.0, 0.0, 10.0], [5.0, 0.0, 1.0]);
         let mut profile = PostProcessorProfile::grbl_3axis_mm();
+        profile.tool_change = PostToolChange::M6;
         profile.line_numbers = Some(PostLineNumbers {
             start: 10,
             step: 10,
         });
-        let ops = [
-            PostBatchOperation {
-                moves_work_mm: &a,
-                conditions: conditions(100.0, 8000.0),
-                tool_number: 1,
-                clearance_z_work_mm: 10.0,
-            },
-            PostBatchOperation {
-                moves_work_mm: &b,
-                conditions: conditions(100.0, 8000.0),
-                tool_number: 1,
-                clearance_z_work_mm: 10.0,
-            },
-        ];
-        let nc = generate_batch_program(&profile, &ops).unwrap();
-        let lines = nc.text.lines().collect::<Vec<_>>();
-        for (i, line) in lines.iter().enumerate() {
+        let batch = [op(&a, Some(1), 100.0, 10.0), op(&a, Some(1), 100.0, 10.0)];
+        let nc = generate_batch_program(&profile, &batch).unwrap();
+        for (i, line) in nc.text.lines().enumerate() {
             assert!(line.starts_with(&format!("N{} ", (i + 1) * 10)));
         }
+        assert_eq!(
+            nc.text
+                .lines()
+                .filter(|line| line.ends_with("T1 M6"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn serialized_legacy_profile_defaults_to_no_tool_change() {
+        let profile = PostProcessorProfile::grbl_3axis_mm();
+        let json = serde_json::to_value(&profile).unwrap();
+        assert!(json.get("tool_change").is_none());
+        let mut clone = json;
+        clone["tool_change"] = serde_json::json!("m6");
+        let decoded: PostProcessorProfile = serde_json::from_value(clone).unwrap();
+        assert_eq!(decoded.tool_change, PostToolChange::M6);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

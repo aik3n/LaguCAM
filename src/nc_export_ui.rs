@@ -587,6 +587,7 @@ impl NcExportUi {
         project: &Project,
         panel: &TestParallelPanel,
         post_ui: &PostUi,
+        machine_ui: &crate::machine_ui::MachineUi,
     ) {
         if !self.open {
             return;
@@ -597,7 +598,9 @@ impl NcExportUi {
             .default_size([690.0, 520.0])
             .min_width(570.0)
             .resizable(true)
-            .show(ctx, |ui| self.show_embedded(ui, project, panel, post_ui));
+            .show(ctx, |ui| {
+                self.show_embedded(ui, project, panel, post_ui, machine_ui)
+            });
         self.open = open;
     }
 
@@ -608,6 +611,7 @@ impl NcExportUi {
         project: &Project,
         panel: &TestParallelPanel,
         post_ui: &PostUi,
+        machine_ui: &crate::machine_ui::MachineUi,
     ) {
         let available: Vec<(usize, String)> = project
             .operations
@@ -635,7 +639,7 @@ impl NcExportUi {
         }
 
         let operation = self.selected_operation;
-        let mut profile_id = self.selected_profile.clone();
+        let profile_id = self.selected_profile.clone();
         let mut acknowledge = self.acknowledge_unverified;
         let mut preview_requested = std::mem::take(&mut self.pending_preview);
         let mut export_requested = false;
@@ -654,25 +658,17 @@ impl NcExportUi {
         } else {
             ui.label("Selecciona una operacion calculada en el arbol del proyecto.");
         }
-        ui.horizontal(|ui| {
-            ui.label("Postprocesador");
-            let selected_name = profiles
-                .iter()
-                .find(|p| p.id == profile_id)
-                .map_or("Sin perfil", |p| p.name.as_str());
-            egui::ComboBox::from_id_salt("p2b3_profile")
-                .selected_text(selected_name)
-                .show_ui(ui, |ui| {
-                    for p in &profiles {
-                        ui.selectable_value(&mut profile_id, p.id.clone(), p.name.as_str());
-                    }
-                });
-        });
-        ui.small("Solo se utilizan perfiles guardados en la biblioteca de postprocesadores.");
+        if let Some(active) = profiles.first() {
+            ui.label(format!("Postprocesador global: {}", active.name));
+        }
+        ui.small(format!(
+            "Maquina global: {} (sin verificacion fisica automatica)",
+            machine_ui.display_name()
+        ));
         if profiles.is_empty() {
             ui.colored_label(
                 egui::Color32::LIGHT_RED,
-                "No hay perfiles disponibles. Revisa la biblioteca de postprocesadores.",
+                "Postprocesador global no disponible. Revisa su configuracion.",
             );
         }
         if let Some(profile) = profiles.iter().find(|p| p.id == profile_id) {

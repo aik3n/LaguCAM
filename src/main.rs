@@ -3,6 +3,7 @@
 mod cam_batch;
 mod cam_combined_nc;
 mod cam_markers_3d;
+mod machine_ui;
 mod material_ui;
 mod nav_cube;
 mod navigation;
@@ -164,6 +165,7 @@ struct App {
     tool_library_path: Option<PathBuf>,
     tool_ui: tools_ui::ToolUi,
     post_ui: post_ui::PostUi,
+    machine_ui: machine_ui::MachineUi,
     nc_export_ui: nc_export_ui::NcExportUi,
     nc_batch_export: cam_combined_nc::NcBatchExportUi,
     nc_playback_ui: nc_playback_ui::NcPlaybackUi,
@@ -240,6 +242,7 @@ impl App {
             tool_library_path,
             tool_ui: tools_ui::ToolUi::new(tool_error),
             post_ui: post_ui::PostUi::load(),
+            machine_ui: machine_ui::MachineUi::load(),
             nc_export_ui: nc_export_ui::NcExportUi::default(),
             nc_batch_export: cam_combined_nc::NcBatchExportUi::default(),
             nc_playback_ui: nc_playback_ui::NcPlaybackUi::default(),
@@ -928,7 +931,12 @@ impl App {
                     self.tool_ui.open = true;
                     ui.close();
                 }
-                if ui.button("Biblioteca de postprocesadores...").clicked() {
+                ui.separator();
+                if ui.button("Configuracion de maquina...").clicked() {
+                    self.machine_ui.open = true;
+                    ui.close();
+                }
+                if ui.button("Configuracion de postprocesador...").clicked() {
                     self.post_ui.open = true;
                     ui.close();
                 }
@@ -1897,10 +1905,20 @@ impl eframe::App for App {
             .sync_tools(&mut self.project, &self.tool_library);
         self.nc_export_ui
             .refresh_verification(&self.project, &self.tool_library);
-        self.nc_export_ui
-            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
-        self.nc_batch_export
-            .show(ui.ctx(), &self.project, &self.test_parallel, &self.post_ui);
+        self.nc_export_ui.show(
+            ui.ctx(),
+            &self.project,
+            &self.test_parallel,
+            &self.post_ui,
+            &self.machine_ui,
+        );
+        self.nc_batch_export.show(
+            ui.ctx(),
+            &self.project,
+            &self.test_parallel,
+            &self.post_ui,
+            &self.machine_ui,
+        );
         if let Some((text, xyz, tool_signature)) = self.nc_export_ui.take_playback_request() {
             self.nc_playback_ui
                 .load_generated(text, xyz, tool_signature);
@@ -1910,6 +1928,7 @@ impl eframe::App for App {
                 .show(ui.ctx(), &self.project, &self.tool_library);
         }
         self.post_ui.show(ui.ctx());
+        self.machine_ui.show(ui.ctx());
         self.options.show(ui.ctx());
     }
 

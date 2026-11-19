@@ -36,6 +36,7 @@ pub enum NcInterpretErrorKind {
     UnsupportedWord(char),
     UnsupportedGCode(u32),
     UnsupportedMCode(u32),
+    ToolChangeWithoutSelection,
     InvalidCodeNumber,
     DuplicateWord(char),
     ConflictingModalCodes,
@@ -185,6 +186,7 @@ struct State {
     position: [f64; 3],
     feed: Option<f64>,
     spindle_rpm: Option<f64>,
+    tool_number: Option<u32>,
     ended: bool,
 }
 
@@ -197,6 +199,7 @@ impl State {
             position: initial.position_work_mm,
             feed: initial.feed_mm_min,
             spindle_rpm: initial.spindle_rpm,
+            tool_number: initial.tool_number,
             ended: false,
         }
     }
@@ -245,6 +248,7 @@ pub fn interpret_program(text: &str, initial: NcInitialState) -> Result<NcTrace,
         let mut new_rpm = None;
         let mut new_spindle = None;
         let mut new_tool = None;
+        let mut tool_change = false;
         let mut end = false;
         let mut has_n = false;
         let mut has_plane = false;
@@ -346,6 +350,12 @@ pub fn interpret_program(text: &str, initial: NcInitialState) -> Result<NcTrace,
                             return Err(error(line, NcInterpretErrorKind::ConflictingModalCodes));
                         }
                     }
+                    6 => {
+                        if tool_change {
+                            return Err(error(line, NcInterpretErrorKind::ConflictingModalCodes));
+                        }
+                        tool_change = true;
+                    }
                     2 | 30 => {
                         if end {
                             return Err(error(line, NcInterpretErrorKind::ConflictingModalCodes));
@@ -399,7 +409,14 @@ pub fn interpret_program(text: &str, initial: NcInitialState) -> Result<NcTrace,
             emit(&mut events, line, NcEventKind::SpindleSpeedRpm(rpm))?;
         }
         if let Some(tool) = new_tool {
+            state.tool_number = Some(tool);
             emit(&mut events, line, NcEventKind::SelectTool(tool))?;
+        }
+        if tool_change {
+            let tool = state
+                .tool_number
+                .ok_or_else(|| error(line, NcInterpretErrorKind::ToolChangeWithoutSelection))?;
+            emit(&mut events, line, NcEventKind::ToolChange(tool))?;
         }
         if let Some(spindle) = new_spindle {
             if spindle != NcSpindleMode::Stopped && state.spindle_rpm.is_none() {
@@ -488,6 +505,29 @@ pub fn interpret_program(text: &str, initial: NcInitialState) -> Result<NcTrace,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_m6_is_an_event_even_for_the_same_t() {
+        let trace = interpret_program("T3 M6\nT3 M6\nM30", initial([0.0; 3])).unwrap();
+        let selected = trace
+            .events
+            .iter()
+            .filter(|e| e.kind == NcEventKind::SelectTool(3))
+            .count();
+        let changed = trace
+            .events
+            .iter()
+            .filter(|e| e.kind == NcEventKind::ToolChange(3))
+            .count();
+        assert_eq!(selected, 2);
+        assert_eq!(changed, 2);
+        assert_eq!(
+            interpret_program("M6\nM30", initial([0.0; 3]))
+                .unwrap_err()
+                .kind,
+            NcInterpretErrorKind::ToolChangeWithoutSelection
+        );
+    }
     use crate::cam_contract::ConfiguredCuttingConditions;
     use crate::nc_post::{PostInput, PostMove, PostProcessorProfile, PostUnits, generate_program};
     use crate::toolpath_links::PlannedMoveKind;
@@ -667,7 +707,7 @@ mod tests {
             ("G92X1\nM30", NcInterpretErrorKind::UnsupportedGCode(92)),
             ("G2X2Y0I1J0\nM30", NcInterpretErrorKind::UnsupportedGCode(2)),
             ("M8\nM30", NcInterpretErrorKind::UnsupportedMCode(8)),
-            ("M6\nM30", NcInterpretErrorKind::UnsupportedMCode(6)),
+            ("M7\nM30", NcInterpretErrorKind::UnsupportedMCode(7)),
             ("G53G0X0\nM30", NcInterpretErrorKind::UnsupportedGCode(53)),
             ("G93\nM30", NcInterpretErrorKind::UnsupportedGCode(93)),
             ("G18\nM30", NcInterpretErrorKind::UnsupportedGCode(18)),

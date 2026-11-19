@@ -14,6 +14,8 @@ fn path_for(executable: &Path, file: &str) -> Result<PathBuf, String> {
             | "tools.json"
             | "recent_projects.json"
             | "postprocessors.json"
+            | "postprocessor.json"
+            | "machine.json"
     ) {
         return Err("Nombre de configuración no permitido".into());
     }
@@ -110,6 +112,8 @@ mod tests {
             "tools.json",
             "recent_projects.json",
             "postprocessors.json",
+            "postprocessor.json",
+            "machine.json",
         ] {
             assert_eq!(
                 path_for(&executable, name).unwrap(),
