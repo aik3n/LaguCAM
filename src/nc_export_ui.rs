@@ -628,9 +628,8 @@ impl NcExportUi {
 
         let operation = self.selected_operation;
         let profile_id = self.selected_profile.clone();
-        let mut preview_requested = std::mem::take(&mut self.pending_preview);
+        let preview_requested = std::mem::take(&mut self.pending_preview);
         let mut export_requested = false;
-        let mut playback_requested = false;
 
         ui.heading("Resultados del programa NC");
         if available.is_empty() {
@@ -676,15 +675,6 @@ impl NcExportUi {
             .preview
             .as_ref()
             .is_some_and(|p| Some(p.operation_index) == operation && p.profile_id == profile_id);
-        if ui
-            .add_enabled(
-                operation.is_some() && !profiles.is_empty(),
-                egui::Button::new("Regenerar NC"),
-            )
-            .clicked()
-        {
-            preview_requested = true;
-        }
         if selected_matches_preview && let Some(preview) = self.preview.as_ref() {
             let generated = &preview.generated;
             ui.label(format!(
@@ -781,21 +771,7 @@ impl NcExportUi {
                     }
                 }
             }
-            let xyz = generated.required_first_move_position_work_mm;
-            ui.label(format!(
-                "\u{24d8} Posicion inicial requerida antes del primer movimiento CAM: X{:.6} Y{:.6} Z{:.6} mm (coordenadas de trabajo).",
-                xyz[0], xyz[1], xyz[2]
-            ));
             ui.separator();
-            ui.collapsing("Diagnostico avanzado", |ui| {
-                ui.small(format!(
-                    "Herramienta CAM (UUID): {}",
-                    preview.tool_signature.tool_id
-                ));
-                if ui.button("Reproductor NC tecnico").clicked() {
-                    playback_requested = true;
-                }
-            });
             if ui.button("Exportar archivo NC...").clicked() {
                 export_requested = true;
             }
@@ -836,50 +812,6 @@ impl NcExportUi {
                     self.message.clear();
                 }
                 Err(error) => {
-                    self.preview = None;
-                    self.message = format!("ERROR: {error}");
-                }
-            }
-        }
-        if playback_requested {
-            // Regenerar antes de enviar, igual que al exportar. Un preview obsoleto se rechaza.
-            let result = self
-                .selected_operation
-                .ok_or_else(|| "No hay operacion seleccionada".to_owned())
-                .and_then(|index| {
-                    let profile = profiles
-                        .iter()
-                        .find(|p| p.id == self.selected_profile)
-                        .ok_or_else(|| "No hay perfil guardado seleccionado".to_owned())?;
-                    let current = self.generate_current(project, panel, profile, index)?;
-                    let previous = self
-                        .preview
-                        .as_ref()
-                        .ok_or_else(|| "Genera primero la vista previa NC".to_owned())?;
-                    if current.operation_index != previous.operation_index
-                        || current.operation_name != previous.operation_name
-                        || current.profile_id != previous.profile_id
-                        || current.tool_signature != previous.tool_signature
-                        || current.generated != previous.generated
-                    {
-                        return Err(
-                            "La vista NC ha quedado obsoleta; regenerala antes de reproducir"
-                                .to_owned(),
-                        );
-                    }
-                    Ok((
-                        current.generated.text.clone(),
-                        current.generated.required_first_move_position_work_mm,
-                        current.tool_signature.clone(),
-                    ))
-                });
-            match result {
-                Ok(request) => {
-                    self.pending_playback = Some(request);
-                    self.message = "NC enviado al reproductor.".into();
-                }
-                Err(error) => {
-                    self.pending_playback = None;
                     self.preview = None;
                     self.message = format!("ERROR: {error}");
                 }

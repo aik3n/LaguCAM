@@ -40,7 +40,9 @@ use std::{
     time::Duration,
 };
 
-const MAX_POINTS: usize = 12_000;
+// Presupuesto superior a la cuota experimental de 12.000 consultas.
+// Protege la memoria del raster; el post NC conserva sus propios limites.
+const MAX_POINTS: usize = 1_000_000;
 const MAX_TRIANGLES: usize = 21_000_000;
 const ENGINE_BYTES: usize = 700 * 1024 * 1024;
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
@@ -106,7 +108,7 @@ impl SamplingPlan {
             .is_none_or(|total| total > MAX_POINTS)
         {
             return Err(format!(
-                "Demasiados puntos de consulta: el limite de esta prueba es {MAX_POINTS}"
+                "El muestreo supera el limite tecnico actual ({MAX_POINTS} consultas)"
             ));
         }
         let radius = params.diameter / 2.0;
@@ -1197,7 +1199,6 @@ impl TestParallelPanel {
                         }
                     });
                 }
-                ui.small("TEST: maximo de 12.000 consultas. No genera G-code.");
             });
 
         if delete_now {
@@ -1485,6 +1486,35 @@ mod tests {
             min: [0.0, 10.0, -4.0],
             max: [10.0, 16.0, 9.0],
         }
+    }
+
+    #[test]
+    fn sampling_above_legacy_test_cap_is_allowed() {
+        let plan = SamplingPlan::new(
+            bounds(),
+            Parameters {
+                stepover: 0.05,
+                longitudinal: 0.05,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!((plan.lines, plan.samples), (121, 201));
+        assert_eq!(plan.total(), 24_321);
+    }
+
+    #[test]
+    fn excessive_sampling_is_still_rejected_before_allocation() {
+        let error = SamplingPlan::new(
+            bounds(),
+            Parameters {
+                stepover: 0.01,
+                longitudinal: 0.001,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("limite tecnico"));
     }
 
     #[test]
