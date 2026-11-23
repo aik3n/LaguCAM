@@ -1,8 +1,8 @@
 # Registro de decisiones técnicas
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
 
-**Última actualización de decisiones:** 2026-11-18 · **Código público inspeccionado:** `85dfda28658d5f8e779caae97838742d1444be73` · **Evidencia:** [`STATUS.md`](STATUS.md)
+**Última actualización de decisiones:** 2026-11-23 · **Código público inspeccionado:** `6d496200f5bf6ec70bb0bb8249543b315d3e1854` · **Evidencia:** [`STATUS.md`](STATUS.md)
 
 Una decisión se cambia mediante una nueva entrada con justificación, no reescribiendo silenciosamente lo que se acordó. Las entradas **PROPUESTAS** no autorizan implementación.
 
@@ -96,6 +96,17 @@ No convertir automáticamente una recomendación de un asistente en **ACEPTADA**
 - **Estado:** acuerdo arquitectonico; no confirma implementacion, compilacion, pruebas ni comportamiento fisico. Las diferencias entre el codigo y el contrato se resolveran en parches posteriores aprobados.
 
 ## Preguntas abiertas
+
+## D-049 — Controles de operación independientes y limpieza visual (ACEPTADA)
+
+- **Fecha:** 2026-11-23. **Código:** `6d496200`; decisiones de interfaz expresamente aceptadas por el usuario.
+- **Problema:** la activación de cálculo, la visibilidad de trayectoria y el arrastre compartían controles poco claros, con iconos Unicode mal renderizados y acciones duplicadas en el editor.
+- **Alternativas:** conservar Unicode/tirador separado frente a recursos de iconos coherentes y arrastre desde icono de operación; mantener controles duplicados frente a centralizar acciones en el árbol.
+- **Decisión:** `active` para inclusión en cálculo/NC conjunto, `visible` para visualización; guardado independiente con valor legado visible. Ojo/ojo tachado de Lucide con colores diferenciados. Arrastre desde el icono de operación y selección por nombre; retirar botones y textos redundantes, sin rediseñar todavía los tamaños de ventana.
+- **Impacto:** `project_ui.rs`, `project/operations.rs`, `project/persistence.rs`, `test_parallel.rs`, `icons.rs` y recursos ISC. Ningún cambio del motor CAM debe derivarse de alternar visibilidad.
+- **Pruebas:** round-trip legado/persistencia y casos de interacción; el usuario reportó 382 pruebas y comprobaciones visuales parciales. Comprobación final sobre SHA exacto y regresión GUI integral pendientes.
+- **Extensión futura:** normalizar progresivamente iconos del resto de la aplicación, conservando pictogramas CNC específicos cuando Lucide no resulte adecuado.
+
 
 - Los cinco tipos tienen convenciones implementadas (ángulo cónico **total** y radio de esfera definido). Antes de CAM deben verificarse matemáticamente para contacto, no solo dibujo.
 - La toroidal ya está en código (G24); «ball with flat tip» sería otra geometría y queda fuera del primer cierre. No confundir implementación con validación independiente.

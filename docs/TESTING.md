@@ -1,8 +1,8 @@
 # Política de pruebas, regresión y seguridad CNC
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
 
-**Politica vigente desde:** 2026-11-17. **Extension de cobertura:** 2026-11-18 (`85dfda2`). Ejecuciones concretas y SHA publico en [`STATUS.md`](STATUS.md). Esta política se aplica a **parches `.ps1` locales** ejecutados por el usuario. Actualizar Markdown no ejecuta Rust, GUI ni CNC.
+**Politica vigente desde:** 2026-11-17. **Extension de cobertura:** 2026-11-23 (`6d496200`). Ejecuciones concretas y SHA publico en [`STATUS.md`](STATUS.md). Esta política se aplica a **parches `.ps1` locales** ejecutados por el usuario. Actualizar Markdown no ejecuta Rust, GUI ni CNC.
 
 ## Comprobaciones de identidad UUID y proyecto v2
 
@@ -43,6 +43,17 @@ cargo build --locked --release
 Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` inspeccionado en `5cd41c7` no contenía workflow de CI activo; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
 
 ## 2. Pruebas del visor y proyecto
+
+### Regresión de operaciones e iconografía (`6d496200`)
+
+- Alternar `visible` con ojo Lucide en operaciones activas e inactivas; comprobar que solo cambia render 3D, no cálculo, NC, caché o estado `active`.
+- Alternar `active` conservando la visibilidad; cálculo y generación conjunta deben incluir exclusivamente activas, en orden.
+- Guardar `.lagucam`, cerrar y abrir: recuperar ambas propiedades; proyecto previo sin `visible` debe abrir con trayectoria visible. La prueba automatizada de persistencia no sustituye al ensayo manual.
+- Arrastrar desde el icono de operación, no desde el nombre: comprobar selección, doble clic, reordenación, identidad del resultado CAM, marcadores y ausencia de arrastres accidentales.
+- Abrir/cerrar y desplegar repetidamente el árbol; los recursos Lucide no deben provocar bloqueo por reentrada de `egui::Context::data_mut`; comprobar los dos temas.
+- Comprobar que el editor carece de botones de generación duplicados y notas auxiliares retiradas; `Vista` ya no muestra diagnóstico experimental ni vista superior duplicada. Comprobar que `Centrar vista` y `Restablecer paneles` siguen disponibles.
+- Ejecutar sobre el árbol final `cargo fmt --all -- --check`, `cargo test --locked --all-targets`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo build --locked --release`; registrar salida y SHA local. Las **382 pruebas reportadas** en el hito no acreditan automáticamente Clippy final del commit.
+
 
 - STL binario pequeño conocido, truncado, conteo erróneo, archivo vacío, coordenadas no finitas y carga cancelada.
 - Abrir un STL válido manteniendo el anterior ante fallo de importación o GPU.

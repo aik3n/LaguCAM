@@ -1,6 +1,15 @@
 # Historial de LaguCAM
 
-<!-- LAGUCAM-MASTER-DOC-CUT: b5b15248ecf357c005dc2fadb7388e545d25cfa7 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
+
+## 2026-11-23 — Operaciones, iconos Lucide y limpieza UI (`6d496200`)
+
+- **Código inspeccionado:** [`6d496200f5bf6ec70bb0bb8249543b315d3e1854`](https://github.com/aik3n/LaguCAM/commit/6d496200f5bf6ec70bb0bb8249543b315d3e1854), sucesor de `ef7d142b`. La documentación se sincroniza mediante parche local; el chat no modifica Git.
+- `Operation.visible` se separa de `active`; visibilidad y activación persisten de forma independiente en `.lagucam`. La ausencia de `visible` en proyectos anteriores equivale a `true`, sin recalcular CAM al ocultar.
+- Dos iconos Lucide (ojo verde/ojo tachado gris) con licencia ISC incorporada; caché de texturas de egui corregida para evitar bloqueo por reentrada. El icono de operación se usa para reordenar; el nombre para seleccionar/editar.
+- Retirados textos auxiliares y botones de cálculo redundantes del editor. Retiradas del menú `Vista` las herramientas de diagnóstico experimentales y el comando duplicado de vista superior; el código de diagnóstico se conserva para pruebas. Redimensionamiento y distribución de ventanas: **pendientes**.
+- **Evidencia comunicada por usuario:** 382 pruebas automatizadas correctas en las validaciones del hito y funcionamiento manual de visibilidad, cálculo y despliegue del árbol. Tras una limpieza se detectaron avisos de Clippy, con correctivo posterior; **falta registro final de formato, Clippy y Release del árbol exacto publicado**.
+- No se modifica geometría CAM/NC ni se declara seguridad de máquina; el código no certifica colisiones o cambios físicos de herramienta.
 
 ## 2026-11-19 — Contratos CAM/NC y unificación del motor post (`b5b15248`)
 

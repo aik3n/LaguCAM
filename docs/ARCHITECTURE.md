@@ -1,8 +1,8 @@
 # Arquitectura de LaguCAM
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
 
-**Arquitectura contrastada con código público:** `85dfda2` (2026-11-18), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
+**Arquitectura contrastada con código público:** `6d496200` (2026-11-23), por inspección estática. Pruebas y limitaciones en [`STATUS.md`](STATUS.md). La etiqueta [ACTUAL] indica presencia en código, **no** seguridad CNC ni validación en Windows.
 
 ## 1. Stack y distribución [ACTUAL]
 
@@ -24,7 +24,8 @@ La distribución portable sitúa `settings.json`, `panels.json`, `tools.json` y 
 | `project/persistence.rs` | Serialización `.lagucam` v2, validación y comprobación económica del STL externo |
 | `project/model_transform.rs` | Origen mm/pulgadas, escala, rotación, traslación y pivote; transformación afín no destructiva compartida entre visor y CAM |
 | `project/cam_provenance.rs` | Dependencias geométricas de previews TEST; invalidación por STL, bruto, estrategia, transformación y fresa |
-| `project_ui.rs` | Árbol y propiedades; selección, activación, reordenación y comandos de operaciones |
+| `project_ui.rs` | Árbol: activación para lote, visibilidad independiente, reordenación mediante icono de operación, selección por nombre y comandos |
+| `icons.rs`, `assets/lucide/*` | Iconos ojo/ojo tachado rasterizados desde Lucide, texturas cacheadas egui, tinta según visibilidad; licencia ISC incluida |
 | `tools/model.rs` | Definición y validación de seis familias de fresas, UUID y perfiles geométricos `f64` |
 | `tools/storage.rs` | Biblioteca global versionada y persistencia independiente |
 | `tools_ui.rs`, `tools_profile.rs` | Editor/filtros y perfil gráfico de las fresas |
@@ -37,8 +38,9 @@ La distribución portable sitúa `settings.json`, `panels.json`, `tools.json` y 
 | `toolpath.rs`, `toolpath_links.rs`, `toolpath_validation.rs` | Trayectoria neutral de contacto, movimientos propuestos y **validador solo estructural** |
 | `cam_contract.rs`, `project/cam_coordinates.rs` | Vista inmutable de operación/F/S y conversión al origen de trabajo con traslación y giro Rz |
 | `cam_markers_3d.rs` | Indicadores visuales de principio y fin de recorrido, no geometría de corte |
-| `sample_direct.rs`, `sample_overlay.rs`, `section_overlay.rs` | Instrumentos transitorios de diagnóstico geométrico |
-| `cam_batch.rs` | Cola en memoria para cálculo secuencial de operaciones activas; no genera NC ni geometría |
+| `sample_direct.rs`, `sample_overlay.rs`, `section_overlay.rs` | Diagnósticos experimentales mantenidos para contratos/pruebas, ya no accesibles desde el menú `Vista` |
+| `cam_batch.rs` | Cola en memoria para cálculo secuencial de operaciones activas; no genera NC por sí sola |
+| `cam_plan.rs`, `cam_combined_nc.rs` | Enlaces neutrales entre operaciones y generación NC conjunta a partir de operaciones vigentes; no verifica colisiones volumétricas |
 | `nc_post.rs`, `post_ui.rs` | Postprocesador 3 ejes y biblioteca de perfiles, cabeceras Start/End; exportación experimental |
 | `nc_contract.rs`, `nc_interpreter.rs` | Contrato modal de programa NC e intérprete estricto del texto final; G53 no soportado |
 | `nc_export_ui.rs`, `nc_verify.rs` | Resultados del programa NC, métricas, alertas conservadoras de bruto original y exportación |
@@ -60,7 +62,7 @@ La GPU conserva las caras renderizadas, pero su geometría normalizada en `f32` 
 
 El bruto es un prisma alineado con los ejes físicos de modelo, con límites y extras por cara `f64`. El STL sigue inmutable: `raw_bounds` guarda límites originales, `bounds` refleja el modelo transformado a milímetros, y `ModelTransform` define la matriz compartida. El renderer aplica la transformación a la malla normalizada y el BVH transforma cada triángulo al calcular. **Riesgo observado:** `main.rs` usa `Mat4::IDENTITY` si no puede crear la matriz visual; P1 debe impedir una divergencia visual/CAM silenciosa. El sistema de trabajo usa anclas en modelo/bruto, offsets y `R = Rz · Ry · Rx`, con `p_modelo = origen + R · p_CNC`. Una rotación matemática del marco no significa que `G54` rote ejes ni que una CNC de tres ejes pueda orientar el husillo.
 
-`.lagucam` guarda referencia externa del STL y configuración de proyecto, no la malla ni una copia editable de la biblioteca global. Las operaciones usan `tool_id: Option<ToolId>`; el editor permite seleccionar la fresa y `cam_adapter.rs` la resuelve antes del cálculo. Las previews usan `CamProvenance` para comprobar identidad muestreada/fecha/tamaño de STL, AABB físico, configuración de transformación, bruto, estrategia y firma UUID/hash de fresa. **No es una firma criptográfica del STL completo ni un contrato de exportación:** setup/origen y parámetros F/S requieren su propia validación previa al post. Los resultados de cálculo permanecen fuera del proyecto persistido.
+`.lagucam` guarda referencia externa del STL y configuración de proyecto, no la malla ni una copia editable de la biblioteca global. Las operaciones usan `tool_id: Option<ToolId>`; el editor permite seleccionar la fresa y `cam_adapter.rs` la resuelve antes del cálculo. Las previews usan `CamProvenance` para comprobar identidad muestreada/fecha/tamaño de STL, AABB físico, configuración de transformación, bruto, estrategia y firma UUID/hash de fresa. **No es una firma criptográfica del STL completo ni un contrato de exportación:** setup/origen y parámetros F/S requieren su propia validación previa al post. Los resultados de cálculo permanecen fuera del proyecto persistido. `Operation.active` controla inclusión en el lote; `Operation.visible` controla exclusivamente visualización de trayectoria y marcadores. Ambos se almacenan como estado de proyecto; proyectos anteriores omiten `visible` y se leen con valor `true`. Cambiar `visible` no implica recalcular.
 
 ## 4. Modelo de fresas [ACTUAL]
 
@@ -82,34 +84,26 @@ El contacto esférico con STL se calcula a partir de los valores `f32` originale
 
 **Precaución:** cada punto muestreado puede ser un contacto válido sin que el **movimiento entre puntos** lo sea. El muestreo TEST no verifica el volumen barrido ni colisiones de mango y portaherramientas.
 
-## 6. Flujo de CAM, post, interpretación y simulación [CÓDIGO OBSERVADO EN 85dfda2]
+## 6. Flujo de CAM, post, interpretación y simulación [CÓDIGO INSPECCIONADO EN `6d496200`]
 
 ```text
-Proyecto STL + modelo transformado + bruto + origen + herramienta UUID
-   |  -> estrategia acabado paralelo TEST / ContactSolver
-   v
-Trayectoria neutral y enlaces internos -> validación ESTRUCTURAL
-   |   primer punto = XY inicial de operacion a Z de despeje de estrategia
-   v
-WorkFrame modelo -> trabajo (mm) -> nc_post.rs -> G-code FINAL
-   |                                  -> nc_export_ui: métricas y alertas
-   v
-nc_interpreter.rs (texto NC final, modos soportados) -> NcTrace
-   |                                        |
-   +-> nc_verify.rs: bruto original          +-> material_sim.rs: heightfield 2,5D
-   |                                        |
-   +-> avisos enlazados al visor             +-> nc_playback_ui/nc_scene_gl: reproducir
-
-Operaciones activas -> cam_batch.rs -> secuencia de calculos CAM independientes
-    [NO concatena NC; NO planifica transiciones de maquina entre operaciones]
+Proyecto STL + bruto + origen + herramienta UUID
+  -> estrategia acabado paralelo TEST / ContactSolver
+  -> trayectoria neutral y enlaces internos -> validación estructural
+  -> operaciones activas -> cam_batch.rs (cálculo secuencial y reutilización)
+  -> cam_plan.rs (enlaces entre operaciones: subir Z, XY, bajar Z)
+  -> cam_combined_nc.rs / nc_post.rs (NC final individual o conjunto)
+  -> nc_interpreter.rs (interpretación estricta del NC final)
+     -> nc_verify.rs (avisos conservadores, no colisión demostrada)
+     -> nc_playback_ui.rs y material_sim.rs (reproducción y 2,5D aproximado)
 ```
 
-- **Frontera CAM:** `toolpath_links.rs` empieza en el primer XY real de mecanizado a la Z de clearance calculada con el bruto/geometria; conserva G0 XY de enlace entre pasadas **dentro** de la operacion. No inventa el movimiento desde la posicion fisica de maquina. Acuerdo normativo D-045.
-- **Frontera de post y maquina:** el post traduce la trayectoria y puede, cuando se implemente y valide el perfil, incorporar una retirada Z de maquina mediante G53 y movimiento XY al inicio; el operador es responsable de condiciones fisicas. No convertir `G53` en una funcion de estrategia. Acuerdo D-046.
-- **Frontera de operaciones multiples:** la cola `cam_batch.rs` administra cálculo de varias operaciones, no un planificador de recorridos entre operaciones. Un futuro planificador es PROPUESTA D-047.
-- **Frontera de verificacion:** el intérprete rechaza G53, G54, arcos y otros codigos no soportados; los Start/End personalizados pueden impedir metricas/simulacion automatica. `nc_verify.rs` solo informa intersecciones candidatas respecto al bruto original; no verifica el material restante ni el portaherramientas.
-
-El motor inicial sigue limitado a tres ejes y herramienta paralela a Z del setup. Máquina, estrategia, planificador y post deben tener contratos independientes; no asumir `M6` ni rotacion por `G54`. Las geometrías futuras se conectarán por capacidades del backend, sin imponer triangulación universal.
+- El enlace entre operaciones se planifica fuera de las estrategias, a la mayor de las Z de los extremos de conexión, siguiendo subida/XY/bajada cuando corresponde. **No verifica obstáculos, utillaje o portaherramientas**.
+- `active` selecciona operaciones para el cálculo/NC conjunto; `visible` solo afecta la visualización, no la generación. Los resultados CAM no se guardan en el proyecto.
+- El post conserva rutas individual y conjunta y políticas específicas de T/M6 y Start/End; la emisión NC no significa validación física de cambio de herramienta.
+- `nc_interpreter.rs` no soporta G53/G54 ni arcos no implementados; la preparación de máquina, el homing y los límites físicos no están demostrados por el modelo.
+- El diagnóstico geométrico experimental se retiró del menú `Vista`; los módulos siguen presentes para pruebas. Los controles de cálculo están en el árbol de operaciones, no duplicados en el editor.
+- **Frontera D-045/D-046/D-048:** estrategia define movimientos internos, planificador coordina enlaces de lote, post emite NC, intérprete reconstruye el texto y el operador prepara físicamente la máquina. Ningún nivel certifica seguridad CNC por sí solo.
 
 ## 7. Riesgos e invariantes
 

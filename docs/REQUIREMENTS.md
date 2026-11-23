@@ -1,11 +1,11 @@
 # Requisitos de LaguCAM
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
 
 > **Requisitos y criterios**, no estado vivo de implementación. Estado actualizado y SHA cubierto: [`STATUS.md`](STATUS.md).
 
 
-**Estado:** requisitos vigentes · **Revisión:** 2026-11-18. La inspeccion estatica cubre `85dfda2`; los resultados de pruebas y la distincion local/remoto estan en STATUS.
+**Estado:** requisitos vigentes · **Revisión:** 2026-11-23. La inspeccion estatica cubre `6d496200`; los resultados de pruebas y la distincion local/remoto estan en STATUS.
 
 La columna de estado diferencia *validado*, *observado en código*, *acordado*, *propuesto* y *pendiente*. Los criterios técnicos aquí descritos sirven para convertir decisiones en tareas verificables.
 
@@ -27,6 +27,17 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 
 ## 2. Geometría y estrategias
 
+**Requisitos UI y persistencia incorporados en `6d496200`:**
+
+| ID | Requisito | Estado |
+| --- | --- | --- |
+| UI-06 | Activación de operación independiente de la visibilidad de su trayectoria | Implementado; `active` define participación en lote/NC, `visible` define render; prueba manual parcial comunicada |
+| UI-07 | Arrastrar para ordenar usando el icono de operación; nombre para seleccionar y doble clic para editar | Implementado en el árbol; regresión manual completa pendiente |
+| UI-08 | Iconografía coherente; controles de visibilidad con Lucide y licencia identificada | Dos recursos Lucide (ojo/ojo tachado) integrados; normalización general futura |
+| PRJ-08 | Persistir visibilidad de operaciones sin romper proyectos que omiten el campo | Implementado; valor legado `true`, prueba unitaria de round-trip reportada |
+| UI-09 | No duplicar cálculo en editor; simplificación de menús y mensajes auxiliares | Aplicado; redimensionamiento y redistribución de ventana aplazados |
+
+
 | ID | Requisito | Estado |
 | --- | --- | --- |
 | GEO-01 | Conservar el modelo fuente sin modificaciones por visualización | Observado en código para STL |
@@ -45,8 +56,8 @@ La columna de estado diferencia *validado*, *observado en código*, *acordado*, 
 | CAM-09 | Contrato F/S y conversión al origen de trabajo 3 ejes | F1.1–F1.2 implementados; comprobación de máquina y unidades pendiente |
 | CAM-10 | Invalidación de resultados cuando cambie cualquier entrada geométrica significativa | P1-A `CamProvenance` implementado para previews, con firma STL muestreada; contrato exportable pendiente |
 | CAM-11 | Inicio de cada estrategia en XY inicial efectivo de mecanizado y Z de seguridad sobre el bruto definida por ella; ningun XY de aparcamiento externo | **Aceptado D-045**; `toolpath_links.rs` sigue este patron, falta prueba de contrato para todas las estrategias |
-| CAM-12 | Operaciones activas calculadas secuencialmente, con reutilizacion y cancelacion; no confundir lote con NC conjunto | **Implementado** `cam_batch.rs` en `85dfda2`; pruebas GUI de regresion pendientes |
-| CAM-13 | Transiciones globales entre operaciones fuera de estrategias | **Propuesta D-047**; planificador NC conjunto pendiente |
+| CAM-12 | Operaciones activas calculadas secuencialmente, con reutilizacion y cancelacion; no confundir cola de calculo con emision NC | Implementado `cam_batch.rs`; pruebas GUI integrales de regresion pendientes |
+| CAM-13 | Transiciones globales entre operaciones fuera de estrategias | Implementado `cam_plan.rs` para enlaces neutrales subir–XY–bajar; no calcula colisiones volumétricas ni demuestra seguridad física |
 
 
 ## 3. Herramientas, máquinas y control

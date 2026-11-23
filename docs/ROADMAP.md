@@ -1,8 +1,8 @@
 # Hoja de ruta de LaguCAM — prototipo CAM de tres ejes
 
-<!-- LAGUCAM-MASTER-DOC-CUT: 85dfda28658d5f8e779caae97838742d1444be73 -->
+<!-- LAGUCAM-MASTER-DOC-CUT: 6d496200f5bf6ec70bb0bb8249543b315d3e1854 -->
 
-**Prioridades revisadas:** 2026-11-18 · **Base inspeccionada:** `85dfda2` (solo codigo publico). Estado y evidencia en [`STATUS.md`](STATUS.md). Este documento no autoriza por si mismo nuevos desarrollos.
+**Prioridades revisadas:** 2026-11-23 · **Base inspeccionada:** `6d496200` (solo codigo publico). Estado y evidencia en [`STATUS.md`](STATUS.md). Este documento no autoriza por si mismo nuevos desarrollos.
 
 ## Objetivo del primer cierre
 
@@ -16,12 +16,12 @@ Flujo reproducible **STL → proyecto, bruto y origen → herramienta UUID → a
 | P2 Movimiento, simulacion, verificacion | Acabado paralelo TEST, enlaces, interprete NC, simulador heightfield y avisos de envolvente | Barrido entre muestras, colisiones reales y portaherramientas, errores geometricos y tiempos fisicos |
 | P3 Post y maquina | Post generico 3 ejes y exportacion NC experimental | Perfil FluidNC validado, limites/homing, retirada G53 configurable, transiciones y NC machine-safe |
 | P4 UX e integracion | Operaciones directas, simulacion compacta, informe NC, resalte de avisos | Pruebas UI de regresion, claridad de estados y rendimiento |
-| Calculo conjunto | **En `85dfda2`:** cola de operaciones activas, reutilizacion, secuencia, cancelacion | **NO** NC conjunto, ni simulacion ni planificador de transiciones entre operaciones |
+| Cálculo y NC conjunto | Cola de operaciones activas, `cam_plan.rs` para enlaces neutrales y `cam_combined_nc.rs` para programa conjunto | Sin planificación de obstáculos, simulación de material multiherramienta ni validación física CNC |
 | Posterior | STEP, 4/5 ejes, desbaste, estrategias adicionales | Fuera del primer cierre |
 
 ## Proximas tareas ordenadas
 
-### 1. Validar el corte `85dfda2` sin mezclar cambios
+### 1. Completar validación de `6d496200` sin mezclar cambios
 
 - `cargo fmt --all -- --check`, `cargo check --locked --all-targets`, `cargo test --locked --all-targets`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo build --locked --release` y prueba de GUI Windows, con salidas asociadas a un SHA.
 - Pruebas end-to-end de operacion individual y lote: cache reutilizada, error de una operacion, cancelacion, activar/desactivar, reordenar durante calculo, abrir otro proyecto, caducidad de resultado y progreso. Medir memoria cuando proceda.
@@ -39,11 +39,12 @@ Flujo reproducible **STL → proyecto, bruto y origen → herramienta UUID → a
 - Perfil de maquina opcional: retirada **solo Z** en coordenadas maquina con `G53 G0 Z...`, cota configurable y validada; despues transito XY a despeje confirmado y llegada a Z segura de operacion.
 - `G53` aun no es interpretable en LaguCAM; ampliar estados, frames y verificador con pruebas de referencias de maquina o mantener modo de salida no verificable. No admitir silenciosamente comandos de Start que alteren el recorrido.
 
-### 4. Definir planificador de transiciones para varias operaciones (D-047: propuesta)
+### 4. Validar y extender el planificador neutral ya implementado (D-048)
 
-- Distinguir lote de calculo de un futuro **programa NC conjunto**: concatenar archivos NC independientes no es un planificador.
-- Contratos para cambio de herramienta, transiciones Z/XY, orden, seguridad, estado modal y un unico programa interpretado completo. No adjudicar a cada estrategia movimientos externos a su operacion.
-- No implementar hasta acuerdo especifico, perfil de maquina y pruebas del flujo individual.
+- `cam_plan.rs` ya enlaza operaciones con movimientos subir–XY–bajar a la mayor Z pertinente. `cam_combined_nc.rs` genera un único NC para las operaciones activas vigentes, sujeto a sus restricciones; **no** es concatenación sin plan.
+- Pendientes: colisiones de herramienta completa, volumen barrido, fijaciones, límites de máquina, cambios físicos T/M6 y estados externos de control.
+- Probar operaciones con cotas y herramientas distintas, cancelación, vigencia, orden, visibilidad oculta y exportación. No confundir geometría neutral con recorrido seguro en una CNC.
+- UX pendiente: normalización progresiva de iconos Lucide y redistribución/tamaño de las ventanas del editor tras la limpieza de textos y controles redundantes.
 
 ### 5. Verificacion de mecanizado y rendimiento
 
