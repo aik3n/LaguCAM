@@ -160,6 +160,7 @@ pub enum OperationStatus {
 pub struct Operation {
     pub name: String,
     pub active: bool,
+    pub visible: bool,
     pub kind: OperationKind,
     pub status: OperationStatus,
     pub tool_id: Option<ToolId>,
@@ -219,6 +220,7 @@ impl Operations {
         self.items.push(Operation {
             name: format!("Nueva operación {serial:02}"),
             active: true,
+            visible: true,
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: None,
@@ -250,6 +252,7 @@ impl Operations {
         self.items.push(Operation {
             name: format!("Acabado paralelo TEST {serial:02}"),
             active: true,
+            visible: true,
             kind: OperationKind::ParallelTest(ParallelTestParameters::default()),
             status: OperationStatus::NotCalculated,
             tool_id: None,

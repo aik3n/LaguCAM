@@ -3,6 +3,7 @@
 mod cam_batch;
 mod cam_combined_nc;
 mod cam_markers_3d;
+mod icons;
 mod machine_ui;
 mod material_ui;
 mod nav_cube;
@@ -22,9 +23,12 @@ mod project;
 mod project_ui;
 mod recent_projects;
 mod render;
+#[allow(dead_code)] // Diagnostico experimental fuera de la UI; conservar contratos y pruebas.
 mod sample_direct;
+#[allow(dead_code)] // Diagnostico experimental fuera de la UI; conservar contratos y pruebas.
 mod sample_overlay;
 mod scene_pick;
+#[allow(dead_code)] // Diagnostico experimental fuera de la UI; conservar contratos y pruebas.
 mod section_overlay;
 mod stl;
 mod stock_render;
@@ -530,17 +534,6 @@ impl App {
         }
     }
 
-    fn top_view(&mut self) {
-        // Mantener el centro de navegacion y el zoom actuales.
-        self.yaw = navigation::TOP_VIEW_YAW;
-        self.pitch = navigation::TOP_VIEW_PITCH;
-        self.projection = navigation::Projection::Orthographic;
-        // Descartar un picking pendiente de la orientacion anterior.
-        self.pending_pick = None;
-        *self.pick_result.lock() = None;
-        self.pivot_press = PivotPress::default();
-    }
-
     fn cube_view(&mut self, target: nav_cube::SnapTarget) {
         // El cubo solo modifica la camara; mantiene el centro y la escala.
         self.yaw = target.yaw;
@@ -896,7 +889,11 @@ impl App {
                             || path.display().to_string(),
                             |name| name.to_string_lossy().into_owned(),
                         );
-                        let label = if exists { name } else { format!("{name} (no encontrado)") };
+                        let label = if exists {
+                            name
+                        } else {
+                            format!("{name} (no encontrado)")
+                        };
                         if ui
                             .add_enabled(enabled && exists, egui::Button::new(label))
                             .on_hover_text(path.display().to_string())
@@ -908,8 +905,12 @@ impl App {
                     }
                 }
                 if let Some(error) = self.recent_projects.error() {
-                    ui.label(egui::RichText::new("Aviso: historial no disponible").small().weak())
-                        .on_hover_text(error);
+                    ui.label(
+                        egui::RichText::new("Aviso: historial no disponible")
+                            .small()
+                            .weak(),
+                    )
+                    .on_hover_text(error);
                 }
                 ui.separator();
                 if ui
@@ -947,117 +948,6 @@ impl App {
                 }
             });
             ui.menu_button("Vista", |ui| {
-                ui.menu_button("Diagnóstico geométrico (experimental)", |ui| {
-                if ui
-                    .add_enabled(
-                        !self.busy() && self.project.model.is_some() && self.sample_profile_job.is_none(),
-                        egui::Button::new("Mostrar secciones reales CSV..."),
-                    )
-                    .clicked()
-                {
-                    ui.close();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Secciones reales LaguCAM", &["csv"])
-                        .pick_file()
-                        && let Some(model) = self.project.model.as_ref()
-                    {
-                        match section_overlay::Sections::load(&path, model) {
-                                Ok(sections) => {
-                                    let count = sections.piece_count();
-                                    self.sample_profile_job = None;
-                                    self.sample_profiles = None;
-                                    self.section_profiles = Some(sections);
-                                    self.message = format!(
-                                        "Secciones reales cargadas: {count} elementos. Solo visualizacion."
-                                    );
-                                }
-                                Err(error) => self.message = format!("ERROR: {error}"),
-                            }
-                    }
-                }
-                if ui.add_enabled(self.section_profiles.is_some(),
-                    egui::Button::new("Ocultar secciones reales")).clicked()
-                {
-                    self.section_profiles = None;
-                    ui.close();
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(
-                        !self.busy()
-                            && self.project.model.is_some()
-                            && self.current_stl_path.is_some()
-                            && self.sample_profile_job.is_none(),
-                        egui::Button::new("Calcular 5 perfiles del STL abierto"),
-                    )
-                    .clicked()
-                {
-                    ui.close();
-                    if let (Some(path), Some(model)) =
-                        (self.current_stl_path.clone(), self.project.model.as_ref())
-                    {
-                        match sample_direct::ProfileJob::start(
-                            path,
-                            model.bounds,
-                            model.size_bytes,
-                            model.triangles,
-                            ui.ctx().clone(),
-                        ) {
-                            Ok(job) => {
-                                self.sample_profiles = None;
-                                self.sample_profile_job = Some(job);
-                                self.message =
-                                    "Calculando 5 perfiles sobre el STL abierto en segundo plano..."
-                                        .into();
-                            }
-                            Err(error) => self.message = format!("ERROR: {error}"),
-                        }
-                    }
-                }
-                if ui
-                    .add_enabled(
-                        !self.busy() && self.project.model.is_some(),
-                        egui::Button::new("Mostrar perfiles de muestra CSV…"),
-                    )
-                    .clicked()
-                {
-                    ui.close();
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Muestra de perfiles LaguCAM", &["csv"])
-                        .pick_file()
-                    {
-                        match sample_overlay::Profiles::load(&path) {
-                            Ok(profiles) => {
-                                self.sample_profile_job = None;
-                                self.section_profiles = None;
-                                self.sample_profiles = Some(profiles);
-                                self.message =
-                                    "Perfiles cargados: vista de muestra, no trayectoria CNC"
-                                        .into();
-                            }
-                            Err(err) => self.message = format!("ERROR: {err}"),
-                        }
-                    }
-                }
-                if ui
-                    .add_enabled(
-                        self.sample_profiles.is_some() || self.sample_profile_job.is_some(),
-                        egui::Button::new("Ocultar perfiles de muestra"),
-                    )
-                    .clicked()
-                {
-                    self.sample_profile_job = None;
-                    self.sample_profiles = None;
-                    ui.close();
-                }
-                ui.separator();
-                });
-                ui.separator();
-                if ui.button("Vista superior (+Z)").clicked() {
-                    self.top_view();
-                    ui.ctx().request_repaint();
-                    ui.close();
-                }
                 if ui.button("Centrar vista").clicked() {
                     self.center_view();
                     ui.ctx().request_repaint();
@@ -1511,7 +1401,7 @@ impl App {
         let cam_marker_renderer = Arc::clone(&self.cam_marker_renderer);
         let stock_geometry = stock_render::StockGeometry::from_project(&self.project);
         let marker_instances = self.project.model.as_ref().map_or_else(Vec::new, |model| {
-            self.test_parallel.marker_instances_3d(model)
+            self.test_parallel.marker_instances_3d(model, &self.project)
         });
         let picking = self.pending_pick.take();
         let pick_result = Arc::clone(&self.pick_result);
@@ -1605,8 +1495,17 @@ impl App {
             sections.paint(ui, rect, model, yaw, pitch, distance, pan, projection);
         }
         if let Some(model) = &self.project.model {
-            self.test_parallel
-                .paint(ui, rect, model, yaw, pitch, distance, pan, projection);
+            self.test_parallel.paint(
+                ui,
+                rect,
+                model,
+                &self.project,
+                yaw,
+                pitch,
+                distance,
+                pan,
+                projection,
+            );
         }
         if self.nc_playback_ui.compact_active()
             && self.nc_playback_ui.compact_controls(

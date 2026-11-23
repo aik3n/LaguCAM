@@ -28,7 +28,7 @@ use cam_libre_visor::toolpath_validation::{Severity, ValidationReport, validate_
 use eframe::egui;
 use glam::Vec3;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -403,17 +403,15 @@ struct OperationEditorDraft {
     kind: OperationKind,
     tool_id: Option<String>,
     tool_number: Option<u32>,
-    visible: bool,
 }
 
 impl OperationEditorDraft {
-    fn from_operation(op: &crate::project::operations::Operation, visible: bool) -> Self {
+    fn from_operation(op: &crate::project::operations::Operation) -> Self {
         Self {
             name: op.name.clone(),
             kind: op.kind.clone(),
             tool_id: op.tool_id.clone(),
             tool_number: op.tool_number,
-            visible,
         }
     }
 
@@ -442,7 +440,6 @@ pub struct TestParallelPanel {
     cancelling: bool,
     results: HashMap<usize, Outcome>,
     result_provenances: HashMap<usize, CamProvenance>,
-    hidden: HashSet<usize>,
     message: String,
 }
 
@@ -471,10 +468,7 @@ impl TestParallelPanel {
         if let Some(op) = project.operations.items.get(index) {
             // Solo un editor: al editar otra operacion se descarta el borrador anterior.
             self.editing = Some(index);
-            self.editor_draft = Some(OperationEditorDraft::from_operation(
-                op,
-                !self.hidden.contains(&index),
-            ));
+            self.editor_draft = Some(OperationEditorDraft::from_operation(op));
             self.editor_tab = OperationEditorTab::General;
             self.editor_error.clear();
             self.confirm_delete_operation = false;
@@ -499,10 +493,6 @@ impl TestParallelPanel {
         self.result_provenances = std::mem::take(&mut self.result_provenances)
             .into_iter()
             .map(|(index, stamp)| (remap(index, from, to), stamp))
-            .collect();
-        self.hidden = std::mem::take(&mut self.hidden)
-            .into_iter()
-            .map(|index| remap(index, from, to))
             .collect();
         self.editing = self.editing.map(|index| remap(index, from, to));
         if let Some((index, _)) = self.active_job.as_mut() {
@@ -583,7 +573,6 @@ impl TestParallelPanel {
         self.cancelling = false;
         self.results.remove(&index);
         self.result_provenances.remove(&index);
-        self.hidden.remove(&index);
         self.message = "Preparando motor y calculando...".into();
         if let Some(operation) = project.operations.items.get_mut(index) {
             operation.status = OperationStatus::NotCalculated;
@@ -604,10 +593,6 @@ impl TestParallelPanel {
             .filter_map(|(index, provenance)| {
                 index_after_delete(index, deleted).map(|i| (i, provenance))
             })
-            .collect();
-        self.hidden = std::mem::take(&mut self.hidden)
-            .into_iter()
-            .filter_map(|index| index_after_delete(index, deleted))
             .collect();
         let previous_editor = self.editing;
         self.editing = self
@@ -630,7 +615,6 @@ impl TestParallelPanel {
         self.cancelling = false;
         self.results.clear();
         self.result_provenances.clear();
-        self.hidden.clear();
         self.editing = None;
         self.editor_draft = None;
         self.editor_tab = OperationEditorTab::General;
@@ -724,7 +708,6 @@ impl TestParallelPanel {
                     self.results.insert(index, outcome);
                     self.result_provenances
                         .insert(index, job.provenance.clone());
-                    self.hidden.remove(&index);
                     if let Some(op) = project.operations.items.get_mut(index) {
                         op.status = status;
                     }
@@ -747,9 +730,9 @@ impl TestParallelPanel {
         &mut self,
         ctx: &egui::Context,
         project: &mut Project,
-        stl_path: Option<&Path>,
+        _stl_path: Option<&Path>,
         tool_library: &ToolLibrary,
-        available: bool,
+        _available: bool,
     ) {
         let Some(index) = self.editing else {
             return;
@@ -773,12 +756,9 @@ impl TestParallelPanel {
             .as_ref()
             .filter(|(i, _)| *i == index)
             .map(|(_, j)| (j.progress.load(Ordering::Relaxed), j.total));
-        let has_result = self.results.contains_key(&index);
         let units = crate::work_units::current(ctx);
         let mut accept = false;
-        let mut generate = false;
         let mut cancel_edit = false;
-        let mut cancel_job = false;
         let mut delete_now = false;
         let mut confirm_delete = self.confirm_delete_operation;
         let mut window_open = true;
@@ -854,8 +834,7 @@ impl TestParallelPanel {
                                             ui.small("Sin T asignado");
                                         }
                                     });
-                                });
-                                ui.small("T es el numero de herramienta del CNC; es independiente de la fresa de biblioteca. No emite M6 automaticamente.");                                if let Some(id) = draft.tool_id.as_deref() {
+                                });                                if let Some(id) = draft.tool_id.as_deref() {
                                     if let Some(tool) = tool_library.get(id) {
                                                                                 ui.small(format!("{} · Diametro Ø{} (biblioteca)",
                                             tool.geometry.kind().label(), units.length(tool.geometry.diameter_mm(), 3)));
@@ -866,8 +845,6 @@ impl TestParallelPanel {
                                         ui.colored_label(egui::Color32::YELLOW, "La fresa asignada no existe en la biblioteca.");
                                     }
                                 }
-                                ui.small("TEST G20: se supone que las unidades del STL son milimetros.");
-                                ui.small("La operacion puede guardarse sin una estrategia seleccionada.");
                             }
                             OperationEditorTab::Estrategia => {
                                 ui.heading("Estrategia de mecanizado");
@@ -963,8 +940,6 @@ impl TestParallelPanel {
                                                                                         ui.label(format!("Aproximacion sobre bruto (+{}):", units.symbol()));
                                             units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)));
                                         });
-                                        ui.small("Referencia Z: max(cima STL, cima bruto y punta calculada). Despeje > aproximacion > 0.");
-                                        ui.small("G25.3: trazados propuestos, NO verificados para ejecutar en una CNC.");
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para acceder a sus parametros.");
@@ -1161,9 +1136,6 @@ impl TestParallelPanel {
                         }
                     }
                 }
-                if has_result {
-                    ui.checkbox(&mut draft.visible, "Mostrar resultado 3D");
-                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     let can_accept = !running && validation.is_ok();
@@ -1172,15 +1144,6 @@ impl TestParallelPanel {
                     }
                     if ui.button("Cancelar").clicked() {
                         cancel_edit = true;
-                    }
-                    let can_generate = !running && available && stl_path.is_some()
-                        && validation.is_ok() && matches!(plan, Some(Ok(_)));
-                    if ui.add_enabled(can_generate, egui::Button::new("Generar")).clicked() {
-                        generate = true;
-                    }
-                    if ui.add_enabled(running_this && !self.cancelling,
-                        egui::Button::new("Cancelar calculo")).clicked() {
-                        cancel_job = true;
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add_enabled(!running, egui::Button::new("Eliminar")).clicked() {
@@ -1219,19 +1182,7 @@ impl TestParallelPanel {
             ctx.request_repaint();
             return;
         }
-
-        if cancel_job && let Some((_, job)) = &self.active_job {
-            job.cancel.store(true, Ordering::Relaxed);
-            self.cancelling = true;
-            self.results.remove(&index);
-            self.message = "Cancelacion solicitada...".into();
-        }
-        if accept || generate {
-            if draft.visible {
-                self.hidden.remove(&index);
-            } else {
-                self.hidden.insert(index);
-            }
+        if accept {
             // Aplicar una unica vez: el proyecto solo cambia al aceptar o generar.
             if let Some(op) = project.operations.items.get_mut(index) {
                 let modified =
@@ -1248,14 +1199,6 @@ impl TestParallelPanel {
                 }
             }
             self.editor_error.clear();
-        }
-        if generate {
-            confirm_delete = false;
-            if let Err(error) =
-                self.calculate_operation(index, project, stl_path, tool_library, ctx)
-            {
-                self.editor_error = format!("ERROR: {error}");
-            }
         }
         if !window_open || cancel_edit || accept {
             self.editing = None;
@@ -1274,13 +1217,19 @@ impl TestParallelPanel {
     pub fn marker_instances_3d(
         &self,
         model: &ModelReference,
+        project: &Project,
     ) -> Vec<crate::cam_markers_3d::Marker3d> {
         use crate::cam_markers_3d::{Marker3d, MarkerKind};
         let mut markers = Vec::with_capacity(self.results.len().saturating_mul(2));
         let mut indices: Vec<usize> = self.results.keys().copied().collect();
         indices.sort_unstable();
         for index in indices {
-            if self.hidden.contains(&index) {
+            if !project
+                .operations
+                .items
+                .get(index)
+                .is_some_and(|op| op.visible)
+            {
                 continue;
             }
             let path = &self.results[&index].linked;
@@ -1314,6 +1263,7 @@ impl TestParallelPanel {
         ui: &egui::Ui,
         rect: egui::Rect,
         model: &ModelReference,
+        project: &Project,
         yaw: f32,
         pitch: f32,
         zoom: f32,
@@ -1332,7 +1282,7 @@ impl TestParallelPanel {
             projection,
         );
         let painter = ui.painter().with_clip_rect(rect);
-        let project = |xyz: [f64; 3]| -> Option<egui::Pos2> {
+        let project_point = |xyz: [f64; 3]| -> Option<egui::Pos2> {
             let pos = model.visual_point(xyz)?;
             let clip = mvp * pos.extend(1.0);
             if !clip.is_finite() || clip.w <= 0.0 {
@@ -1354,7 +1304,12 @@ impl TestParallelPanel {
         let mut indices: Vec<_> = self.results.keys().copied().collect();
         indices.sort_unstable();
         for index in indices {
-            if self.hidden.contains(&index) {
+            if !project
+                .operations
+                .items
+                .get(index)
+                .is_some_and(|op| op.visible)
+            {
                 continue;
             }
             let result = &self.results[&index];
@@ -1368,7 +1323,9 @@ impl TestParallelPanel {
                     if rapid != rapid_pass {
                         continue;
                     }
-                    if let (Some(a), Some(b)) = (project(movement.from), project(movement.to)) {
+                    if let (Some(a), Some(b)) =
+                        (project_point(movement.from), project_point(movement.to))
+                    {
                         let color = if rapid { blue } else { red };
                         painter.line_segment([a, b], egui::Stroke::new(1.8, color));
                     }
@@ -1707,7 +1664,6 @@ mod operation_editor_tabs_tests {
             kind: OperationKind::Placeholder,
             tool_id: None,
             tool_number: None,
-            visible: true,
         };
         assert!(draft.validate().is_err());
         draft.name = "Operacion A".into();
@@ -1739,16 +1695,15 @@ mod deletion_index_tests {
     use super::*;
 
     #[test]
-    fn moving_operations_preserves_editor_and_hidden_state() {
-        let mut panel = TestParallelPanel::default();
-        panel.hidden.extend([0, 2]);
-        panel.editing = Some(2);
+    fn moving_operations_preserves_editor_index() {
+        let mut panel = TestParallelPanel {
+            editing: Some(2),
+            ..Default::default()
+        };
         panel.operation_moved(2, 0);
         assert_eq!(panel.editing, Some(0));
-        assert_eq!(panel.hidden, HashSet::from([0, 1]));
         panel.operation_moved(0, 2);
         assert_eq!(panel.editing, Some(2));
-        assert_eq!(panel.hidden, HashSet::from([0, 2]));
     }
 
     #[test]
@@ -1757,15 +1712,12 @@ mod deletion_index_tests {
         assert_eq!(index_after_delete(1, 1), None);
         assert_eq!(index_after_delete(2, 1), Some(1));
         assert_eq!(index_after_delete(3, 1), Some(2));
-        let mut panel = TestParallelPanel::default();
-        panel.hidden.extend([0, 2, 3]);
-        panel.editing = Some(3);
+        let mut panel = TestParallelPanel {
+            editing: Some(3),
+            ..Default::default()
+        };
         panel.operation_deleted(1);
         assert_eq!(panel.editing, Some(2));
-        assert_eq!(panel.hidden.len(), 3);
-        assert!(panel.hidden.contains(&0));
-        assert!(panel.hidden.contains(&1));
-        assert!(panel.hidden.contains(&2));
         assert!(panel.result_provenances.is_empty());
     }
 }

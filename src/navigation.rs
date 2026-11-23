@@ -14,6 +14,7 @@ pub enum Projection {
 // Vista superior sobre los ejes del MODELO: +X derecha, +Y arriba.
 // Solo cambia la camara; no transforma el STL ni el sistema CNC.
 pub const TOP_VIEW_YAW: f32 = -std::f32::consts::FRAC_PI_2;
+#[cfg(test)]
 pub const TOP_VIEW_PITCH: f32 = std::f32::consts::FRAC_PI_2;
 
 /// Distancia que encuadra el cubo visual normalizado [-1, 1]^3.

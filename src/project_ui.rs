@@ -319,26 +319,35 @@ pub fn tree(ui: &mut egui::Ui, project: &mut Project) -> OperationTreeActions {
                                     "Activar operacion en el mecanizado conjunto"
                                 };
                                 ui.checkbox(&mut op.active, "").on_hover_text(tip);
+                                if crate::icons::visibility_button(ui, op.visible).clicked() {
+                                    op.visible = !op.visible;
+                                }
                                 ui.dnd_drag_source(
                                     ui.make_persistent_id(("operation_reorder", i)),
                                     OperationDrag(i),
                                     |ui| {
-                                        ui.add_sized(
-                                            [22.0, ui.spacing().interact_size.y],
-                                            egui::Label::new("\u{22EE}\u{22EE}"),
-                                        )
-                                        .on_hover_text("Arrastrar para reordenar");
+                                        // El propio icono de operacion es el controlador de arrastre.
+                                        let (icon_rect, _) = ui.allocate_exact_size(
+                                            egui::vec2(22.0, ui.spacing().interact_size.y),
+                                            egui::Sense::hover(),
+                                        );
+                                        let selected = project.selection == Selection::Operation(i);
+                                        paint_tree_icon(
+                                            ui,
+                                            icon_rect,
+                                            TreeIcon::Operation,
+                                            false,
+                                            selected,
+                                        );
                                     },
                                 );
                                 let display_name = match op.tool_number {
                                     Some(number) => format!("{}  T{number}", op.name),
                                     None => op.name.clone(),
                                 };
-                                let response = icon_selectable_label(
-                                    ui,
+                                let response = ui.selectable_label(
                                     project.selection == Selection::Operation(i),
                                     &display_name,
-                                    TreeIcon::Operation,
                                 );
                                 if response.clicked() {
                                     project.selection = Selection::Operation(i);

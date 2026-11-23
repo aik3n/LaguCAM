@@ -115,6 +115,11 @@ pub struct SavedOperation {
         skip_serializing_if = "operation_active_is_default"
     )]
     pub active: bool,
+    #[serde(
+        default = "operation_active_default",
+        skip_serializing_if = "operation_active_is_default"
+    )]
+    pub visible: bool,
     pub kind: String,
     pub status: String,
     pub tool_id: Option<ToolId>,
@@ -190,6 +195,7 @@ impl ProjectState {
                 .map(|op| SavedOperation {
                     name: op.name.clone(),
                     active: op.active,
+                    visible: op.visible,
                     kind: match &op.kind {
                         OperationKind::Placeholder => "placeholder",
                         OperationKind::ParallelTest(_) => "parallel_test",
@@ -346,6 +352,7 @@ impl ProjectState {
                 .map(|op| Operation {
                     name: op.name.clone(),
                     active: op.active,
+                    visible: op.visible,
                     kind: match op.parallel_test {
                         Some(params) => OperationKind::ParallelTest(params),
                         None => OperationKind::Placeholder,
@@ -741,6 +748,7 @@ mod tests {
             Operation {
                 name: "Primera".into(),
                 active: true,
+                visible: true,
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Ready,
                 tool_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
@@ -750,6 +758,7 @@ mod tests {
             Operation {
                 name: "Segunda".into(),
                 active: true,
+                visible: true,
                 kind: OperationKind::Placeholder,
                 status: OperationStatus::Error,
                 tool_id: None,
@@ -816,6 +825,38 @@ mod tests {
     }
 
     #[test]
+    fn operation_visibility_roundtrips_and_legacy_defaults_visible() {
+        let mut project = Project::default();
+        let index = project.operations.add_new().unwrap();
+        project.operations.items[index].visible = false;
+        let saved = ProjectState::capture(&project);
+        let mut json = serde_json::to_value(&saved).unwrap();
+        assert_eq!(json["operations"][0]["visible"], false);
+        let restored: ProjectState = serde_json::from_value(json.clone()).unwrap();
+        assert!(
+            !restored
+                .restore(String::new(), None)
+                .unwrap()
+                .operations
+                .items[0]
+                .visible
+        );
+        json["operations"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("visible");
+        let legacy: ProjectState = serde_json::from_value(json).unwrap();
+        assert!(
+            legacy
+                .restore(String::new(), None)
+                .unwrap()
+                .operations
+                .items[0]
+                .visible
+        );
+    }
+
+    #[test]
     fn tool_number_is_optional_and_survives_project_roundtrip() {
         let mut project = Project::default();
         let index = project.operations.add_new().unwrap();
@@ -862,6 +903,7 @@ mod tests {
         project.operations.items.push(Operation {
             name: "Acabado".into(),
             active: true,
+            visible: true,
             kind: OperationKind::Placeholder,
             status: OperationStatus::NotCalculated,
             tool_id: Some(UUID.into()),
