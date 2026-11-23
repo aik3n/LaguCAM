@@ -39,6 +39,15 @@ El parche debe verificar **todos** los archivos de entrada antes de escribir; ac
 
 **Prohibido en un parche ordinario:** ejecutar comandos Git; bajar código de Internet; ejecutar instrucciones de procedencia no verificada; cambiar configuraciones externas, políticas permanentes de PowerShell o archivos personales; ocultar errores con `-ErrorAction SilentlyContinue`; sobrescribir conflictos; generar `.bak` de proyectos.
 
+### Ejecución estándar para entregas nuevas (PowerShell 7)
+
+- **Entregar siempre un enlace descargable al `.ps1` autocontenido**, no solo fragmentos para copiar. Guardar el script en el Escritorio al lado de la carpeta `LaguCAM`.
+- **Mostrar un único bloque de comandos copiable para `pwsh` 7**, comenzando por `Set-Location "C:\Users\momo\Desktop"` en el entorno actual del usuario. En el propio script, usar `$PSScriptRoot` para localizar `LaguCAM` sin depender de esa ruta personal.
+- Encadenar las operaciones con `&&`: si una falla, las siguientes no deben continuar. Usar `pwsh -NoProfile -ExecutionPolicy Bypass -File` para invocar cada parche; `Bypass` se aplica solo al proceso invocado, sin cambiar políticas persistentes.
+- **Todo parche nuevo debe implementar `-CheckOnly`**, sin cambios de archivos, y permitir reejecución idempotente. Primero comprobar, después aplicar. No anunciar soporte de `-CheckOnly` para scripts anteriores que no lo implementen.
+- Para código Rust, añadir las validaciones adecuadas con `--manifest-path ".\LaguCAM\Cargo.toml"`. El comando `cargo fmt --all -- --check` verifica sin modificar; `cargo fmt --all` se usa solo cuando se pretende reformatear. Un parche solo documental no exige Cargo.
+- Estos ejemplos de ejecución prevalecen sobre ejemplos antiguos que usen `powershell.exe` o comandos separados; no alteran la responsabilidad exclusiva del usuario para Git.
+
 ## 4. Entrega de evidencia y coordinación
 
 - **Implementado/inspeccionado:** el código existe en una base identificada; no acredita ejecución.

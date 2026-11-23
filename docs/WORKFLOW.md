@@ -46,32 +46,41 @@ Cada entrega debe contener, de forma verificable:
 
 ## 4. Validación del propio parche antes de entregarlo
 
-El chat responsable comprueba la coherencia del contenido y los hashes contra los archivos de referencia accesibles. Siempre que pueda, prueba sobre una **copia temporal** del estado base (nunca el proyecto personal): precomprobación, primera aplicación, segunda aplicación sin cambios y rechazo de un archivo modificado. Para cambios multarchivo, comprobar reversión ante fallo simulado. **Si no pudo ejecutar PowerShell 5.1 o probarlo en Windows, declararlo; las pruebas estáticas no lo sustituyen.**
+El chat responsable comprueba la coherencia del contenido y los hashes contra los archivos de referencia accesibles. Siempre que pueda, prueba sobre una **copia temporal** del estado base (nunca el proyecto personal): precomprobación, primera aplicación, segunda aplicación sin cambios y rechazo de un archivo modificado. Para cambios multarchivo, comprobar reversión ante fallo simulado. **Si no pudo ejecutar PowerShell 7 o probarlo en Windows, declararlo; las pruebas estáticas no lo sustituyen.**
 
-El usuario ejecuta desde PowerShell:
-
-```powershell
-# 1. Precomprobar; debe NO modificar el proyecto
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Desktop\parche_HITO_descripcion.ps1" -CheckOnly
-
-# 2. Aplicar una sola vez tras revisar el resumen
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Desktop\parche_HITO_descripcion.ps1"
-```
+El usuario ejecuta los comandos normalizados de la sección 4.a (PowerShell 7).
 
 Si falla: **detenerse y enviar la salida completa** al chat responsable. No forzar, corregir a mano, cambiar hashes ni ejecutar un segundo parche sobre el estado dudoso. El responsable audita el punto de fallo y entrega un parche correctivo específico, si procede.
 
-## 5. Calidad de Rust y pruebas funcionales
+## 4.a. Comandos de entrega normalizados: PowerShell 7 (vigente desde 2026-11-23)
 
-El parche de código adjunta los comandos **necesarios para su riesgo**, no un listado inerte. Comandos de referencia desde la carpeta real:
+En el entorno Windows actual, el chat entrega **enlace descargable del `.ps1`** y un **solo bloque pegable** que comienza en el Escritorio y utiliza `&&`. La base local del script sigue localizándose con `$PSScriptRoot`; no introducir la ruta personal del usuario en el código del parche. `-ExecutionPolicy Bypass` afecta solo a cada proceso `pwsh`, nunca cambia la política persistente del equipo. El prompt `PS ...>` y las líneas `>>` de la consola **no forman parte** de los comandos entregados.
 
 ```powershell
-Set-Location "$env:USERPROFILE\Desktop\LaguCAM"
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-cargo check --locked --all-targets
-cargo build --locked --release
+Set-Location "C:\Users\momo\Desktop" &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1" -CheckOnly &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1"
 ```
+
+**Todos los parches nuevos implementan `-CheckOnly` sin escritura.** Para un parche antiguo sin dicho parámetro, indicar explícitamente la excepción; no simular la precomprobación. `&&` detiene la cadena si falla un comando. Exigir además prevalidación de archivos, idempotencia, límites de rutas, staging y rollback descritos en la sección 3.
+
+Para **parches Rust**, después de aplicar el parche, añadir **en el mismo bloque** las verificaciones que correspondan (ejemplo completo):
+
+```powershell
+Set-Location "C:\Users\momo\Desktop" &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1" -CheckOnly &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1" &&
+cargo fmt --manifest-path ".\LaguCAM\Cargo.toml" --all -- --check &&
+cargo test --manifest-path ".\LaguCAM\Cargo.toml" --locked --all-targets &&
+cargo clippy --manifest-path ".\LaguCAM\Cargo.toml" --locked --all-targets -- -D warnings &&
+cargo build --manifest-path ".\LaguCAM\Cargo.toml" --locked --release
+```
+
+`cargo check --locked --all-targets` se añade cuando el contrato de pruebas lo requiera. Si el parche ha modificado el formato, el desarrollador debe incluir deliberadamente una fase de `cargo fmt --all` antes de `--check`, distinguiendo claramente modificación y validación. **Los parches solo documentales no necesitan ejecutar Cargo**: basta precomprobación, aplicación y verificación textual. El usuario conserva la responsabilidad exclusiva del commit/push.
+
+## 5. Calidad de Rust y pruebas funcionales
+
+El parche de código adjunta los comandos **necesarios para su riesgo**, no un listado inerte. Los comandos de referencia, con rutas explícitas al `Cargo.toml`, figuran en la sección 4.a.
 
 Exigir también tests unitarios/integración específicos, GUI y patrones geométricos según el contrato. Registrar comandos, resultado real, Windows/Rust/driver cuando afecte, rendimiento medido, errores y regresiones. `cargo fmt` sin `--check` modifica archivos: no pedirlo como validación pasiva. **Un cambio exclusivamente documental no necesita Cargo.**
 

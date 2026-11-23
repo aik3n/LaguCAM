@@ -29,18 +29,25 @@ El usuario aporta salida de aplicación y de pruebas. **Un parche documental no 
 
 ## 1. Comandos de calidad de Rust
 
-Comandos de referencia desde la raíz del repositorio:
-
-```powershell
-cd "$env:USERPROFILE\Desktop\LaguCAM"
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-cargo check --locked --all-targets
-cargo build --locked --release
-```
+Para aplicar y verificar parches, utilizar el bloque normalizado PowerShell 7 de la sección siguiente. Comando adicional cuando corresponda: `cargo check --manifest-path ".\\LaguCAM\\Cargo.toml" --locked --all-targets`.
 
 Registrar sistema, versión Rust, salida real y si alguno no pudo ejecutarse. La existencia de `Cargo.lock` fija el grafo de dependencias; no equivale a verificar licencias o seguridad de todas ellas. El árbol de `main` inspeccionado en `5cd41c7` no contenía workflow de CI activo; **no afirmar que CI corre** hasta incorporarlo y observar sus resultados.
+
+### Invocación estándar de parches (PowerShell 7)
+
+El usuario utiliza `pwsh` 7. Los parches nuevos deben incluir `-CheckOnly` real y se ejecutan desde el Escritorio con `Set-Location`, `pwsh -NoProfile -ExecutionPolicy Bypass -File` y `&&` para detenerse ante errores. La invocación del script usa `$PSScriptRoot` internamente, sin rutas personales incrustadas. Se entrega **enlace de descarga y un bloque de comandos listo para pegar**, sin prompts de consola (`PS ...>` o `>>`).
+
+```powershell
+Set-Location "C:\Users\momo\Desktop" &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1" -CheckOnly &&
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\parche_HITO_descripcion.ps1" &&
+cargo fmt --manifest-path ".\LaguCAM\Cargo.toml" --all -- --check &&
+cargo test --manifest-path ".\LaguCAM\Cargo.toml" --locked --all-targets &&
+cargo clippy --manifest-path ".\LaguCAM\Cargo.toml" --locked --all-targets -- -D warnings &&
+cargo build --manifest-path ".\LaguCAM\Cargo.toml" --locked --release
+```
+
+El bloque Cargo es para cambios de código y debe adaptarse a su alcance. En cambios solo de documentación se omite por completo. `--check` no modifica los archivos; `cargo fmt --all` sí. La política temporal `Bypass` no altera la configuración global de Windows. No confundir salida de prueba con verificación GUI, NC seguro o identidad del SHA local.
 
 ## 2. Pruebas del visor y proyecto
 
