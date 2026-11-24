@@ -395,6 +395,8 @@ enum OperationEditorTab {
     General,
     Estrategia,
     Area,
+    Condiciones,
+    Movimientos,
 }
 
 #[derive(Clone)]
@@ -407,9 +409,14 @@ struct OperationEditorDraft {
 
 impl OperationEditorDraft {
     fn from_operation(op: &crate::project::operations::Operation) -> Self {
+        let mut kind = op.kind.clone();
+        if let OperationKind::ParallelTest(ref mut p) = kind {
+            p.cutting_feed_mm_min.get_or_insert(1000.0);
+            p.spindle_rpm.get_or_insert(5000.0);
+        }
         Self {
             name: op.name.clone(),
-            kind: op.kind.clone(),
+            kind,
             tool_id: op.tool_id.clone(),
             tool_number: op.tool_number,
         }
@@ -766,7 +773,8 @@ impl TestParallelPanel {
         egui::Window::new(title)
             .open(&mut window_open)
             .resizable(true)
-            .default_width(610.0)
+            .default_size(egui::vec2(650.0, 550.0))
+            .min_size(egui::vec2(480.0, 330.0))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if ui.selectable_label(tab == OperationEditorTab::General, "General").clicked() {
@@ -778,12 +786,19 @@ impl TestParallelPanel {
                     if ui.selectable_label(tab == OperationEditorTab::Area, "Area").clicked() {
                         tab = OperationEditorTab::Area;
                     }
+                    if ui.selectable_label(tab == OperationEditorTab::Condiciones, "Condiciones").clicked() {
+                        tab = OperationEditorTab::Condiciones;
+                    }
+                    if ui.selectable_label(tab == OperationEditorTab::Movimientos, "Movimientos").clicked() {
+                        tab = OperationEditorTab::Movimientos;
+                    }
                 });
                 ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(360.0)
+                let validation = egui::ScrollArea::vertical()
+                    .id_salt("operation_editor_stable_content")
+                    .auto_shrink([false, false])
+                    .max_height((ui.available_height() - 90.0).max(130.0))
                     .show(ui, |ui| {
-                        ui.set_min_height(200.0);
                         match tab {
                             OperationEditorTab::General => {
                                 ui.heading("Datos generales");
@@ -872,7 +887,6 @@ impl TestParallelPanel {
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.separator();
                                     ui.add_enabled_ui(!running, |ui| {
-                                        ui.small("Diametro de contacto: definido por la herramienta seleccionada en General.");
                                         ui.horizontal(|ui| {
                                                                                         ui.label(format!("Paso entre pasadas ({}):", units.symbol()));
                                             units.drag_mm(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0)));
@@ -885,33 +899,7 @@ impl TestParallelPanel {
                                                                                         ui.label(format!("Sobreespesor ({}):", units.symbol()));
                                             units.drag_mm(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0)));
                                         });
-                                        ui.small("Separacion uniforme respecto al modelo nominal; no se acumula entre operaciones.");
                                         ui.separator();
-                                        ui.small("Condiciones de corte de esta estrategia (pendientes por defecto):");
-                                        ui.horizontal(|ui| {
-                                            ui.label("Avance F de corte:");
-                                            let mut defined = p.cutting_feed_mm_min.is_some();
-                                            if ui.checkbox(&mut defined, "Definir").changed() {
-                                                p.cutting_feed_mm_min = defined.then_some(0.0);
-                                            }
-                                            if let Some(feed) = p.cutting_feed_mm_min.as_mut() {
-                                                                                                units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0)));
-                                                ui.label(format!("{}/min", units.symbol()));
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                            ui.label("Husillo S:");
-                                            let mut defined = p.spindle_rpm.is_some();
-                                            if ui.checkbox(&mut defined, "Definir").changed() {
-                                                p.spindle_rpm = defined.then_some(0.0);
-                                            }
-                                            if let Some(rpm) = p.spindle_rpm.as_mut() {
-                                                ui.add(egui::DragValue::new(rpm)
-                                                    .speed(100.0).range(0.0..=1_000_000.0)
-                                                    .suffix(" rpm"));
-                                            }
-                                        });
-                                        ui.small("F/S son datos de estrategia, no alteran el contacto STL ni autorizan G-code.");
                                         ui.horizontal(|ui| {
                                             ui.label("Direccion:");
                                             ui.radio_value(&mut p.along_x, true, "Eje X");
@@ -931,15 +919,6 @@ impl TestParallelPanel {
                                                     RasterPattern::Zigzag.label(),
                                                 );
                                             });
-                                        ui.separator();
-                                        ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Despeje sobre bruto (+{}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0)));
-                                        });
-                                        ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Aproximacion sobre bruto (+{}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)));
-                                        });
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para acceder a sus parametros.");
@@ -987,8 +966,50 @@ impl TestParallelPanel {
                                     ui.label("Selecciona primero una estrategia en la pestana Estrategia.");
                                 }
                             }
+                            OperationEditorTab::Condiciones => {
+                                ui.heading("Condiciones de corte");
+                                if let OperationKind::ParallelTest(ref mut p) = draft.kind {
+                                    ui.add_enabled_ui(!running, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label("Avance F de corte:");
+                                            let feed = p.cutting_feed_mm_min.get_or_insert(1000.0);
+                                            units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0)));
+                                            ui.label(format!("{}/min", units.symbol()));
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label("Husillo S:");
+                                            let rpm = p.spindle_rpm.get_or_insert(5000.0);
+                                            ui.add(
+                                                egui::DragValue::new(rpm)
+                                                    .speed(100.0)
+                                                    .range(0.0..=1_000_000.0)
+                                                    .suffix(" rpm"),
+                                            );
+                                        });
+                                    });
+                                } else {
+                                    ui.small("Selecciona una estrategia para configurar F y S.");
+                                }
+                            }
+                            OperationEditorTab::Movimientos => {
+                                ui.heading("Movimientos");
+                                if let OperationKind::ParallelTest(ref mut p) = draft.kind {
+                                    ui.add_enabled_ui(!running, |ui| {
+                                        ui.separator();
+                                        ui.horizontal(|ui| {
+                                                                                        ui.label(format!("Despeje sobre bruto (+{}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0)));
+                                        });
+                                        ui.horizontal(|ui| {
+                                                                                        ui.label(format!("Aproximacion sobre bruto (+{}):", units.symbol()));
+                                            units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)));
+                                        });
+                                    });
+                                } else {
+                                    ui.small("Selecciona una estrategia para configurar las alturas.");
+                                }
+                            }
                         }
-                    });
                 ui.separator();
                 let validation = draft.validate();
                 if let Err(error) = &validation {
@@ -1136,6 +1157,8 @@ impl TestParallelPanel {
                         }
                     }
                 }
+                validation
+                }).inner;
                 ui.separator();
                 ui.horizontal(|ui| {
                     let can_accept = !running && validation.is_ok();
@@ -1151,8 +1174,9 @@ impl TestParallelPanel {
                         }
                     });
                 });
-                if confirm_delete && !running {
-                    ui.horizontal(|ui| {
+                ui.allocate_ui(egui::vec2(ui.available_width(), ui.spacing().interact_size.y + 8.0), |ui| {
+                    if confirm_delete && !running {
+                        ui.horizontal(|ui| {
                         ui.colored_label(egui::Color32::LIGHT_RED, "¿Eliminar definitivamente esta operación?");
                         if ui.button("Sí, eliminar").clicked() {
                             delete_now = true;
@@ -1160,8 +1184,9 @@ impl TestParallelPanel {
                         if ui.button("No").clicked() {
                             confirm_delete = false;
                         }
-                    });
-                }
+                        });
+                    }
+                });
             });
 
         if delete_now {

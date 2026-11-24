@@ -91,7 +91,7 @@
           "diameter": 4.0,
           "stepover": 4.0,
           "longitudinal": 2.0,
-          "along_x": true,
+          "along_x": false,
           "allowance_mm": 5.0,
           "cutting_feed_mm_min": 1200.0,
           "spindle_rpm": 5000.0,

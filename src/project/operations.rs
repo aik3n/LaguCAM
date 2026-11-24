@@ -88,8 +88,8 @@ impl Default for ParallelTestParameters {
             longitudinal: 2.0,
             along_x: true,
             allowance_mm: 0.0,
-            cutting_feed_mm_min: None,
-            spindle_rpm: None,
+            cutting_feed_mm_min: Some(1000.0),
+            spindle_rpm: Some(5000.0),
             pass_pattern: RasterPattern::Unidirectional,
             clearance_mm: default_clearance_mm(),
             approach_mm: default_approach_mm(),
@@ -517,8 +517,8 @@ mod f1_1_cutting_conditions_tests {
             serde_json::from_str::<ParallelTestParameters>(&json).unwrap(),
             first
         );
-        assert_eq!(second.cutting_feed_mm_min, None);
-        assert_eq!(second.spindle_rpm, None);
+        assert_eq!(second.cutting_feed_mm_min, Some(1000.0));
+        assert_eq!(second.spindle_rpm, Some(5000.0));
         assert_ne!(
             OperationKind::ParallelTest(first),
             OperationKind::ParallelTest(second)
