@@ -47,8 +47,20 @@ fn rapid(from: [f64; 3], to: [f64; 3]) -> Option<CamMove> {
     })
 }
 
-fn transition(previous: [f64; 3], target: [f64; 3]) -> [Option<CamMove>; 3] {
-    let link_z = previous[2].max(target[2]);
+/// Une operaciones sin reducir nunca sus despejes configurados.
+/// El postprocesador comprueba previamente que los extremos de las trayectorias
+/// del lote coinciden con sus alturas de despeje. El enlace sigue siendo
+/// geometrico: NO certifica ausencia de colisiones con bruto o fijaciones.
+fn transition(
+    previous: [f64; 3],
+    target: [f64; 3],
+    previous_clearance_z: f64,
+    target_clearance_z: f64,
+) -> [Option<CamMove>; 3] {
+    let link_z = previous[2]
+        .max(target[2])
+        .max(previous_clearance_z)
+        .max(target_clearance_z);
     let vertical_top = [previous[0], previous[1], link_z];
     let horizontal_end = [target[0], target[1], link_z];
     [
@@ -80,7 +92,7 @@ pub(crate) fn plan_single<'a>(
 /// los enlaces; cada trayectoria propia conserva sus movimientos y su orden.
 /// Ningun enlace se redondea aqui: eso corresponde al postprocesador.
 pub(crate) fn plan_batch<'moves>(operations: &[CamBatchOperation<'moves>]) -> BatchPlan<'moves> {
-    let mut previous = None;
+    let mut previous: Option<([f64; 3], f64)> = None;
     let mut planned = Vec::with_capacity(operations.len());
     for operation in operations {
         let first = operation
@@ -88,7 +100,12 @@ pub(crate) fn plan_batch<'moves>(operations: &[CamBatchOperation<'moves>]) -> Ba
             .first()
             .expect("El post ha validado cada trayectoria no vacia");
         let links = match previous {
-            Some(position) => transition(position, first.from_work_mm),
+            Some((position, previous_clearance)) => transition(
+                position,
+                first.from_work_mm,
+                previous_clearance,
+                operation.clearance_z_work_mm,
+            ),
             None => [None; 3],
         };
         planned.push(PlannedBatchOperation {
@@ -102,7 +119,7 @@ pub(crate) fn plan_batch<'moves>(operations: &[CamBatchOperation<'moves>]) -> Ba
         previous = operation
             .moves_work_mm
             .last()
-            .map(|movement| movement.to_work_mm);
+            .map(|movement| (movement.to_work_mm, operation.clearance_z_work_mm));
     }
     BatchPlan {
         operations: planned,
@@ -195,6 +212,62 @@ mod tests {
         assert_eq!(plan.operations[2].operation.moves_work_mm, &c);
     }
 
+    #[test]
+    fn transition_respects_both_clearances_even_when_endpoints_are_lower() {
+        let previous = [10.0, 20.0, 12.0];
+        let target = [0.0, 0.0, 14.0];
+        let links = transition(previous, target, 25.0, 30.0);
+        assert_eq!(
+            links,
+            [
+                rapid(previous, [10.0, 20.0, 30.0]),
+                rapid([10.0, 20.0, 30.0], [0.0, 0.0, 30.0]),
+                rapid([0.0, 0.0, 30.0], target),
+            ]
+        );
+        for movement in links.into_iter().flatten() {
+            assert_eq!(movement.kind, PlannedMoveKind::RapidTraverse);
+        }
+    }
+
+    #[test]
+    fn transition_does_not_lower_an_endpoint_above_configured_clearance() {
+        let previous = [1.0, 2.0, 45.0];
+        let target = [3.0, 4.0, 20.0];
+        let links = transition(previous, target, 12.0, 30.0);
+        assert_eq!(links[0], None);
+        assert_eq!(links[1], rapid(previous, [3.0, 4.0, 45.0]));
+        assert_eq!(links[2], rapid([3.0, 4.0, 45.0], target));
+    }
+
+    #[test]
+    fn plan_batch_links_match_configured_clearances_and_borrow_paths() {
+        let a = path([10.0, 20.0, 15.0], [10.0, 20.0, 1.0]);
+        let b = path([0.0, 0.0, 35.0], [0.0, 0.0, 2.0]);
+        let c = path([8.0, 9.0, 20.0], [8.0, 9.0, 3.0]);
+        let plan = plan_batch(&[op(&a, 15.0), op(&b, 35.0), op(&c, 20.0)]);
+        assert_eq!(plan.operations.len(), 3);
+        assert_eq!(plan.operations[0].transition, [None; 3]);
+        assert_eq!(
+            plan.operations[1].transition,
+            [
+                rapid([10.0, 20.0, 15.0], [10.0, 20.0, 35.0]),
+                rapid([10.0, 20.0, 35.0], [0.0, 0.0, 35.0]),
+                None,
+            ]
+        );
+        assert_eq!(
+            plan.operations[2].transition,
+            [
+                None,
+                rapid([0.0, 0.0, 35.0], [8.0, 9.0, 35.0]),
+                rapid([8.0, 9.0, 35.0], [8.0, 9.0, 20.0]),
+            ]
+        );
+        for (planned, original) in plan.operations.iter().zip([&a[..], &b[..], &c[..]]) {
+            assert_eq!(planned.operation.moves_work_mm, original);
+        }
+    }
     #[test]
     fn coincident_endpoints_do_not_add_zero_length_motion() {
         let a = path([0.0, 0.0, 10.0], [0.0, 0.0, 1.0]);

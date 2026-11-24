@@ -33,6 +33,8 @@ use std::{
 
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_VISIBLE_SEGMENTS: usize = 12_000;
+/// Velocidad nominal de referencia para G0; NO describe la maquina real.
+const RAPID_ESTIMATE_MM_MIN: f64 = 6_000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct DisplayMotion {
@@ -72,10 +74,97 @@ fn position_at(initial: [f64; 3], motions: &[DisplayMotion], playhead: f64) -> [
     })
 }
 
-fn next_tick(playhead: f64, elapsed_secs: f64, speed_moves_sec: f64, total: usize) -> f64 {
-    // Acotar delta tras un paron de UI evita saltos involuntarios en la reproduccion.
-    let delta = elapsed_secs.clamp(0.0, 0.1) * speed_moves_sec;
-    (playhead + delta).min(total as f64)
+/// Tabla cronologica calculada UNA vez desde el NC ya interpretado.
+/// Los offsets preservan el acceso por movimiento del visor y del material 2.5D.
+#[derive(Clone, Debug)]
+struct MotionTimeline {
+    cumulative_secs: Vec<f64>,
+}
+
+impl MotionTimeline {
+    fn from_motions(motions: &[DisplayMotion]) -> Result<Self, String> {
+        let mut cumulative_secs = Vec::with_capacity(motions.len() + 1);
+        cumulative_secs.push(0.0);
+        for item in motions {
+            let motion = item.motion;
+            let delta: [f64; 3] =
+                std::array::from_fn(|axis| motion.to_work_mm[axis] - motion.from_work_mm[axis]);
+            let distance_mm = delta[0].hypot(delta[1]).hypot(delta[2]);
+            let feed_mm_min = match motion.kind {
+                NcMotionKind::Rapid => RAPID_ESTIMATE_MM_MIN,
+                NcMotionKind::LinearFeed => motion.effective_feed_mm_min.ok_or_else(|| {
+                    format!(
+                        "Linea {}: falta F efectivo para estimar el tiempo",
+                        item.line
+                    )
+                })?,
+            };
+            if !distance_mm.is_finite() || !feed_mm_min.is_finite() || feed_mm_min <= 0.0 {
+                return Err(format!("Linea {}: distancia o avance no valido", item.line));
+            }
+            let duration = distance_mm * 60.0 / feed_mm_min;
+            let next = cumulative_secs.last().copied().unwrap_or(0.0) + duration;
+            if !next.is_finite() {
+                return Err("La duracion NC supera el rango numerico".into());
+            }
+            cumulative_secs.push(next);
+        }
+        Ok(Self { cumulative_secs })
+    }
+
+    fn total(&self) -> f64 {
+        self.cumulative_secs.last().copied().unwrap_or(0.0)
+    }
+
+    fn seconds_at(&self, playhead: f64) -> f64 {
+        let n = self.cumulative_secs.len() - 1;
+        if n == 0 || playhead <= 0.0 {
+            return 0.0;
+        }
+        if playhead >= n as f64 {
+            return self.total();
+        }
+        let i = playhead.floor() as usize;
+        let fraction = playhead - i as f64;
+        self.cumulative_secs[i] + (self.cumulative_secs[i + 1] - self.cumulative_secs[i]) * fraction
+    }
+
+    fn playhead_at(&self, seconds: f64) -> f64 {
+        let n = self.cumulative_secs.len() - 1;
+        if n == 0 || seconds <= 0.0 {
+            return 0.0;
+        }
+        if seconds >= self.total() {
+            return n as f64;
+        }
+        let i = self
+            .cumulative_secs
+            .partition_point(|value| *value <= seconds)
+            .saturating_sub(1)
+            .min(n - 1);
+        let duration = self.cumulative_secs[i + 1] - self.cumulative_secs[i];
+        if duration <= 0.0 {
+            return i as f64;
+        }
+        i as f64 + ((seconds - self.cumulative_secs[i]) / duration).clamp(0.0, 1.0)
+    }
+}
+
+fn estimated_clock(seconds: f64) -> String {
+    let s = seconds.max(0.0).floor() as u64;
+    format!("{:02}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
+}
+
+fn next_tick(
+    playhead: f64,
+    elapsed_secs: f64,
+    speed_factor: f64,
+    timeline: &MotionTimeline,
+) -> f64 {
+    // Evitar saltos tras una pausa del proceso o del sistema operativo.
+    let delta = elapsed_secs.clamp(0.0, 0.1) * speed_factor;
+    let next_seconds = (timeline.seconds_at(playhead) + delta).min(timeline.total());
+    timeline.playhead_at(next_seconds)
 }
 
 fn validate_source_file(path: &Path) -> Result<String, String> {
@@ -214,6 +303,7 @@ impl PlaybackSession {
 struct Playback {
     trace: NcTrace,
     moves: Vec<DisplayMotion>,
+    timeline: MotionTimeline,
     frame: WorkFrame,
     identity: PlaybackSession,
 }
@@ -265,7 +355,7 @@ impl Default for NcPlaybackUi {
             playback: None,
             playhead: 0.0,
             playing: false,
-            speed: 5.0,
+            speed: 1.0,
             last_update: None,
             visible: true,
             show_cutter: true,
@@ -454,7 +544,8 @@ impl NcPlaybackUi {
             let elapsed = self.last_update.map_or(0.0, |last| {
                 now.saturating_duration_since(last).as_secs_f64()
             });
-            self.playhead = next_tick(self.playhead, elapsed, self.speed, total);
+            let timeline = &self.playback.as_ref().expect("Sesion compacta").timeline;
+            self.playhead = next_tick(self.playhead, elapsed, self.speed, timeline);
             if self.playhead >= total as f64 {
                 self.playing = false;
             } else {
@@ -534,7 +625,21 @@ impl NcPlaybackUi {
                             }
                             ui.small(format!("{} / {}", self.playhead.floor() as usize, total));
                         });
-                        ui.small("NC generado · Inicio teorico CAM · No verifica colisiones");
+                        if let Some(pb) = &self.playback {
+                            ui.small(format!(
+                                "Tiempo estimado {} / {}  ·  {:.2}x  ·  G0 ref. {:.0} mm/min",
+                                estimated_clock(pb.timeline.seconds_at(self.playhead)),
+                                estimated_clock(pb.timeline.total()),
+                                self.speed,
+                                RAPID_ESTIMATE_MM_MIN,
+                            ));
+                            ui.add(
+                                egui::Slider::new(&mut self.speed, 0.1..=20.0)
+                                    .logarithmic(true)
+                                    .text("Velocidad x"),
+                            );
+                        }
+                        ui.small("Tiempo nominal sin aceleraciones · Inicio teorico CAM · No verifica colisiones");
                     });
             });
         close
@@ -600,11 +705,13 @@ impl NcPlaybackUi {
         let trace =
             interpret_program(&self.nc_text, self.initial_state()).map_err(|e| e.to_string())?;
         let moves = motion_list(&trace);
+        let timeline = MotionTimeline::from_motions(&moves)?;
         let identity =
             PlaybackSession::capture(project, self.source_path.as_deref(), self.nc_text_version)?;
         self.playback = Some(Playback {
             trace,
             moves,
+            timeline,
             frame,
             identity,
         });
@@ -667,7 +774,7 @@ impl NcPlaybackUi {
             let secs = self.last_update.map_or(0.0, |last| {
                 now.saturating_duration_since(last).as_secs_f64()
             });
-            self.playhead = next_tick(self.playhead, secs, self.speed, pb.moves.len());
+            self.playhead = next_tick(self.playhead, secs, self.speed, &pb.timeline);
             if self.playhead >= pb.moves.len() as f64 {
                 self.playing = false;
             } else {
@@ -767,10 +874,16 @@ impl NcPlaybackUi {
                             .text("Movimiento NC"),
                     );
                     ui.add(
-                        egui::Slider::new(&mut self.speed, 0.25..=60.0)
+                        egui::Slider::new(&mut self.speed, 0.1..=20.0)
                             .logarithmic(true)
-                            .text("Movimientos/s (visual)"),
+                            .text("Velocidad x (tiempo estimado)"),
                     );
+                    ui.small(format!(
+                        "Tiempo estimado {} / {}  ·  G0 ref. {:.0} mm/min  ·  Sin aceleraciones",
+                        estimated_clock(pb.timeline.seconds_at(self.playhead)),
+                        estimated_clock(pb.timeline.total()),
+                        RAPID_ESTIMATE_MM_MIN,
+                    ));
                     let i = self.playhead.floor() as usize;
                     let line = pb
                         .moves
@@ -1336,10 +1449,38 @@ mod tests {
     }
 
     #[test]
-    fn playback_speed_is_visual_and_capped_after_long_pause() {
-        assert_eq!(next_tick(2.0, 0.01, 10.0, 5), 2.1);
-        assert_eq!(next_tick(2.0, 600.0, 10.0, 5), 3.0);
-        assert_eq!(next_tick(4.9, 0.02, 10.0, 5), 5.0);
+    fn playback_time_uses_nc_feed_and_rapid_reference() {
+        let motions = motion_list(&simple());
+        let timeline = MotionTimeline::from_motions(&motions).unwrap();
+        // G0 10 mm a 6000 mm/min = 0.1 s.
+        // G1 5 mm a F600 mm/min = 0.5 s.
+        assert!((timeline.total() - 0.6).abs() < 1e-12);
+        assert!((timeline.seconds_at(1.5) - 0.35).abs() < 1e-12);
+        assert!((timeline.playhead_at(0.35) - 1.5).abs() < 1e-12);
+        assert!((next_tick(0.0, 0.01, 1.0, &timeline) - 0.1).abs() < 1e-12);
+        assert_eq!(next_tick(0.0, 600.0, 1.0, &timeline), 1.0);
+        assert_eq!(next_tick(1.9, 1.0, 20.0, &timeline), 2.0);
+    }
+
+    #[test]
+    fn timeline_preserves_short_and_long_moves_with_different_feed() {
+        let trace = interpret_program(
+            "G21 G90 G94\nF60 G1 X1\nF600 G1 X101\nM30\n",
+            NcInitialState {
+                position_work_mm: [0.0; 3],
+                units: NcUnits::Millimeters,
+                distance_mode: NcDistanceMode::Absolute,
+                feed_mm_min: None,
+                spindle_rpm: None,
+                spindle_mode: NcSpindleMode::Stopped,
+                tool_number: None,
+            },
+        )
+        .unwrap();
+        let timing = MotionTimeline::from_motions(&motion_list(&trace)).unwrap();
+        assert!((timing.total() - 11.0).abs() < 1e-9);
+        assert!((timing.playhead_at(1.0) - 1.0).abs() < 1e-9);
+        assert!((timing.playhead_at(6.0) - 1.5).abs() < 1e-9);
     }
 
     #[test]

@@ -10,8 +10,9 @@ use cam_libre_visor::material_sim::MaterialHeightfield;
 use eframe::glow;
 use glow::HasContext as _;
 
-// 192x192 -> ~220k vertices como maximo para la cara superior.
-const MAX_RENDER_NODES: usize = 192;
+// 256x256: la resolucion por defecto de material se representa sin decimacion.
+// Limitar a 256 evita multiplicar memoria/CPU al seleccionar 512 o 1024.
+const MAX_RENDER_NODES: usize = 256;
 const CIRCLE_STEPS: usize = 32;
 const BALL_STEPS: usize = 12;
 const STRIDE: usize = 6; // posicion normalizada XYZ + color RGB
@@ -42,6 +43,28 @@ fn shade(a: [f64; 3], b: [f64; 3], c: [f64; 3], base: [f32; 3]) -> [f32; 3] {
     base.map(|x| x * factor)
 }
 
+/// Luz difusa a partir de la pendiente real de la superficie del material.
+/// Es una mejora de presentacion: no modifica ni interpola el heightfield.
+fn surface_brightness(dz_dx: f64, dz_dy: f64) -> f32 {
+    let length = (dz_dx * dz_dx + dz_dy * dz_dy + 1.0).sqrt();
+    if !length.is_finite() || length <= 0.0 {
+        return 0.48;
+    }
+    let diffuse = ((dz_dx * 0.25 + dz_dy * 0.4 + 0.88) / length).clamp(0.0, 1.0);
+    (0.48 + 0.52 * diffuse) as f32
+}
+
+fn surface_vertex_brightness(field: &MaterialHeightfield, ix: usize, iy: usize) -> f32 {
+    let [nx, ny] = field.cells;
+    let (left, right) = (ix.saturating_sub(1), (ix + 1).min(nx - 1));
+    let (down, up) = (iy.saturating_sub(1), (iy + 1).min(ny - 1));
+    let dx = field.stock.size_mm[0] * (right - left) as f64 / (nx - 1) as f64;
+    let dy = field.stock.size_mm[1] * (up - down) as f64 / (ny - 1) as f64;
+    let dz_dx = (field.height_at(right, iy) - field.height_at(left, iy)) / dx;
+    let dz_dy = (field.height_at(ix, up) - field.height_at(ix, down)) / dy;
+    surface_brightness(dz_dx, dz_dy)
+}
+
 impl Scene {
     fn triangle(&mut self, project: &Project, xyz: [[f64; 3]; 3], color: [f32; 3], tool: bool) {
         let Some(model) = &project.model else {
@@ -63,6 +86,30 @@ impl Scene {
         for point in points {
             target.extend_from_slice(&point);
             target.extend_from_slice(&rgb);
+        }
+    }
+
+    /// Cada vertice de la superficie recibe su propia iluminacion.
+    /// El color de la fresa y el de los faldones mantienen su render anterior.
+    fn surface_triangle(
+        &mut self,
+        project: &Project,
+        points: [[f64; 3]; 3],
+        colors: [[f32; 3]; 3],
+    ) {
+        let Some(model) = &project.model else {
+            return;
+        };
+        let mut normalized = [[0.0_f32; 3]; 3];
+        for (index, point) in points.into_iter().enumerate() {
+            let Some(position) = model.visual_point(point) else {
+                return;
+            };
+            normalized[index] = position.to_array();
+        }
+        for (point, color) in normalized.into_iter().zip(colors) {
+            self.solid.extend_from_slice(&point);
+            self.solid.extend_from_slice(&color);
         }
     }
 
@@ -113,16 +160,23 @@ impl Scene {
                 let b = point(ix1, iy0);
                 let c = point(ix1, iy1);
                 let d = point(ix0, iy1);
+                // Una celda tiene un material, no una mezcla de material
+                // original y mecanizado. Solo se interpola la iluminacion.
                 let cut = field.is_cut(ix0, iy0)
                     || field.is_cut(ix1, iy0)
                     || field.is_cut(ix1, iy1)
                     || field.is_cut(ix0, iy1);
-                let color = if cut {
+                let base: [f32; 3] = if cut {
                     [0.20, 0.65, 0.83]
                 } else {
                     [0.72, 0.51, 0.30]
                 };
-                scene.quad(project, a, b, c, d, color, false);
+                let color_a = base.map(|v| v * surface_vertex_brightness(field, ix0, iy0));
+                let color_b = base.map(|v| v * surface_vertex_brightness(field, ix1, iy0));
+                let color_c = base.map(|v| v * surface_vertex_brightness(field, ix1, iy1));
+                let color_d = base.map(|v| v * surface_vertex_brightness(field, ix0, iy1));
+                scene.surface_triangle(project, [a, b, c], [color_a, color_b, color_c]);
+                scene.surface_triangle(project, [a, c, d], [color_a, color_c, color_d]);
             }
         }
         // Faldones en el limite real del bruto. No formar falsos triangulos
@@ -428,9 +482,20 @@ mod tests {
     use super::*;
     #[test]
     fn nodes_and_triangle_budget_are_bounded() {
-        assert_eq!(MAX_RENDER_NODES, 192);
-        const { assert!(MAX_RENDER_NODES * MAX_RENDER_NODES * 6 * STRIDE < 1_400_000) };
+        assert_eq!(MAX_RENDER_NODES, 256);
+        // Hasta seis vertices y seis f32 por celda, sin limite de 192.
+        const { assert!(MAX_RENDER_NODES * MAX_RENDER_NODES * 6 * STRIDE < 2_400_000) };
     }
+    #[test]
+    fn surface_brightness_is_finite_and_changes_with_slope() {
+        let flat = surface_brightness(0.0, 0.0);
+        let slope = surface_brightness(1.0, 0.0);
+        assert!((0.0..=1.0).contains(&flat));
+        assert!((0.0..=1.0).contains(&slope));
+        assert_ne!(flat, slope);
+        assert!((0.0..=1.0).contains(&surface_brightness(1.0e300, 1.0e300)));
+    }
+
     #[test]
     fn flat_normal_has_finite_shading() {
         let c = shade([0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 0.5, 0.]);
