@@ -804,8 +804,11 @@ impl TestParallelPanel {
                                 ui.heading("Datos generales");
                                 ui.add_enabled_ui(!running, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label("Nombre:");
-                                        ui.text_edit_singleline(&mut draft.name);
+                                        ui.add_sized([210.0, 20.0], egui::Label::new("Nombre:"));
+                                        ui.add_sized([250.0, 22.0], egui::TextEdit::singleline(&mut draft.name));
+                                        if draft.name.trim().is_empty() {
+                                            ui.colored_label(egui::Color32::YELLOW, "Nombre obligatorio");
+                                        }
                                     });
                                 });
                                 ui.separator();
@@ -888,20 +891,29 @@ impl TestParallelPanel {
                                     ui.separator();
                                     ui.add_enabled_ui(!running, |ui| {
                                         ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Paso entre pasadas ({}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0)));
+                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Paso entre pasadas ({}):", units.symbol())));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0))); });
+                                            if !p.stepover.is_finite() || p.stepover <= 0.0 || p.stepover > 1_000_000.0 {
+                                                ui.colored_label(egui::Color32::YELLOW, "Paso lateral invalido");
+                                            }
                                         });
                                         ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Paso longitudinal ({}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.longitudinal, 0.1, Some((0.01, 1000.0)));
+                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Paso longitudinal ({}):", units.symbol())));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.longitudinal, 0.1, Some((0.01, 1000.0))); });
+                                            if !p.longitudinal.is_finite() || p.longitudinal <= 0.0 || p.longitudinal > 1_000_000.0 {
+                                                ui.colored_label(egui::Color32::YELLOW, "Paso longitudinal invalido");
+                                            }
                                         });
                                         ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Sobreespesor ({}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0)));
+                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Sobreespesor ({}):", units.symbol())));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0))); });
+                                            if !p.allowance_mm.is_finite() || !(0.0..=1_000_000.0).contains(&p.allowance_mm) {
+                                                ui.colored_label(egui::Color32::YELLOW, "Sobreespesor invalido");
+                                            }
                                         });
                                         ui.separator();
                                         ui.horizontal(|ui| {
-                                            ui.label("Direccion:");
+                                            ui.add_sized([210.0, 20.0], egui::Label::new("Direccion:"));
                                             ui.radio_value(&mut p.along_x, true, "Eje X");
                                             ui.radio_value(&mut p.along_x, false, "Eje Y");
                                         });
@@ -947,17 +959,20 @@ impl TestParallelPanel {
                                         if let Some(area) = p.area_xy.as_mut() {
                                                                                         ui.small(format!("Limites del modelo transformado, en {}.", units.symbol()));
                                             ui.horizontal(|ui| {
-                                                ui.label("X min");
+                                                ui.add_sized([55.0, 20.0], egui::Label::new("X min"));
                                                 units.drag_mm(ui, &mut area.x_min, 0.1, None);
-                                                ui.label("X max");
+                                                ui.add_sized([55.0, 20.0], egui::Label::new("X max"));
                                                 units.drag_mm(ui, &mut area.x_max, 0.1, None);
                                             });
                                             ui.horizontal(|ui| {
-                                                ui.label("Y min");
+                                                ui.add_sized([55.0, 20.0], egui::Label::new("Y min"));
                                                 units.drag_mm(ui, &mut area.y_min, 0.1, None);
-                                                ui.label("Y max");
+                                                ui.add_sized([55.0, 20.0], egui::Label::new("Y max"));
                                                 units.drag_mm(ui, &mut area.y_max, 0.1, None);
                                             });
+                                            if let Err(error) = area.validate() {
+                                                ui.colored_label(egui::Color32::YELLOW, error);
+                                            }
                                         } else {
                                             ui.small("Se utilizara el rectangulo completo del modelo STL.");
                                         }
@@ -971,13 +986,16 @@ impl TestParallelPanel {
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.add_enabled_ui(!running, |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label("Avance F de corte:");
+                                            ui.add_sized([210.0, 20.0], egui::Label::new("Avance F de corte:"));
                                             let feed = p.cutting_feed_mm_min.get_or_insert(1000.0);
-                                            units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0)));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0))); });
                                             ui.label(format!("{}/min", units.symbol()));
+                                            if !feed.is_finite() || *feed <= 0.0 || *feed > 1_000_000.0 {
+                                                ui.colored_label(egui::Color32::YELLOW, "F debe ser positivo");
+                                            }
                                         });
                                         ui.horizontal(|ui| {
-                                            ui.label("Husillo S:");
+                                            ui.add_sized([210.0, 20.0], egui::Label::new("Husillo S:"));
                                             let rpm = p.spindle_rpm.get_or_insert(5000.0);
                                             ui.add(
                                                 egui::DragValue::new(rpm)
@@ -985,6 +1003,9 @@ impl TestParallelPanel {
                                                     .range(0.0..=1_000_000.0)
                                                     .suffix(" rpm"),
                                             );
+                                            if !rpm.is_finite() || *rpm <= 0.0 || *rpm > 1_000_000.0 {
+                                                ui.colored_label(egui::Color32::YELLOW, "S debe ser positivo");
+                                            }
                                         });
                                     });
                                 } else {
@@ -997,12 +1018,15 @@ impl TestParallelPanel {
                                     ui.add_enabled_ui(!running, |ui| {
                                         ui.separator();
                                         ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Despeje sobre bruto (+{}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0)));
+                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Despeje sobre bruto (+{}):", units.symbol())));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0))); });
                                         });
                                         ui.horizontal(|ui| {
-                                                                                        ui.label(format!("Aproximacion sobre bruto (+{}):", units.symbol()));
-                                            units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)));
+                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Aproximacion sobre bruto (+{}):", units.symbol())));
+                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0))); });
+                                            if !p.approach_mm.is_finite() || !p.clearance_mm.is_finite() || p.approach_mm <= 0.0 || p.clearance_mm <= p.approach_mm || p.clearance_mm > 1_000_000.0 {
+                                                ui.colored_label(egui::Color32::YELLOW, "Requiere despeje > aproximacion > 0");
+                                            }
                                         });
                                     });
                                 } else {
