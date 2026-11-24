@@ -68,6 +68,32 @@ impl WorkUnits {
         }
         response
     }
+    /// Editor de longitud/avance con ancho real fijo. El dato se almacena en mm.
+    pub fn drag_mm_sized(
+        self,
+        ui: &mut egui::Ui,
+        mm: &mut f64,
+        speed_mm: f64,
+        range_mm: Option<(f64, f64)>,
+        width: f32,
+    ) -> egui::Response {
+        let factor = self.mm_per_unit();
+        let mut view = *mm / factor;
+        let mut drag = egui::DragValue::new(&mut view)
+            .speed(speed_mm / factor)
+            .max_decimals(8);
+        if let Some((min, max)) = range_mm {
+            drag = drag.range((min / factor)..=(max / factor));
+        }
+        let response = ui.add_sized([width, ui.spacing().interact_size.y], drag);
+        if response.changed() {
+            let physical = view * factor;
+            if physical.is_finite() {
+                *mm = physical;
+            }
+        }
+        response
+    }
 }
 
 const SETTINGS_ID: &str = "lagucam_work_units_display_v1";

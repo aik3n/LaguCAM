@@ -389,6 +389,24 @@ fn compute(
 /// UI transitoria de operaciones: los parametros residen en Project,
 /// los resultados y los hilos viven solamente en memoria.
 // Estado del editor: pertenece a la interfaz y no al formato .lagucam.
+// Columnas compartidas para el editor de operaciones (egui 0.37).
+// La medida de la etiqueta no depende del texto de la fila.
+fn operation_editor_label(ui: &mut egui::Ui, label: &str) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(210.0, 24.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.label(label);
+        },
+    );
+}
+
+fn operation_editor_grid(ui: &mut egui::Ui, id: &'static str, rows: impl FnOnce(&mut egui::Ui)) {
+    egui::Grid::new(id)
+        .num_columns(3)
+        .spacing([10.0, 8.0])
+        .show(ui, rows);
+}
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum OperationEditorTab {
     #[default]
@@ -800,16 +818,18 @@ impl TestParallelPanel {
                     .max_height((ui.available_height() - 90.0).max(130.0))
                     .show(ui, |ui| {
                         match tab {
-                            OperationEditorTab::General => {
+                                                        OperationEditorTab::General => {
                                 ui.heading("Datos generales");
                                 ui.add_enabled_ui(!running, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.add_sized([210.0, 20.0], egui::Label::new("Nombre:"));
-                                        ui.add_sized([250.0, 22.0], egui::TextEdit::singleline(&mut draft.name));
-                                        if draft.name.trim().is_empty() {
-                                            ui.colored_label(egui::Color32::YELLOW, "Nombre obligatorio");
-                                        }
+                                    operation_editor_grid(ui, "editor_general", |ui| {
+                                        operation_editor_label(ui, "Nombre:");
+                                        ui.add_sized([250.0, 24.0], egui::TextEdit::singleline(&mut draft.name));
+                                        ui.label("");
+                                        ui.end_row();
                                     });
+                                    if draft.name.trim().is_empty() {
+                                        ui.colored_label(egui::Color32::YELLOW, "Nombre obligatorio");
+                                    }
                                 });
                                 ui.separator();
                                 ui.add_enabled_ui(!running, |ui| {
@@ -819,48 +839,64 @@ impl TestParallelPanel {
                                             .map(|tool| tool.name.clone())
                                             .unwrap_or_else(|| "Herramienta no disponible".to_owned()),
                                     };
-                                    egui::ComboBox::from_label("Herramienta de biblioteca")
-                                        .selected_text(selected)
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut draft.tool_id, None, "Sin seleccionar");
-                                            for tool in &tool_library.tools {
-                                                ui.selectable_value(
-                                                    &mut draft.tool_id,
-                                                    Some(tool.id.clone()),
-                                                    format!(                                                "{} - {} Ø{}", tool.name,
-                                                        tool.geometry.kind().label(),
-                                                        units.length(tool.geometry.diameter_mm(), 3)),
-                                                );
-                                            }
-                                        });
+                                    operation_editor_grid(ui, "editor_tool", |ui| {
+                                        operation_editor_label(ui, "Herramienta:");
+                                        egui::ComboBox::from_id_salt("operation_editor_tool")
+                                            .width(240.0)
+                                            .selected_text(selected)
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut draft.tool_id, None, "Sin seleccionar");
+                                                for tool in &tool_library.tools {
+                                                    ui.selectable_value(
+                                                        &mut draft.tool_id,
+                                                        Some(tool.id.clone()),
+                                                        format!("{} - {} Ø{}", tool.name,
+                                                            tool.geometry.kind().label(),
+                                                            units.length(tool.geometry.diameter_mm(), 3)),
+                                                    );
+                                                }
+                                            });
+                                        ui.label("");
+                                        ui.end_row();
+                                    });
                                 });
                                 ui.separator();
                                 ui.add_enabled_ui(!running, |ui| {
-                                    ui.horizontal(|ui| {
-                                        let mut assigned = draft.tool_number.is_some();
-                                        if ui.checkbox(&mut assigned, "Asignar numero de herramienta CNC").changed() {
-                                            draft.tool_number = assigned.then_some(1);
-                                        }
-                                        if let Some(number) = draft.tool_number.as_mut() {
-                                            ui.add(
-                                                egui::DragValue::new(number)
-                                                    .range(1..=crate::project::operations::MAX_NC_TOOL_NUMBER)
-                                                    .speed(1)
-                                                    .prefix("T"),
-                                            );
-                                        } else {
-                                            ui.small("Sin T asignado");
-                                        }
+                                    operation_editor_grid(ui, "editor_tool_number", |ui| {
+                                        operation_editor_label(ui, "Numero CNC:");
+                                        ui.horizontal(|ui| {
+                                            let mut assigned = draft.tool_number.is_some();
+                                            if ui.checkbox(&mut assigned, "Asignar").changed() {
+                                                draft.tool_number = assigned.then_some(1);
+                                            }
+                                            if let Some(number) = draft.tool_number.as_mut() {
+                                                ui.add(
+                                                    egui::DragValue::new(number)
+                                                        .range(1..=crate::project::operations::MAX_NC_TOOL_NUMBER)
+                                                        .speed(1)
+                                                        .prefix("T"),
+                                                );
+                                            } else {
+                                                ui.small("Sin T");
+                                            }
+                                        });
+                                        ui.label("");
+                                        ui.end_row();
                                     });
-                                });                                if let Some(id) = draft.tool_id.as_deref() {
+                                });
+                                if let Some(id) = draft.tool_id.as_deref() {
                                     if let Some(tool) = tool_library.get(id) {
-                                                                                ui.small(format!("{} · Diametro Ø{} (biblioteca)",
+                                        ui.small(format!("{} · Diametro Ø{} (biblioteca)",
                                             tool.geometry.kind().label(), units.length(tool.geometry.diameter_mm(), 3)));
-                                        if !matches!(&tool.geometry, crate::tools::model::ToolGeometry::BallNose { .. } | crate::tools::model::ToolGeometry::Flat { .. } | crate::tools::model::ToolGeometry::BullNose { .. }) {
+                                        if !matches!(&tool.geometry,
+                                            crate::tools::model::ToolGeometry::BallNose { .. }
+                                            | crate::tools::model::ToolGeometry::Flat { .. }
+                                            | crate::tools::model::ToolGeometry::BullNose { .. }) {
                                             ui.small("Este tipo aun no dispone de solucion de contacto CAM.");
                                         }
                                     } else {
-                                        ui.colored_label(egui::Color32::YELLOW, "La fresa asignada no existe en la biblioteca.");
+                                        ui.colored_label(egui::Color32::YELLOW,
+                                            "La fresa asignada no existe en la biblioteca.");
                                     }
                                 }
                             }
@@ -869,16 +905,22 @@ impl TestParallelPanel {
                                 let was_parallel = matches!(&draft.kind, OperationKind::ParallelTest(_));
                                 let mut parallel = was_parallel;
                                 ui.add_enabled_ui(!running, |ui| {
-                                    egui::ComboBox::from_label("Estrategia")
-                                        .selected_text(if was_parallel {
-                                            "Acabado paralelo - TEST"
-                                        } else {
-                                            "Sin seleccionar"
-                                        })
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut parallel, false, "Sin seleccionar");
-                                            ui.selectable_value(&mut parallel, true, "Acabado paralelo - TEST");
-                                        });
+                                    operation_editor_grid(ui, "editor_strategy_select", |ui| {
+                                        operation_editor_label(ui, "Estrategia:");
+                                        egui::ComboBox::from_id_salt("operation_editor_strategy")
+                                            .width(240.0)
+                                            .selected_text(if was_parallel {
+                                                "Acabado paralelo - TEST"
+                                            } else {
+                                                "Sin seleccionar"
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut parallel, false, "Sin seleccionar");
+                                                ui.selectable_value(&mut parallel, true, "Acabado paralelo - TEST");
+                                            });
+                                        ui.label("");
+                                        ui.end_row();
+                                    });
                                 });
                                 if parallel != was_parallel {
                                     draft.kind = if parallel {
@@ -890,47 +932,50 @@ impl TestParallelPanel {
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.separator();
                                     ui.add_enabled_ui(!running, |ui| {
-                                        ui.horizontal(|ui| {
-                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Paso entre pasadas ({}):", units.symbol())));
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0))); });
-                                            if !p.stepover.is_finite() || p.stepover <= 0.0 || p.stepover > 1_000_000.0 {
-                                                ui.colored_label(egui::Color32::YELLOW, "Paso lateral invalido");
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Paso longitudinal ({}):", units.symbol())));
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.longitudinal, 0.1, Some((0.01, 1000.0))); });
-                                            if !p.longitudinal.is_finite() || p.longitudinal <= 0.0 || p.longitudinal > 1_000_000.0 {
-                                                ui.colored_label(egui::Color32::YELLOW, "Paso longitudinal invalido");
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Sobreespesor ({}):", units.symbol())));
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0))); });
-                                            if !p.allowance_mm.is_finite() || !(0.0..=1_000_000.0).contains(&p.allowance_mm) {
-                                                ui.colored_label(egui::Color32::YELLOW, "Sobreespesor invalido");
-                                            }
-                                        });
-                                        ui.separator();
-                                        ui.horizontal(|ui| {
-                                            ui.add_sized([210.0, 20.0], egui::Label::new("Direccion:"));
-                                            ui.radio_value(&mut p.along_x, true, "Eje X");
-                                            ui.radio_value(&mut p.along_x, false, "Eje Y");
-                                        });
-                                        egui::ComboBox::from_label("Recorrido de pasadas")
-                                            .selected_text(p.pass_pattern.label())
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(
-                                                    &mut p.pass_pattern,
-                                                    RasterPattern::Unidirectional,
-                                                    RasterPattern::Unidirectional.label(),
-                                                );
-                                                ui.selectable_value(
-                                                    &mut p.pass_pattern,
-                                                    RasterPattern::Zigzag,
-                                                    RasterPattern::Zigzag.label(),
-                                                );
+                                        operation_editor_grid(ui, "editor_strategy_fields", |ui| {
+                                            operation_editor_label(ui, "Paso entre pasadas:");
+                                            units.drag_mm_sized(ui, &mut p.stepover, 0.5, Some((0.01, 1000.0)), 112.0);
+                                            ui.label(units.symbol());
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Paso longitudinal:");
+                                            units.drag_mm_sized(ui, &mut p.longitudinal, 0.1, Some((0.01, 1000.0)), 112.0);
+                                            ui.label(units.symbol());
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Sobreespesor:");
+                                            units.drag_mm_sized(ui, &mut p.allowance_mm, 0.1, Some((0.0, 1_000_000.0)), 112.0);
+                                            ui.label(units.symbol());
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Direccion:");
+                                            ui.horizontal(|ui| {
+                                                ui.radio_value(&mut p.along_x, true, "Eje X");
+                                                ui.radio_value(&mut p.along_x, false, "Eje Y");
                                             });
+                                            ui.label("");
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Recorrido de pasadas:");
+                                            egui::ComboBox::from_id_salt("operation_editor_pass_pattern")
+                                                .width(240.0)
+                                                .selected_text(p.pass_pattern.label())
+                                                .show_ui(ui, |ui| {
+                                                    ui.selectable_value(&mut p.pass_pattern,
+                                                        RasterPattern::Unidirectional,
+                                                        RasterPattern::Unidirectional.label());
+                                                    ui.selectable_value(&mut p.pass_pattern,
+                                                        RasterPattern::Zigzag,
+                                                        RasterPattern::Zigzag.label());
+                                                });
+                                            ui.label("");
+                                            ui.end_row();
+                                        });
+                                        if !p.stepover.is_finite() || p.stepover <= 0.0 || p.stepover > 1_000_000.0 {
+                                            ui.colored_label(egui::Color32::YELLOW, "Paso lateral invalido");
+                                        }
+                                        if !p.longitudinal.is_finite() || p.longitudinal <= 0.0 || p.longitudinal > 1_000_000.0 {
+                                            ui.colored_label(egui::Color32::YELLOW, "Paso longitudinal invalido");
+                                        }
+                                        if !p.allowance_mm.is_finite() || !(0.0..=1_000_000.0).contains(&p.allowance_mm) {
+                                            ui.colored_label(egui::Color32::YELLOW, "Sobreespesor invalido");
+                                        }
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para acceder a sus parametros.");
@@ -957,18 +1002,24 @@ impl TestParallelPanel {
                                             };
                                         }
                                         if let Some(area) = p.area_xy.as_mut() {
-                                                                                        ui.small(format!("Limites del modelo transformado, en {}.", units.symbol()));
-                                            ui.horizontal(|ui| {
-                                                ui.add_sized([55.0, 20.0], egui::Label::new("X min"));
-                                                units.drag_mm(ui, &mut area.x_min, 0.1, None);
-                                                ui.add_sized([55.0, 20.0], egui::Label::new("X max"));
-                                                units.drag_mm(ui, &mut area.x_max, 0.1, None);
-                                            });
-                                            ui.horizontal(|ui| {
-                                                ui.add_sized([55.0, 20.0], egui::Label::new("Y min"));
-                                                units.drag_mm(ui, &mut area.y_min, 0.1, None);
-                                                ui.add_sized([55.0, 20.0], egui::Label::new("Y max"));
-                                                units.drag_mm(ui, &mut area.y_max, 0.1, None);
+                                            ui.small(format!("Limites del modelo transformado, en {}.", units.symbol()));
+                                            operation_editor_grid(ui, "editor_area_xy", |ui| {
+                                                operation_editor_label(ui, "X min:");
+                                                units.drag_mm_sized(ui, &mut area.x_min, 0.1, None, 112.0);
+                                                ui.label(units.symbol());
+                                                ui.end_row();
+                                                operation_editor_label(ui, "X max:");
+                                                units.drag_mm_sized(ui, &mut area.x_max, 0.1, None, 112.0);
+                                                ui.label(units.symbol());
+                                                ui.end_row();
+                                                operation_editor_label(ui, "Y min:");
+                                                units.drag_mm_sized(ui, &mut area.y_min, 0.1, None, 112.0);
+                                                ui.label(units.symbol());
+                                                ui.end_row();
+                                                operation_editor_label(ui, "Y max:");
+                                                units.drag_mm_sized(ui, &mut area.y_max, 0.1, None, 112.0);
+                                                ui.label(units.symbol());
+                                                ui.end_row();
                                             });
                                             if let Err(error) = area.validate() {
                                                 ui.colored_label(egui::Color32::YELLOW, error);
@@ -985,28 +1036,27 @@ impl TestParallelPanel {
                                 ui.heading("Condiciones de corte");
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.add_enabled_ui(!running, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.add_sized([210.0, 20.0], egui::Label::new("Avance F de corte:"));
+                                        operation_editor_grid(ui, "editor_cutting_conditions", |ui| {
+                                            operation_editor_label(ui, "Avance F de corte:");
                                             let feed = p.cutting_feed_mm_min.get_or_insert(1000.0);
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, feed, 10.0, Some((0.0, 1_000_000.0))); });
+                                            units.drag_mm_sized(ui, feed, 10.0, Some((0.0, 1_000_000.0)), 112.0);
                                             ui.label(format!("{}/min", units.symbol()));
-                                            if !feed.is_finite() || *feed <= 0.0 || *feed > 1_000_000.0 {
-                                                ui.colored_label(egui::Color32::YELLOW, "F debe ser positivo");
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                            ui.add_sized([210.0, 20.0], egui::Label::new("Husillo S:"));
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Husillo S:");
                                             let rpm = p.spindle_rpm.get_or_insert(5000.0);
-                                            ui.add(
+                                            ui.add_sized([112.0, 24.0],
                                                 egui::DragValue::new(rpm)
                                                     .speed(100.0)
-                                                    .range(0.0..=1_000_000.0)
-                                                    .suffix(" rpm"),
-                                            );
-                                            if !rpm.is_finite() || *rpm <= 0.0 || *rpm > 1_000_000.0 {
-                                                ui.colored_label(egui::Color32::YELLOW, "S debe ser positivo");
-                                            }
+                                                    .range(0.0..=1_000_000.0));
+                                            ui.label("rpm");
+                                            ui.end_row();
                                         });
+                                        if p.cutting_feed_mm_min.is_some_and(|f| !f.is_finite() || f <= 0.0 || f > 1_000_000.0) {
+                                            ui.colored_label(egui::Color32::YELLOW, "F debe ser positivo");
+                                        }
+                                        if p.spindle_rpm.is_some_and(|s| !s.is_finite() || s <= 0.0 || s > 1_000_000.0) {
+                                            ui.colored_label(egui::Color32::YELLOW, "S debe ser positivo");
+                                        }
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para configurar F y S.");
@@ -1016,26 +1066,29 @@ impl TestParallelPanel {
                                 ui.heading("Movimientos");
                                 if let OperationKind::ParallelTest(ref mut p) = draft.kind {
                                     ui.add_enabled_ui(!running, |ui| {
-                                        ui.separator();
-                                        ui.horizontal(|ui| {
-                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Despeje sobre bruto (+{}):", units.symbol())));
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0))); });
+                                        operation_editor_grid(ui, "editor_motion_heights", |ui| {
+                                            operation_editor_label(ui, "Despeje sobre bruto (+):");
+                                            units.drag_mm_sized(ui, &mut p.clearance_mm, 0.5, Some((0.1, 1_000_000.0)), 112.0);
+                                            ui.label(units.symbol());
+                                            ui.end_row();
+                                            operation_editor_label(ui, "Aproximacion sobre bruto (+):");
+                                            units.drag_mm_sized(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0)), 112.0);
+                                            ui.label(units.symbol());
+                                            ui.end_row();
                                         });
-                                        ui.horizontal(|ui| {
-                                                                                        ui.add_sized([210.0, 20.0], egui::Label::new(format!("Aproximacion sobre bruto (+{}):", units.symbol())));
-                                            ui.scope(|ui| { ui.spacing_mut().interact_size.x = 112.0; units.drag_mm(ui, &mut p.approach_mm, 0.1, Some((0.01, 1_000_000.0))); });
-                                            if !p.approach_mm.is_finite() || !p.clearance_mm.is_finite() || p.approach_mm <= 0.0 || p.clearance_mm <= p.approach_mm || p.clearance_mm > 1_000_000.0 {
-                                                ui.colored_label(egui::Color32::YELLOW, "Requiere despeje > aproximacion > 0");
-                                            }
-                                        });
+                                        if !p.approach_mm.is_finite() || !p.clearance_mm.is_finite()
+                                            || p.approach_mm <= 0.0 || p.clearance_mm <= p.approach_mm
+                                            || p.clearance_mm > 1_000_000.0 {
+                                            ui.colored_label(egui::Color32::YELLOW,
+                                                "Requiere despeje > aproximacion > 0");
+                                        }
                                     });
                                 } else {
                                     ui.small("Selecciona una estrategia para configurar las alturas.");
                                 }
                             }
                         }
-                ui.separator();
-                let validation = draft.validate();
+                ui.separator();let validation = draft.validate();
                 if let Err(error) = &validation {
                     ui.colored_label(egui::Color32::YELLOW, error.as_str());
                 }
