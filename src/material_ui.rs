@@ -2,15 +2,20 @@
 //! Resolucion del calculo independiente del tamano STL; dibujo desacoplado y
 //! simplificado para no crear cientos de miles de triangulos egui por frame.
 
+use crate::sparse_scene_gpu::Surface;
 use crate::{
     project::{Project, cam_coordinates::WorkFrame},
     tools::model::{Tool, ToolGeometry, ToolLibrary},
 };
 use cam_libre_visor::{
-    material_sim::{CutterShape, CutterSpec, MaterialHeightfield, StockBox, segments_from_trace},
+    material_sim::{
+        CutSegment, CutterShape, CutterSpec, MaterialHeightfield, StockBox, segments_from_trace,
+    },
     nc_contract::NcTrace,
+    sparse_material::{SparseConfig, SparseMaterial},
 };
 use eframe::egui;
+use std::cell::RefCell;
 use std::{
     sync::{
         Arc,
@@ -20,8 +25,13 @@ use std::{
     time::Duration,
 };
 
+enum MaterialResult {
+    Dense(MaterialHeightfield),
+    Sparse(SparseMaterial, Vec<CutSegment>),
+}
+
 struct MaterialJob {
-    rx: Receiver<Result<MaterialHeightfield, String>>,
+    rx: Receiver<Result<MaterialResult, String>>,
     cancel: Arc<AtomicBool>,
     progress: Arc<AtomicUsize>,
     total: usize,
@@ -36,10 +46,15 @@ struct Snapshot {
 pub struct MaterialUi {
     selected_tool_id: Option<String>,
     resolution: usize,
+    use_sparse: bool,
+    spacing_mm: f64,
     visible: bool,
     isolated_view: bool,
     history_budget_mib: usize,
     field: Option<MaterialHeightfield>,
+    sparse_field: Option<SparseMaterial>,
+    sparse_segments: Vec<CutSegment>,
+    sparse_cache: RefCell<Option<(f64, Arc<Surface>)>>,
     job: Option<MaterialJob>,
     snapshot: Option<Snapshot>,
     message: String,
@@ -50,10 +65,15 @@ impl Default for MaterialUi {
         Self {
             selected_tool_id: None,
             resolution: 256,
+            use_sparse: true,
+            spacing_mm: 0.05,
             visible: true,
             isolated_view: true,
             history_budget_mib: 256,
             field: None,
+            sparse_field: None,
+            sparse_segments: Vec::new(),
+            sparse_cache: RefCell::new(None),
             job: None,
             snapshot: None,
             message: String::new(),
@@ -101,8 +121,32 @@ impl MaterialUi {
         if let Some(field) = &mut self.field {
             field.seek(playhead);
         }
+        if let Some(field) = &mut self.sparse_field
+            && let Err(error) = field.seek(&self.sparse_segments, playhead)
+        {
+            self.message = format!("ERROR reproduciendo material: {error}");
+        }
     }
-
+    /// Estado visible incluso con reproductor NC compacto.
+    pub fn compact_status(&self) -> String {
+        if let Some(job) = &self.job {
+            return format!(
+                "Material: calculando {} / {} movimientos NC",
+                job.progress.load(Ordering::Relaxed),
+                job.total
+            );
+        }
+        if self.sparse_field.is_some() {
+            return format!("Material disperso: {}", self.message);
+        }
+        if self.field.is_some() {
+            return format!("Material clasico: {}", self.message);
+        }
+        if !self.message.is_empty() {
+            return self.message.clone();
+        }
+        "Material: no calculado; bruto provisional".into()
+    }
     /// Al cambiar de programa, no reutilizar una seleccion de su programa anterior.
     /// Para NC generado se propone la fresa de su operacion; se puede cambiar a mano.
     pub fn select_source_tool(&mut self, tool_id: Option<&str>) {
@@ -118,7 +162,10 @@ impl MaterialUi {
     /// La herramienta tiene la misma identidad y geometria que la simulacion calculada.
     /// Si el resultado se invalida, no se muestra una fresa obsoleta.
     pub fn simulated_tool(&self) -> Option<&Tool> {
-        if !self.visible || self.job.is_some() || self.field.is_none() {
+        if !self.visible
+            || self.job.is_some()
+            || (self.field.is_none() && self.sparse_field.is_none())
+        {
             return None;
         }
         self.snapshot.as_ref().map(|snapshot| &snapshot.tool)
@@ -131,7 +178,30 @@ impl MaterialUi {
         self.field.as_ref()
     }
     pub fn isolated_view_active(&self) -> bool {
-        self.isolated_view && self.visible && self.field.is_some() && self.job.is_none()
+        self.isolated_view
+            && self.visible
+            && (self.field.is_some() || self.sparse_field.is_some())
+            && self.job.is_none()
+    }
+
+    /// La superficie CPU solo se reconstruye si cambia el cursor NC.
+    /// El renderer conserva los buffers GPU al mover la camara.
+    pub fn render_sparse_surface(&self, project: &Project) -> Result<Option<Arc<Surface>>, String> {
+        if !self.visible || self.job.is_some() {
+            return Ok(None);
+        }
+        let Some(field) = self.sparse_field.as_ref() else {
+            return Ok(None);
+        };
+        let cursor = field.stats().cursor;
+        if let Some((cached_cursor, cached)) = self.sparse_cache.borrow().as_ref()
+            && *cached_cursor == cursor
+        {
+            return Ok(Some(Arc::clone(cached)));
+        }
+        let built = Arc::new(Surface::build(project, field)?);
+        *self.sparse_cache.borrow_mut() = Some((cursor, Arc::clone(&built)));
+        Ok(Some(built))
     }
 
     pub fn clear(&mut self) {
@@ -139,6 +209,9 @@ impl MaterialUi {
             job.cancel.store(true, Ordering::Relaxed);
         }
         self.field = None;
+        self.sparse_field = None;
+        self.sparse_segments.clear();
+        *self.sparse_cache.borrow_mut() = None;
         self.snapshot = None;
         self.message.clear();
     }
@@ -182,6 +255,8 @@ impl MaterialUi {
         let total = segments.len();
         let resolution = self.resolution;
         let budget_mib = self.history_budget_mib;
+        let use_sparse = self.use_sparse;
+        let spacing_mm = self.spacing_mm;
         let stock_spec = snapshot.stock;
         let cancel = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicUsize::new(0));
@@ -191,15 +266,37 @@ impl MaterialUi {
         std::thread::Builder::new()
             .name("lagucam-heightfield".into())
             .spawn(move || {
-                let result = MaterialHeightfield::simulate_with_budget(
-                    stock_spec,
-                    cutter,
-                    resolution,
-                    budget_mib,
-                    &segments,
-                    &worker_cancel,
-                    &worker_progress,
-                );
+                let result = (|| -> Result<MaterialResult, String> {
+                    if use_sparse {
+                        let mut field = SparseMaterial::new(SparseConfig {
+                            stock: stock_spec,
+                            cutter,
+                            spacing_mm,
+                            checkpoint_every: 25,
+                            max_checkpoints: 4,
+                            height_budget_mib: budget_mib,
+                        })?;
+                        if worker_cancel.load(Ordering::Relaxed) {
+                            return Err("Calculo cancelado".into());
+                        }
+                        // Se construye fuera del hilo de UI. El seek incremental
+                        // posterior emplea los checkpoints del motor disperso.
+                        field.seek(&segments, segments.len() as f64)?;
+                        worker_progress.store(segments.len(), Ordering::Relaxed);
+                        Ok(MaterialResult::Sparse(field, segments))
+                    } else {
+                        MaterialHeightfield::simulate_with_budget(
+                            stock_spec,
+                            cutter,
+                            resolution,
+                            budget_mib,
+                            &segments,
+                            &worker_cancel,
+                            &worker_progress,
+                        )
+                        .map(MaterialResult::Dense)
+                    }
+                })();
                 let _ = tx.send(result);
             })
             .map_err(|error| format!("No se pudo iniciar simulacion: {error}"))?;
@@ -217,10 +314,18 @@ impl MaterialUi {
     fn poll(&mut self, ctx: &egui::Context) {
         let received = self.job.as_ref().map(|job| job.rx.try_recv());
         match received {
-            Some(Ok(Ok(field))) => {
+            Some(Ok(Ok(MaterialResult::Dense(field)))) => {
                 self.field = Some(field);
                 self.job = None;
-                self.message = "Simulacion 2.5D preparada. Reproduce o mueve el cursor NC.".into();
+                self.message = "Simulacion 2.5D preparada (motor anterior).".into();
+                ctx.request_repaint();
+            }
+            Some(Ok(Ok(MaterialResult::Sparse(field, segments)))) => {
+                self.sparse_field = Some(field);
+                self.sparse_segments = segments;
+                *self.sparse_cache.borrow_mut() = None;
+                self.job = None;
+                self.message = "Motor disperso calculado a resolucion fisica real.".into();
                 ctx.request_repaint();
             }
             Some(Ok(Err(error))) => {
@@ -265,6 +370,11 @@ impl MaterialUi {
         if let Some(field) = &mut self.field {
             field.seek(playhead);
         }
+        if let Some(field) = &mut self.sparse_field
+            && let Err(error) = field.seek(&self.sparse_segments, playhead)
+        {
+            self.message = format!("ERROR reproduciendo material: {error}");
+        }
         ui.collapsing("Simulacion de arranque de material · Heightfield 2.5D", |ui| {
             ui.colored_label(egui::Color32::YELLOW,
                 "Vista aproximada para fresado 3 ejes vertical. No simula socavados, mango, fijaciones ni seguridad CNC.");
@@ -279,6 +389,21 @@ impl MaterialUi {
                     }
                 });
             if previous_tool != self.selected_tool_id { self.clear(); }
+            let previous_engine = self.use_sparse;
+            ui.checkbox(&mut self.use_sparse, "Motor disperso (resolucion en mm)");
+            if previous_engine != self.use_sparse { self.clear(); }
+            if self.use_sparse {
+                let previous_step = self.spacing_mm;
+                egui::ComboBox::from_label("Paso fisico XY")
+                    .selected_text(format!("{:.2} mm", self.spacing_mm))
+                    .show_ui(ui, |ui| {
+                        for step in [0.05, 0.10, 0.20, 0.50] {
+                            ui.selectable_value(&mut self.spacing_mm, step, format!("{step:.2} mm"));
+                        }
+                    });
+                if self.spacing_mm != previous_step { self.clear(); }
+                ui.small("Sin reduccion automatica de resolucion. Limite grafico: 4,5 millones de vertices; si se supera, se indica el error.");
+            }
             let previous_budget = self.history_budget_mib;
             egui::ComboBox::from_label("Limite del historial de RAM")
                 .selected_text(format!("{} MiB", self.history_budget_mib))
@@ -290,6 +415,7 @@ impl MaterialUi {
                 });
             if previous_budget != self.history_budget_mib { self.clear(); }
             ui.small("El presupuesto afecta al historial de cambios, no a los STL ni a la RAM total del proceso.");
+            if !self.use_sparse {
             let previous_resolution = self.resolution;
             egui::ComboBox::from_label("Resolucion de calculo XY")
                 .selected_text(format!("{} muestras en el eje mayor", self.resolution))
@@ -303,6 +429,7 @@ impl MaterialUi {
                     }
                 });
             if previous_resolution != self.resolution { self.clear(); }
+            }
             if let Some(job) = &self.job {
                 ui.label(format!("Procesando NC: {} / {} movimientos",
                     job.progress.load(Ordering::Relaxed), job.total));
@@ -315,10 +442,26 @@ impl MaterialUi {
             {
                 self.message = format!("ERROR: {error}");
             }
-            if let Some(field) = &self.field {
+            if self.field.is_some() || self.sparse_field.is_some() {
                 ui.checkbox(&mut self.visible, "Mostrar material restante en visor 3D");
                 ui.checkbox(&mut self.isolated_view,
                     "Vista aislada: ocultar STL y trayectorias (mantener punta NC)");
+            }
+            if let Some(field) = &self.sparse_field {
+                let stats = field.stats();
+                let [nx, ny] = field.cells();
+                ui.monospace(format!("Motor disperso: {nx} x {ny} muestras | paso {:.3} x {:.3} mm",
+                    field.spacing_mm()[0], field.spacing_mm()[1]));
+                ui.small(format!("Bloques: {} | memoria alturas: {:.1} MiB | checkpoints: {}",
+                    stats.tiles, stats.height_bytes as f64 / 1_048_576.0, stats.checkpoints));
+                let vertices = nx.checked_mul(ny).unwrap_or(usize::MAX);
+                if vertices > 4_500_000 {
+                    ui.colored_label(egui::Color32::RED,
+                        format!("Superficie demasiado grande para el renderer continuo: {vertices} vertices. No se decima."));
+                }
+                ui.small("Geometria completa indexada, sombreado por cara; las alturas no se suavizan.");
+            }
+            if let Some(field) = &self.field {
                 ui.monospace(format!("{} x {} muestras · {:.1} mm3 retirados",
                     field.cells[0], field.cells[1], field.removed_mm3()));
                 ui.small(format!("Historial RAM: {:.1} / {} MiB · {} cambios · rebobinado disponible",

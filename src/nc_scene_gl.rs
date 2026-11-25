@@ -2,6 +2,7 @@
 //! La geometria y el render son transitorios: no alteran CAM, NC ni heightfield.
 //! Las superficies comparten el mismo depth buffer; sin ordenacion de triangulos 2D.
 
+use crate::sparse_scene_gpu::{GpuSurface, Surface};
 use crate::{
     project::Project,
     tools::model::{Tool, ToolGeometry},
@@ -9,6 +10,7 @@ use crate::{
 use cam_libre_visor::material_sim::MaterialHeightfield;
 use eframe::glow;
 use glow::HasContext as _;
+use std::sync::Arc;
 
 // 256x256: la resolucion por defecto de material se representa sin decimacion.
 // Limitar a 256 evita multiplicar memoria/CPU al seleccionar 512 o 1024.
@@ -23,6 +25,7 @@ pub struct Scene {
     solid: Vec<f32>,
     tool: Vec<f32>,
     lines: Vec<f32>,
+    sparse_surface: Option<Arc<Surface>>,
 }
 
 fn shade(a: [f64; 3], b: [f64; 3], c: [f64; 3], base: [f32; 3]) -> [f32; 3] {
@@ -66,6 +69,43 @@ fn surface_vertex_brightness(field: &MaterialHeightfield, ix: usize, iy: usize) 
 }
 
 impl Scene {
+    /// Bruto intacto: representacion provisional hasta que haya una superficie NC.
+    /// Ocho esquinas, seis caras; no interpola ni decima el heightfield calculado.
+    pub fn from_stock(project: &Project) -> Option<Self> {
+        project.model.as_ref()?;
+        let stock = project.stock.as_ref()?;
+        let [x0, y0, z0] = stock.min;
+        let [sx, sy, sz] = stock.size;
+        let (x1, y1, z1) = (x0 + sx, y0 + sy, z0 + sz);
+        if ![x0, y0, z0, x1, y1, z1].iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let a = [x0, y0, z0];
+        let b = [x1, y0, z0];
+        let c = [x1, y1, z0];
+        let d = [x0, y1, z0];
+        let e = [x0, y0, z1];
+        let f = [x1, y0, z1];
+        let g = [x1, y1, z1];
+        let h = [x0, y1, z1];
+        let color = [0.72, 0.51, 0.30];
+        let mut scene = Self::default();
+        scene.quad(project, e, f, g, h, color, false);
+        scene.quad(project, b, a, e, f, color, false);
+        scene.quad(project, c, b, f, g, color, false);
+        scene.quad(project, d, c, g, h, color, false);
+        scene.quad(project, a, d, h, e, color, false);
+        scene.quad(project, d, a, b, c, color, false);
+        Some(scene)
+    }
+    pub fn from_sparse_surface(surface: Arc<Surface>) -> Self {
+        Self {
+            solid: surface.skirts.clone(),
+            sparse_surface: Some(surface),
+            ..Default::default()
+        }
+    }
+
     fn triangle(&mut self, project: &Project, xyz: [[f64; 3]; 3], color: [f32; 3], tool: bool) {
         let Some(model) = &project.model else {
             return;
@@ -327,6 +367,7 @@ pub struct Renderer {
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     u_mvp: glow::UniformLocation,
+    sparse_gpu: Option<Result<GpuSurface, String>>,
 }
 
 impl Renderer {
@@ -405,6 +446,7 @@ void main(){ fragColor=vec4(v_color,1.0); }
                 vao,
                 vbo,
                 u_mvp,
+                sparse_gpu: None,
             })
         }
     }
@@ -450,6 +492,22 @@ void main(){ fragColor=vec4(v_color,1.0); }
             gl.bind_vertex_array(Some(self.vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
             self.draw(gl, &scene.solid, glow::TRIANGLES);
+            if let Some(surface) = &scene.sparse_surface {
+                if self.sparse_gpu.is_none() {
+                    let created = GpuSurface::new(gl);
+                    if let Err(error) = &created {
+                        eprintln!("LaguCAM material GPU: {error}");
+                    }
+                    self.sparse_gpu = Some(created);
+                }
+                if let Some(Ok(gpu)) = self.sparse_gpu.as_mut() {
+                    gpu.paint(gl, surface, &mvp);
+                }
+                gl.use_program(Some(self.program));
+                gl.uniform_matrix_4_f32_slice(Some(&self.u_mvp), false, &mvp.to_cols_array());
+                gl.bind_vertex_array(Some(self.vao));
+                gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            }
             gl.depth_mask(false);
             self.draw(gl, &scene.lines, glow::LINES);
             gl.depth_mask(true);
@@ -469,6 +527,9 @@ void main(){ fragColor=vec4(v_color,1.0); }
     }
 
     pub fn destroy(self, gl: &glow::Context) {
+        if let Some(Ok(gpu)) = self.sparse_gpu {
+            gpu.destroy(gl);
+        }
         unsafe {
             gl.delete_buffer(self.vbo);
             gl.delete_vertex_array(self.vao);

@@ -6,6 +6,7 @@ mod cam_markers_3d;
 mod icons;
 mod machine_ui;
 mod material_ui;
+mod sparse_scene_gpu;
 mod nav_cube;
 mod navigation;
 mod nc_export_ui;

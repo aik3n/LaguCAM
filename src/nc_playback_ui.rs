@@ -640,6 +640,7 @@ impl NcPlaybackUi {
                             );
                         }
                         ui.small("Tiempo nominal sin aceleraciones · Inicio teorico CAM · No verifica colisiones");
+                         ui.small(self.material.compact_status());
                     });
             });
         close
@@ -1155,8 +1156,19 @@ impl NcPlaybackUi {
         // P2-D3: todos los solidos de la simulacion usan la MISMA profundidad GL.
         // El modelo STL original queda fuera de la vista de simulacion. Nunca se
         // triangula material en pantalla (Pos2) ni se ordenan las caras por Z media.
-        if let Some(field) = self.material.render_field()
-            && let Some(mut scene) = crate::nc_scene_gl::Scene::from_material(project, field)
+        let sparse_scene = self
+            .material
+            .render_sparse_surface(project)
+            .ok()
+            .flatten()
+            .map(crate::nc_scene_gl::Scene::from_sparse_surface);
+        let dense_scene = self
+            .material
+            .render_field()
+            .and_then(|field| crate::nc_scene_gl::Scene::from_material(project, field));
+        if let Some(mut scene) = sparse_scene
+            .or(dense_scene)
+            .or_else(|| crate::nc_scene_gl::Scene::from_stock(project))
         {
             let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
             if self.show_cutter

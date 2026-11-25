@@ -4,6 +4,8 @@ pub mod cam_contract;
 pub mod cam_geometry;
 pub mod cam_plan;
 pub mod material_sim;
+pub mod sparse_material;
+pub mod sparse_nc;
 pub mod nc_contract;
 pub mod nc_interpreter;
 pub mod nc_post;
