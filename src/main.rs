@@ -6,7 +6,6 @@ mod cam_markers_3d;
 mod icons;
 mod machine_ui;
 mod material_ui;
-mod sparse_scene_gpu;
 mod nav_cube;
 mod navigation;
 mod nc_export_ui;
@@ -31,6 +30,8 @@ mod sample_overlay;
 mod scene_pick;
 #[allow(dead_code)] // Diagnostico experimental fuera de la UI; conservar contratos y pruebas.
 mod section_overlay;
+mod sparse_runtime;
+mod sparse_scene_gpu;
 mod stl;
 mod stock_render;
 mod test_parallel;

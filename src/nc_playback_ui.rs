@@ -555,6 +555,12 @@ impl NcPlaybackUi {
         self.last_update = Some(now);
         self.material
             .tick_compact(ctx, project, library, self.playhead);
+        // Nunca consumir minutos de NC si el motor solo ha materializado segundos.
+        // Se mantiene la interfaz libre; el cursor puede tener hasta 1 movimiento pendiente.
+        if self.playing {
+            let ready = self.material.visual_cursor(self.playhead);
+            self.playhead = self.playhead.min(ready + 1.0);
+        }
 
         let mut close = false;
         let left = (viewport.center().x - 164.0).max(viewport.left() + 8.0);
@@ -1170,7 +1176,11 @@ impl NcPlaybackUi {
             .or(dense_scene)
             .or_else(|| crate::nc_scene_gl::Scene::from_stock(project))
         {
-            let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
+            let tip = position_at(
+                pb.trace.initial.position_work_mm,
+                &pb.moves,
+                self.material.visual_cursor(self.playhead),
+            );
             if self.show_cutter
                 && let Some(tool) = self.material.simulated_tool()
             {
@@ -1285,7 +1295,11 @@ impl NcPlaybackUi {
                 painter.line_segment([a, b], egui::Stroke::new(2.8, egui::Color32::WHITE));
             }
         }
-        let tip = position_at(pb.trace.initial.position_work_mm, &pb.moves, self.playhead);
+        let tip = position_at(
+            pb.trace.initial.position_work_mm,
+            &pb.moves,
+            self.material.visual_cursor(self.playhead),
+        );
         if self.show_cutter
             && let Some(tool) = self.material.simulated_tool()
         {
