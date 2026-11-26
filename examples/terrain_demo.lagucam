@@ -63,7 +63,7 @@
     ],
     "operations": [
       {
-        "name": "desb esf d4 s0",
+        "name": "desb esf d6 s0",
         "kind": "parallel_test",
         "status": "not_calculated",
         "tool_id": "e1d9c575-af0a-4406-8df9-9569f2fe1a7b",

@@ -310,9 +310,35 @@ struct Playback {
 
 type VerificationSnapshot = (VerificationReport, Tool, [f64; 3], [f64; 3]);
 
+/// Limita el avance nominal del NC a lo que ya se ha materializado.
+/// La sincronizacion puede detener el reloj, pero NUNCA hacerlo retroceder.
+fn material_limited_cursor(current: f64, proposed: f64, confirmed: f64) -> f64 {
+    if !current.is_finite() || !proposed.is_finite() || !confirmed.is_finite() {
+        return current;
+    }
+    let max_ahead = (confirmed + 0.25).max(current);
+    proposed.max(current).min(max_ahead)
+}
+
+#[cfg(test)]
+mod compact_material_cursor_tests {
+    use super::material_limited_cursor;
+
+    #[test]
+    fn material_delay_never_rewinds_tool() {
+        assert_eq!(material_limited_cursor(10.0, 12.0, 0.0), 10.0);
+    }
+
+    #[test]
+    fn progress_stays_close_to_confirmed_material() {
+        assert_eq!(material_limited_cursor(0.0, 4.0, 1.0), 1.25);
+        assert_eq!(material_limited_cursor(1.25, 1.4, 1.25), 1.4);
+    }
+}
 pub struct NcPlaybackUi {
     pub open: bool,
     compact_generated: bool,
+    compact_progressive: bool,
     /// Se incrementa en cada carga de texto NC; el texto no es editable directamente.
     nc_text_version: u64,
     source_path: Option<PathBuf>,
@@ -344,6 +370,7 @@ impl Default for NcPlaybackUi {
         Self {
             open: false,
             compact_generated: false,
+            compact_progressive: false,
             nc_text_version: 0,
             source_path: None,
             last_source_check: None,
@@ -379,6 +406,7 @@ impl NcPlaybackUi {
 
     pub fn clear(&mut self) {
         self.compact_generated = false;
+        self.compact_progressive = false;
         self.nc_text_version = self.nc_text_version.wrapping_add(1);
         self.last_source_check = None;
         self.verification = None;
@@ -504,7 +532,7 @@ impl NcPlaybackUi {
         }
         self.compact_generated = true;
         self.visible = true;
-        self.show_cutter = true;
+        self.show_cutter = false;
         self.message =
             "Simulacion geometrica: posicion inicial teorica CAM; no verifica la maquina".into();
         if let Some(pb) = &self.playback
@@ -528,6 +556,10 @@ impl NcPlaybackUi {
 
     /// Controles de reproduccion superpuestos al visor, sin ventana de NC.
     /// Devuelve true cuando el usuario solicita cerrar la simulacion.
+    /// Simulacion CAM orientativa: solo se calcula y muestra el resultado final.
+    /// La reproduccion NC tecnica se gestiona por separado.
+    /// Un solo Heightfield 2.5D: resultado final o reproduccion progresiva.
+    /// El visor tecnico NC, los modelos y las trayectorias quedan intactos.
     pub fn compact_controls(
         &mut self,
         ctx: &egui::Context,
@@ -538,33 +570,37 @@ impl NcPlaybackUi {
         if !self.compact_active() {
             return false;
         }
+
         let total = self.playback.as_ref().map_or(0, |pb| pb.moves.len());
-        let now = Instant::now();
-        if self.playing {
-            let elapsed = self.last_update.map_or(0.0, |last| {
-                now.saturating_duration_since(last).as_secs_f64()
-            });
-            let timeline = &self.playback.as_ref().expect("Sesion compacta").timeline;
-            self.playhead = next_tick(self.playhead, elapsed, self.speed, timeline);
-            if self.playhead >= total as f64 {
-                self.playing = false;
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(16));
+        if self.compact_progressive {
+            let now = Instant::now();
+            if self.playing && self.material.progressive_ready() {
+                let elapsed = self.last_update.map_or(0.0, |last| {
+                    now.saturating_duration_since(last).as_secs_f64()
+                });
+                let timeline = &self.playback.as_ref().expect("Sesion compacta").timeline;
+                let proposed = next_tick(self.playhead, elapsed, self.speed, timeline);
+                let confirmed = self.material.visual_cursor(self.playhead);
+                self.playhead = material_limited_cursor(self.playhead, proposed, confirmed);
+                if self.playhead >= total as f64 {
+                    self.playing = false;
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
             }
+            self.last_update = Some(now);
+        } else {
+            self.playing = false;
+            self.last_update = None;
+            self.playhead = total as f64;
         }
-        self.last_update = Some(now);
-        self.material
-            .tick_compact(ctx, project, library, self.playhead);
-        // Nunca consumir minutos de NC si el motor solo ha materializado segundos.
-        // Se mantiene la interfaz libre; el cursor puede tener hasta 1 movimiento pendiente.
-        if self.playing {
-            let ready = self.material.visual_cursor(self.playhead);
-            self.playhead = self.playhead.min(ready + 1.0);
-        }
+        self.material.tick_compact(ctx, project, library, self.playhead);
 
         let mut close = false;
-        let left = (viewport.center().x - 164.0).max(viewport.left() + 8.0);
-        let top = (viewport.bottom() - 108.0).max(viewport.top() + 8.0);
+        let mut restart = false;
+        let mut selected_progressive = self.compact_progressive;
+        let left = (viewport.center().x - 200.0).max(viewport.left() + 8.0);
+        let top = (viewport.bottom() - 128.0).max(viewport.top() + 8.0);
         egui::Area::new(egui::Id::unique("lagucam_simulation_controls"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(left, top))
@@ -576,79 +612,86 @@ impl NcPlaybackUi {
                     .inner_margin(egui::Margin::symmetric(10, 8))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            if ui.button("⏮").on_hover_text("Ir al inicio").clicked() {
-                                self.playhead = 0.0;
-                                self.playing = false;
-                            }
-                            if ui
-                                .add_enabled(self.playhead > 0.0, egui::Button::new("⏴"))
-                                .on_hover_text("Movimiento anterior")
-                                .clicked()
-                            {
-                                self.playhead = (self.playhead.ceil() - 1.0).max(0.0);
-                                self.playing = false;
-                            }
-                            let can_play =
-                                total > 0 && (self.playing || self.playhead < total as f64);
-                            if ui
-                                .add_enabled(
-                                    can_play,
-                                    egui::Button::new(if self.playing { "⏸" } else { "▶" }),
-                                )
-                                .on_hover_text(if self.playing { "Pausar" } else { "Reproducir" })
-                                .clicked()
-                            {
-                                self.playing = !self.playing;
-                                self.last_update = None;
-                                ctx.request_repaint();
-                            }
-                            if ui
-                                .add_enabled(self.playhead < total as f64, egui::Button::new("⏭"))
-                                .on_hover_text("Movimiento siguiente")
-                                .clicked()
-                            {
-                                self.playhead = (self.playhead.floor() + 1.0).min(total as f64);
-                                self.playing = false;
-                            }
-                            if ui.button("↺").on_hover_text("Reiniciar").clicked() {
-                                self.playhead = 0.0;
-                                self.playing = false;
-                            }
-                            if ui.button("⏹").on_hover_text("Cerrar simulacion").clicked() {
+                            ui.strong("Simulacion orientativa");
+                            egui::ComboBox::from_label("Modo")
+                                .selected_text(if self.compact_progressive {
+                                    "Reproduccion"
+                                } else {
+                                    "Resultado final"
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut selected_progressive,
+                                        false,
+                                        "Resultado final",
+                                    );
+                                    ui.selectable_value(
+                                        &mut selected_progressive,
+                                        true,
+                                        "Reproduccion progresiva",
+                                    );
+                                });
+                            if ui.button("Cerrar").clicked() {
                                 close = true;
                             }
                         });
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_sized(
-                                    [220.0, 18.0],
-                                    egui::Slider::new(&mut self.playhead, 0.0..=total as f64)
-                                        .show_value(false),
-                                )
-                                .changed()
-                            {
-                                self.playing = false;
-                            }
-                            ui.small(format!("{} / {}", self.playhead.floor() as usize, total));
-                        });
-                        if let Some(pb) = &self.playback {
+                        if self.compact_progressive {
+                            ui.horizontal(|ui| {
+                                let ready = self.material.progressive_ready();
+                                let can_play = ready && total > 0 &&
+                                    (self.playing || self.playhead < total as f64);
+                                if ui.add_enabled(
+                                    can_play,
+                                    egui::Button::new(if self.playing { "Pausar" } else { "Reproducir" }),
+                                ).clicked() {
+                                    self.playing = !self.playing;
+                                    self.last_update = None;
+                                    ctx.request_repaint();
+                                }
+                                if ui.button("Reiniciar").clicked() {
+                                    restart = true;
+                                }
+                                ui.add(
+                                    egui::Slider::new(&mut self.speed, 0.1..=20.0)
+                                        .logarithmic(true)
+                                        .text("Velocidad x"),
+                                );
+                            });
+                            let confirmed = self.material.visual_cursor(self.playhead);
                             ui.small(format!(
-                                "Tiempo estimado {} / {}  ·  {:.2}x  ·  G0 ref. {:.0} mm/min",
-                                estimated_clock(pb.timeline.seconds_at(self.playhead)),
-                                estimated_clock(pb.timeline.total()),
-                                self.speed,
-                                RAPID_ESTIMATE_MM_MIN,
+                                "Material: {:.1} / {} movimientos NC | Tiempo nominal, no tiempo real de maquina",
+                                confirmed, total
                             ));
-                            ui.add(
-                                egui::Slider::new(&mut self.speed, 0.1..=20.0)
-                                    .logarithmic(true)
-                                    .text("Velocidad x"),
-                            );
                         }
-                        ui.small("Tiempo nominal sin aceleraciones · Inicio teorico CAM · No verifica colisiones");
-                         ui.small(self.material.compact_status());
+                        ui.small(self.material.compact_status());
+                        if self.message.starts_with("No se pudo cambiar la simulacion:") {
+                            ui.colored_label(egui::Color32::RED, &self.message);
+                        }
                     });
             });
+
+        // El cambio de modalidad reemplaza solo el material de la sesion.
+        // No se reinterpreta el NC ni se regeneran operaciones CAM.
+        if selected_progressive != self.compact_progressive || restart {
+            self.playing = false;
+            self.last_update = None;
+            self.playhead = if selected_progressive { 0.0 } else { total as f64 };
+            self.show_cutter = selected_progressive;
+            let result = match self.playback.as_ref() {
+                Some(pb) if selected_progressive => {
+                    self.material.prepare_progressive_compact(project, library, &pb.trace)
+                }
+                Some(pb) => self.material.prepare_compact(project, library, &pb.trace),
+                None => Err("No hay programa NC interpretado".into()),
+            };
+            self.compact_progressive = selected_progressive;
+            if let Err(error) = result {
+                self.message = format!("No se pudo cambiar la simulacion: {error}");
+            } else if self.message.starts_with("No se pudo cambiar la simulacion:") {
+                self.message.clear();
+            }
+            ctx.request_repaint();
+        }
         close
     }
 

@@ -49,6 +49,7 @@ pub struct MaterialUi {
     selected_tool_id: Option<String>,
     resolution: usize,
     use_sparse: bool,
+    final_only: bool,
     spacing_mm: f64,
     visible: bool,
     isolated_view: bool,
@@ -71,6 +72,7 @@ impl Default for MaterialUi {
             selected_tool_id: None,
             resolution: 256,
             use_sparse: true,
+            final_only: false,
             spacing_mm: 0.05,
             visible: true,
             isolated_view: true,
@@ -113,9 +115,28 @@ impl MaterialUi {
         library: &ToolLibrary,
         trace: &NcTrace,
     ) -> Result<(), String> {
-        self.start(project, library, trace)
+        self.use_sparse = true;
+        self.visible = true;
+        self.start_impl(project, library, trace, true)
     }
 
+    /// Cambia al motor G3 de reproduccion, partiendo de un bruto intacto.
+    /// No altera el NC ni la operacion de origen.
+    pub fn prepare_progressive_compact(
+        &mut self,
+        project: &Project,
+        library: &ToolLibrary,
+        trace: &NcTrace,
+    ) -> Result<(), String> {
+        self.use_sparse = true;
+        self.visible = true;
+        self.start_impl(project, library, trace, false)
+    }
+
+    /// El boton Reproducir se habilita solo cuando el trabajador G3 esta listo.
+    pub fn progressive_ready(&self) -> bool {
+        self.sparse_runtime.is_some()
+    }
     /// El visor compacto mantiene al dia el material incluso sin panel inferior.
     pub fn tick_compact(
         &mut self,
@@ -245,6 +266,7 @@ impl MaterialUi {
     }
 
     pub fn clear(&mut self) {
+        self.final_only = false;
         if let Some(job) = self.job.take() {
             job.cancel.store(true, Ordering::Relaxed);
         }
@@ -277,7 +299,18 @@ impl MaterialUi {
         library: &ToolLibrary,
         trace: &NcTrace,
     ) -> Result<(), String> {
+        self.start_impl(project, library, trace, false)
+    }
+
+    fn start_impl(
+        &mut self,
+        project: &Project,
+        library: &ToolLibrary,
+        trace: &NcTrace,
+        final_only: bool,
+    ) -> Result<(), String> {
         self.clear();
+        self.final_only = final_only;
         let snapshot = self
             .current_snapshot(project, library)
             .ok_or("Selecciona una fresa y define un bruto")?;
@@ -322,11 +355,24 @@ impl MaterialUi {
                         if worker_cancel.load(Ordering::Relaxed) {
                             return Err("Calculo cancelado".into());
                         }
-                        // El estado inicial debe ser un bruto intacto: no calcular
-                        // todo el NC antes de mostrar la herramienta y reproducir.
-                        // Los movimientos se aplican mediante seek en reproduccion.
-                        worker_progress.store(0, Ordering::Relaxed);
-                        Ok(MaterialResult::Sparse(field, segments))
+                        if final_only {
+                            // El visor GPU necesita una rejilla compatible con su textura.
+                            // Rechazar antes del barrido evita trabajo costoso inutil.
+                            let nodes = field.cells()[0]
+                                .checked_mul(field.cells()[1])
+                                .ok_or("Rejilla XY demasiado grande")?;
+                            if nodes > 32_000_000 {
+                                return Err(format!(
+                                    "El bruto requiere {nodes} alturas; el visor admite 32 millones. Aumenta el paso XY."
+                                ));
+                            }
+                            field.calculate_final(&segments, &worker_cancel, &worker_progress)?;
+                            Ok(MaterialResult::Sparse(field, Vec::new()))
+                        } else {
+                            // Modo anterior de exploracion NC: material inicial intacto.
+                            worker_progress.store(0, Ordering::Relaxed);
+                            Ok(MaterialResult::Sparse(field, segments))
+                        }
                     } else {
                         MaterialHeightfield::simulate_with_budget(
                             stock_spec,
@@ -363,22 +409,37 @@ impl MaterialUi {
                 self.message = "Simulacion 2.5D preparada (motor anterior).".into();
                 ctx.request_repaint();
             }
-            Some(Ok(Ok(MaterialResult::Sparse(field, segments)))) => {
-                let fresh = field.fresh();
+            Some(Ok(Ok(MaterialResult::Sparse(mut field, segments)))) => {
                 self.job = None;
-                match fresh {
-                    Ok(initial) => match SparseRuntime::new(field, segments) {
-                        Ok(runtime) => {
-                            self.sparse_field = Some(initial);
-                            self.sparse_runtime = Some(runtime);
-                            self.sparse_segments.clear();
-                            self.sparse_pending.borrow_mut().clear();
-                            *self.sparse_cache.borrow_mut() = None;
-                            self.message = "Material asincrono preparado; bruto intacto".into();
-                        }
-                        Err(error) => self.message = format!("ERROR iniciando material: {error}"),
-                    },
-                    Err(error) => self.message = format!("ERROR creando bruto: {error}"),
+                if self.final_only {
+                    // Publicar UNA sola version final: sin frames ni historial temporal.
+                    let regions = field.take_dirty_regions();
+                    let changed = regions.len();
+                    self.sparse_pending.borrow_mut().clear();
+                    self.sparse_pending.borrow_mut().extend(regions);
+                    *self.sparse_cache.borrow_mut() = None;
+                    self.sparse_runtime = None;
+                    self.sparse_field = Some(field);
+                    self.sparse_segments.clear();
+                    self.message = format!(
+                        "Resultado final calculado. {} bloques modificados", changed
+                    );
+                } else {
+                    let fresh = field.fresh();
+                    match fresh {
+                        Ok(initial) => match SparseRuntime::new(field, segments) {
+                            Ok(runtime) => {
+                                self.sparse_field = Some(initial);
+                                self.sparse_runtime = Some(runtime);
+                                self.sparse_segments.clear();
+                                self.sparse_pending.borrow_mut().clear();
+                                *self.sparse_cache.borrow_mut() = None;
+                                self.message = "Material asincrono preparado; bruto intacto".into();
+                            }
+                            Err(error) => self.message = format!("ERROR iniciando material: {error}"),
+                        },
+                        Err(error) => self.message = format!("ERROR creando bruto: {error}"),
+                    }
                 }
                 ctx.request_repaint();
             }

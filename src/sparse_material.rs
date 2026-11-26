@@ -6,7 +6,10 @@
 //! Esta fase NO sustituye material_sim en la UI.
 use crate::material_sim::{CutSegment, CutterShape, CutterSpec, MAX_SIM_MOVES, StockBox};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 const TILE: usize = 128;
 const SAMPLES_PER_TILE: usize = TILE * TILE;
@@ -106,6 +109,40 @@ impl SparseMaterial {
         })
     }
 
+    /// Calcula un unico resultado final sin snapshots ni rebobinado NC.
+    /// Solo publica el resultado cuando TODOS los movimientos han terminado.
+    /// El avance se informa por movimiento; no se presenta una pieza parcial.
+    pub fn calculate_final(
+        &mut self,
+        segments: &[CutSegment],
+        cancel: &AtomicBool,
+        progress: &AtomicUsize,
+    ) -> Result<(), String> {
+        if self.cursor != 0.0 || !self.tiles.is_empty() {
+            return Err("El calculo final requiere un bruto nuevo".into());
+        }
+        if segments.len() > MAX_SIM_MOVES {
+            return Err("El programa NC excede el limite de movimientos".into());
+        }
+        progress.store(0, Ordering::Relaxed);
+        for (index, segment) in segments.iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("Calculo final cancelado".into());
+            }
+            self.apply(segment, 0.0, 1.0)?;
+            progress.store(index + 1, Ordering::Relaxed);
+            if (index + 1) % 64 == 0 {
+                self.trim_snapshots()?;
+            }
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return Err("Calculo final cancelado".into());
+        }
+        self.cursor = segments.len() as f64;
+        self.replayed_moves = segments.len();
+        self.trim_snapshots()?;
+        Ok(())
+    }
     pub fn fresh(&self) -> Result<Self, String> {
         Self::new(self.config)
     }
@@ -456,6 +493,36 @@ impl SparseMaterial {
 mod tests {
     use super::*;
 
+    #[test]
+    fn final_without_history_matches_full_seek() {
+        for shape in [CutterShape::Flat, CutterShape::Ball] {
+            let segments = movements();
+            let mut timeline = SparseMaterial::new(config(shape, 0.1)).unwrap();
+            timeline.seek(&segments, segments.len() as f64).unwrap();
+            let mut final_field = SparseMaterial::new(config(shape, 0.1)).unwrap();
+            let cancelled = AtomicBool::new(false);
+            let progress = AtomicUsize::new(0);
+            final_field
+                .calculate_final(&segments, &cancelled, &progress)
+                .unwrap();
+            assert_eq!(progress.load(Ordering::Relaxed), segments.len());
+            assert_eq!(final_field.stats().checkpoints, 0);
+            for y in (0..201).step_by(13) {
+                for x in (0..201).step_by(11) {
+                    assert_eq!(final_field.height_at(x, y), timeline.height_at(x, y));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn final_cancel_does_not_publish_a_result() {
+        let mut field = SparseMaterial::new(config(CutterShape::Ball, 0.1)).unwrap();
+        let cancelled = AtomicBool::new(true);
+        let progress = AtomicUsize::new(0);
+        assert!(field.calculate_final(&movements(), &cancelled, &progress).is_err());
+        assert_eq!(progress.load(Ordering::Relaxed), 0);
+    }
     fn config(shape: CutterShape, spacing_mm: f64) -> SparseConfig {
         SparseConfig {
             stock: StockBox {
