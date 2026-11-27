@@ -1,3 +1,10 @@
 /target
 *.log
 .DS_Store
+
+# Copias y manifiestos de parches locales: nunca versionar.
+*.bak*
+/_backup_*/
+/.lagucam_*backup*/
+/.lagucam_*rescue*/
+/.lagucam_*.json
